@@ -1,0 +1,483 @@
+# Lean SQL benchmark: 50 turns against arvind_retail_chatbot_test_1.
+#
+# 24 standalone questions and 26 turns across 8 conversations. Every expected
+# row count in the comments was executed against the live database before the
+# question was written; nothing here is assumed.
+#
+# Anchors were chosen for how well they discriminate, not for convenience:
+#   AR_YD_Suiting        22 BOs (19 Active, 3 Closed), 208 tasks (32 open)
+#   AR_NPD_Shirting      10 BOs (5 Active, 5 Closed)  -- clean split, so a
+#                        leaked "Active" filter is visible as 5 instead of 10
+#   AR_NPD_YD_SHIRTING   59 BOs, 4 distinct statuses, the only PVH row
+#   AR_YD_Shirting       52 BOs -- large enough for limit changes
+#
+# expect_decision asserts what the session layer should conclude about the
+# turn. A thread can produce correct SQL while classifying a turn wrongly,
+# which then breaks the turn after it, so the classification is checked too.
+
+version: 1
+
+questions:
+
+# ============================================================== STANDALONE ==
+
+- id: S01
+  category: Basic List
+  question: Show the AR_YD_Suiting items
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+
+- id: S02
+  category: Count
+  question: How many AR_YD_Suiting items are there?
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+
+- id: S03
+  category: Status Filter
+  question: Show active AR_YD_Suiting items
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
+
+- id: S04
+  category: BO Aggregation
+  question: How many AR_YD_Suiting items are there by status?
+  expected_sql: |
+    SELECT business_object_status, COUNT(*)
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    GROUP BY business_object_status
+
+- id: S05
+  category: Business Unit Filter
+  question: Show AR_NPD_YD_SHIRTING items for PVH
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_unit
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+      AND business_unit = 'PVH'
+
+- id: S06
+  category: Multi Filter
+  question: Show active AR_NPD_YD_SHIRTING items in business unit unit1
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status, business_unit
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+      AND business_object_status = 'Active'
+      AND business_unit = 'unit1'
+
+- id: S07
+  category: Dimension Filter
+  question: Show the AR_YD_Suiting items whose priority colour is Black
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_color
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_color = 'Black'
+
+- id: S08
+  category: BO Aggregation
+  question: How many AR_YD_Suiting items are there by priority colour?
+  expected_sql: |
+    SELECT business_object_color, COUNT(*)
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    GROUP BY business_object_color
+
+- id: S09
+  category: Limit
+  question: Give me the first 5 AR_YD_Suiting items
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    LIMIT 5
+
+- id: S10
+  category: Sort
+  question: Show AR_YD_Suiting items ordered by their id
+  ordered: true
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    ORDER BY business_object_id
+
+- id: S11
+  category: Sort + Limit
+  question: Show the 3 most recently created AR_YD_Suiting items
+  ordered: true
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_created_at
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    ORDER BY business_object_created_at DESC
+    LIMIT 3
+
+- id: S12
+  category: Distinct
+  question: How many distinct business object types are there?
+  expected_sql: |
+    SELECT COUNT(DISTINCT business_object_type) FROM tms_business_object_flat
+
+- id: S13
+  category: Task List
+  question: Show the tasks in AR_YD_Suiting
+  expected_sql: |
+    SELECT task_id, task_display_name, task_status
+    FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+
+- id: S14
+  category: Task Filter
+  question: Show the open tasks in AR_YD_Suiting
+  expected_sql: |
+    SELECT task_id, task_display_name, task_status
+    FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_status = 'open'
+
+- id: S15
+  category: Task Count
+  question: How many tasks are in AR_YD_Suiting?
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+
+- id: S16
+  category: Task Aggregation
+  question: How many tasks in AR_YD_Suiting are there by status?
+  expected_sql: |
+    SELECT task_status, COUNT(*)
+    FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+    GROUP BY task_status
+
+- id: S17
+  category: Semantic Rule
+  question: How many delayed tasks are there in AR_YD_Suiting?
+  note: Exercises the delayed_task rule -- task_sla_status = 'Delayed'.
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_sla_status = 'Delayed'
+
+- id: S18
+  category: Join
+  question: Show the AR_YD_Suiting items together with their category attribute
+  expected_sql: |
+    SELECT b.business_object_id, b.business_object_ref_id, a.category
+    FROM tms_business_object_flat b
+    JOIN tms_business_object_attributes_flat a
+      ON a.business_object_id = b.business_object_id
+    WHERE b.business_object_type = 'AR_YD_Suiting'
+
+- id: S19
+  category: MY_TASK
+  question: Show my tasks
+  tags: [my_tasks]
+  expected_sql: |
+    SELECT task_id, task_display_name, business_object_ref_id
+    FROM tms_task_flat
+    WHERE assigned_user_id = 1
+      AND task_status = 'open'
+      AND display_flag = 1
+
+- id: S20
+  category: MY_TASK Aggregation
+  question: How many of my tasks are closed?
+  tags: [my_tasks]
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_task_flat
+    WHERE assigned_user_id = 1
+      AND task_status = 'closed'
+
+- id: S21
+  category: Null Handling
+  question: How many business objects have no workflow name recorded?
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_business_object_flat
+    WHERE workflow_name IS NULL
+
+- id: S22
+  category: Date Filter
+  question: How many business objects were created in July 2026?
+  tags: [date]
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_business_object_flat
+    WHERE business_object_created_at >= DATE '2026-07-01'
+      AND business_object_created_at < DATE '2026-08-01'
+
+- id: S23
+  category: Ranking
+  question: Which business object type has the most items?
+  ordered: true
+  expected_sql: |
+    SELECT business_object_type, COUNT(*) AS item_count
+    FROM tms_business_object_flat
+    GROUP BY business_object_type
+    ORDER BY item_count DESC
+    LIMIT 1
+
+- id: S24
+  category: Natural Language Variation
+  question: What's the count of open tasks?
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_task_flat
+    WHERE task_status = 'open'
+
+# =========================================================== CONVERSATIONS ==
+
+- id: C01
+  category: Conversation - Add Filter
+  turns:
+    - id: C01.1
+      question: Show AR_YD_Suiting items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+    - id: C01.2
+      question: Only the active ones
+      note: Anaphoric filter. Must keep the type and add the status.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
+    - id: C01.3
+      question: How many are there?
+      note: Intent switches to a count; both filters must survive. Expect 19.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
+
+- id: C02
+  category: Conversation - Replace and Remove Filter
+  turns:
+    - id: C02.1
+      question: Show active AR_NPD_Shirting items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Active'
+    - id: C02.2
+      question: Show the closed ones instead
+      note: Replaces the status rather than adding to it. Expect 5, not 0.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Closed'
+    - id: C02.3
+      question: Now show all statuses
+      note: Removes the status filter but keeps the type. Expect 10.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+
+- id: C03
+  category: Conversation - Group and Sort
+  turns:
+    - id: C03.1
+      question: Show AR_NPD_YD_SHIRTING items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+    - id: C03.2
+      question: Group those by status
+      note: Adds a dimension and changes the shape of the answer. Expect 4 groups.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_status, COUNT(*)
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+        GROUP BY business_object_status
+    - id: C03.3
+      question: Sort them by the count, largest first
+      expect_decision: follow_up
+      ordered: true
+      expected_sql: |
+        SELECT business_object_status, COUNT(*) AS item_count
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+        GROUP BY business_object_status
+        ORDER BY item_count DESC
+
+- id: C04
+  category: Conversation - Topic Switch
+  turns:
+    - id: C04.1
+      question: Show AR_YD_Suiting items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+    - id: C04.2
+      question: Only the active ones
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
+    - id: C04.3
+      question: How many?
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
+    - id: C04.4
+      question: Show AR_NPD_Shirting items
+      note: >-
+        The leakage test. A new subject must drop the Active filter from the
+        previous block: 10 rows, not the 5 that leaking Active would give.
+      expect_decision: switch
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+    - id: C04.5
+      question: Only the closed ones
+      note: The filter now applies to the new subject. Expect 5.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Closed'
+
+- id: C05
+  category: Conversation - Explicit Reset
+  turns:
+    - id: C05.1
+      question: Show AR_YD_Suiting items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+    - id: C05.2
+      question: How many?
+      note: Expect 22.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+    - id: C05.3
+      question: 'New question: show AR_NPD_Shirting items'
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+    - id: C05.4
+      question: How many?
+      note: >-
+        Must count the new subject, 10, not the 22 from before the reset.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+
+- id: C06
+  category: Conversation - Task Domain
+  turns:
+    - id: C06.1
+      question: Show the tasks in AR_YD_Suiting
+      expect_decision: new_block
+      expected_sql: |
+        SELECT task_id, task_display_name, task_status
+        FROM tms_task_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+    - id: C06.2
+      question: Only the open ones
+      note: Expect 32.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT task_id, task_display_name, task_status
+        FROM tms_task_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND task_status = 'open'
+    - id: C06.3
+      question: Group them by department
+      note: Expect 4 departments among the open AR_YD_Suiting tasks.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT task_department, COUNT(*)
+        FROM tms_task_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
+          AND task_status = 'open'
+        GROUP BY task_department
+
+- id: C07
+  category: Conversation - Limit and Projection
+  turns:
+    - id: C07.1
+      question: Show the first 5 AR_YD_Shirting items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Shirting'
+        LIMIT 5
+    - id: C07.2
+      question: Give me 10 instead
+      note: Replaces the limit, keeps the subject.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Shirting'
+        LIMIT 10
+    - id: C07.3
+      question: Show their status as well
+      note: Widens the projection without disturbing the limit.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Shirting'
+        LIMIT 10
+
+- id: C08
+  category: Conversation - Dimension Follow-up
+  turns:
+    - id: C08.1
+      question: Show AR_NPD_YD_SHIRTING items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_unit
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+    - id: C08.2
+      question: What about PVH?
+      note: >-
+        PVH is a business_unit, not a subject, so this narrows the current
+        block rather than starting a new one. Expect 1.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_unit
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_unit = 'PVH'
