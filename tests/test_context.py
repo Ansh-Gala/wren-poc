@@ -121,6 +121,26 @@ def test_follow_up_filters_accumulate():
     assert "business_object_status" in state.active_filters
 
 
+def test_a_filter_can_be_removed():
+    """Regression: filters used to merge, so a dropped filter came straight back.
+
+    Turn 2 narrows to PVH, turn 3 drops it. The state after turn 3 must not
+    still claim PVH is in force, or turn 4 is told to re-apply it.
+    """
+    with_pvh = (
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting' AND business_unit = 'PVH'"
+    )
+    state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
+    state, _ = _state_after("only PVH", with_pvh, 1, state=state)
+    assert "business_unit" in state.active_filters
+
+    state, _ = _state_after("drop the business unit filter", SQL_LIST, 22, state=state)
+    assert "business_unit" not in state.active_filters
+    assert "business_object_type" in state.active_filters
+    assert "PVH" not in render_context(state)
+
+
 def test_switching_subject_drops_the_old_filters():
     """The whole point of a switch: Active must not leak onto the new subject."""
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)

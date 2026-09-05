@@ -1,0 +1,153 @@
+# Long-thread stress test. Not part of the 50-turn suite.
+#
+# The 50-turn suite's longest thread is five turns, which is not long enough
+# to show whether state drifts or grows. This is one twelve-turn thread that
+# adds, removes and replaces constraints repeatedly, then switches subject at
+# the very end -- the switch has to survive eleven turns of accumulated state,
+# which is the case most likely to leak.
+#
+# Counts verified against arvind_retail_chatbot_test_1:
+#   AR_NPD_YD_SHIRTING  59 total, 49 Active, 8 Closed
+#   of the 49 Active:   48 unit1, 1 PVH, 38 Black
+#   AR_YD_Suiting       22 total
+
+version: 1
+
+questions:
+
+- id: L01
+  category: Stress - Long Thread
+  turns:
+    - id: L01.01
+      question: Show AR_NPD_YD_SHIRTING items
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+
+    - id: L01.02
+      question: Only the active ones
+      note: add a filter -- 49
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+
+    - id: L01.03
+      question: How many?
+      note: change of intent -- 49
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+
+    - id: L01.04
+      question: Group them by business unit
+      note: add a dimension -- 2 groups
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_unit, COUNT(*)
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+        GROUP BY business_unit
+
+    - id: L01.05
+      question: Just list them again
+      note: drop the grouping, keep both filters -- 49
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+
+    - id: L01.06
+      question: Only PVH
+      note: add a dimension filter -- 1
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+          AND business_unit = 'PVH'
+
+    - id: L01.07
+      question: Remove that business unit filter
+      note: >-
+        Remove only that filter -- back to 49. Previously worded "Show all
+        business units again", which the model reasonably read as "list the
+        distinct business units" and answered with SELECT DISTINCT
+        business_unit. That was ambiguous wording on our side, not a system
+        failure, so the question was reworded rather than the model blamed.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+
+    - id: L01.08
+      question: Only the black ones
+      note: a different dimension -- 38
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_color
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+          AND business_object_color = 'Black'
+
+    - id: L01.09
+      question: How many?
+      note: 38
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+          AND business_object_color = 'Black'
+
+    - id: L01.10
+      question: Sort them by id
+      ordered: true
+      note: 38, ordered
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_color
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+          AND business_object_color = 'Black'
+        ORDER BY business_object_id
+
+    - id: L01.11
+      question: Just the first 10
+      ordered: true
+      note: 10, keeping the sort and all three filters
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_color
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
+          AND business_object_color = 'Black'
+        ORDER BY business_object_id
+        LIMIT 10
+
+    - id: L01.12
+      question: Show AR_YD_Suiting items
+      note: >-
+        The hard case. Eleven turns of state -- status, colour, sort, limit --
+        must all be dropped. Anything that leaks shows up immediately: 22 is
+        correct, and any smaller number means a filter survived the switch.
+      expect_decision: switch
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_YD_Suiting'
