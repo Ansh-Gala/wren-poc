@@ -44,6 +44,19 @@ rules:
       "my task status breakdown" is assigned_user_id = 1 GROUP BY task_status.
       The only invariant across all of them is assigned_user_id = 1.
 
+  - name: prefer_pre_aggregated_counts
+    definition: >-
+      tms_business_object_flat already carries total_task_count, open_task_count,
+      closed_task_count and delayed_task_count. When a question is about a Business
+      Object's task counts, read these columns rather than joining to tms_task_flat
+      and re-aggregating: it is the same answer from one table, and it keeps the
+      choice deterministic instead of leaving two equally reasonable shapes.
+    sql_fragment: "tms_business_object_flat.total_task_count"
+    caution: >-
+      delayed_task_count counts delayed OPEN tasks only. If a question should also
+      count closed tasks that breached SLA, join to tms_task_flat on
+      task_sla_status = 'Delayed' instead.
+
   - name: count_business_objects_from_tasks
     definition: >-
       When counting Business Objects from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).

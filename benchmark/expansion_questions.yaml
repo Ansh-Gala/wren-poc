@@ -293,7 +293,7 @@ questions:
     '
 - id: E47
   category: Cross Dimension
-  question: Which business objects have delayed tasks?
+  question: Which business objects have delayed tasks still open?
   expected_sql: 'SELECT business_object_id, delayed_task_count FROM tms_business_object_flat WHERE delayed_task_count
     > 0
 
@@ -373,7 +373,7 @@ questions:
   - edge_case
 - id: E59
   category: Distinct
-  question: How many different departments are there?
+  question: How many different departments do tasks belong to?
   expected_sql: 'SELECT COUNT(DISTINCT task_department) FROM tms_task_flat
 
     '

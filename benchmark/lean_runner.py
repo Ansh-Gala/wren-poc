@@ -192,7 +192,18 @@ def run_turn(
     elif context_mode == "history":
         context = ""          # provider replays session.turns instead
     else:
-        context = "" if decision in ("new_block", "switch") else render_context(state)
+        # A rebase keeps its context: the subject changed but the question
+        # relies on the shape of the one before it.
+        if decision in ("new_block", "switch"):
+            context = ""
+        else:
+            if decision == "rebase":
+                state.active_filters = {
+                    col: pred for col, pred in state.active_filters.items()
+                    if state.active_entity is None or state.active_entity not in pred
+                }
+                state.active_entity = entity
+            context = render_context(state)
     r.context_chars = len(context)
 
     session.context_block = context or None
@@ -226,6 +237,10 @@ def run_turn(
     # it is cautious.
     if turn.expect_behavior == "clarify":
         r.behavior_match = r.clarification is not None and parsed.sql is None
+    elif turn.expect_behavior == "zero_or_clarify":
+        # Decided below, once the query has run: clarifying is fine, and so is
+        # a query that honestly returns nothing.
+        r.behavior_match = None
     else:
         r.behavior_match = parsed.sql is not None
 
@@ -244,6 +259,29 @@ def run_turn(
             r.sql_valid = True
         except UnsafeSQLError as exc:
             r.error = r.error or f"unsafe SQL: {exc}"
+
+    if turn.expect_behavior == "zero_or_clarify":
+        if r.clarification is not None and parsed.sql is None:
+            r.behavior_match = r.result_match = r.semantic_match = True
+        elif parsed.sql:
+            res = run_readonly(settings, parsed.sql, settings.statement_timeout_ms)
+            r.actual_result = result_summary(res)
+            r.execution_success = res.ok
+            empty = res.ok and (
+                not res.rows or (len(res.rows) == 1 and res.rows[0][0] == 0))
+            r.behavior_match = r.result_match = r.semantic_match = bool(empty)
+            if not empty:
+                # Rows came back for a value that does not exist, so a filter
+                # was quietly changed to something that does.
+                r.failure_category = "SILENT_SUBSTITUTION"
+        else:
+            r.behavior_match = r.result_match = False
+            r.failure_category = "PROMPT_ERROR"
+        update_state(state, turn.question, parsed.sql, None, entity, decision)
+        session.turns.append(Turn(index=turn.turn_index, question=turn.question,
+                                  generated_sql=parsed.sql))
+        r.latency_ms = (time.perf_counter() - started) * 1000
+        return r
 
     if turn.expect_behavior == "clarify":
         r.result_match = bool(r.behavior_match)

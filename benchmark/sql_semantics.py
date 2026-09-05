@@ -79,10 +79,26 @@ def _qualify(column: exp.Column, aliases: dict[str, str], sole: str | None) -> s
     return name
 
 
+_MIDNIGHT = (" 00:00:00", "T00:00:00", " 00:00:00.000000")
+
+
+def _normalise_date(value: str) -> str:
+    """Drop a midnight time component so date boundaries compare equal.
+
+    DATE '2026-06-01', '2026-06-01' and '2026-06-01 00:00:00' are the same
+    boundary written three ways; only the date part carries meaning.
+    """
+    v = value.strip()
+    for suffix in _MIDNIGHT:
+        if v.endswith(suffix):
+            return v[: -len(suffix)].strip()
+    return v
+
+
 def _literal(node: exp.Expression) -> str:
     """Comparison value, normalised so 'Active' and "Active" agree."""
     if isinstance(node, exp.Literal):
-        return str(node.this).strip()
+        return _normalise_date(str(node.this))
     if isinstance(node, exp.Boolean):
         return str(node.this).lower()
     if isinstance(node, exp.Null):
@@ -90,7 +106,8 @@ def _literal(node: exp.Expression) -> str:
     if isinstance(node, exp.Cast):
         return _literal(node.this)
     try:
-        return " ".join(node.sql(dialect="postgres").split()).strip("'\"")
+        return _normalise_date(
+            " ".join(node.sql(dialect="postgres").split()).strip("'\""))
     except Exception:
         return str(node)
 
@@ -179,6 +196,12 @@ def signature(sql: str | None) -> SqlSignature:
         for op_type in _OPS:
             for node in scope.find_all(op_type):
                 record_predicate(node)
+        for node in scope.find_all(exp.Between):
+            col = node.this
+            if isinstance(col, exp.Column):
+                name = _qualify(col, aliases, sole)
+                sig.filters.add((name, ">=", _literal(node.args.get("low"))))
+                sig.filters.add((name, "<=", _literal(node.args.get("high"))))
         for node in scope.find_all(exp.In):
             col = node.this
             if isinstance(col, exp.Column):

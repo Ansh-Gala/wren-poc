@@ -9,7 +9,7 @@ from benchmark.context import (
 
 GAZ = [
     "AR_YD_Suiting", "AR_NPD_Shirting", "AR_NPD_YD_SHIRTING",
-    "AR_YD_Shirting", "AR_PD_Suiting", "TESTING_MG", "test",
+    "AR_YD_Shirting", "AR_PD_Suiting", "AR_NPD_Suiting", "TESTING_MG", "test",
 ]
 
 SQL_LIST = (
@@ -73,6 +73,42 @@ def test_naming_a_different_entity_switches_subject():
 def test_naming_the_same_entity_is_still_a_follow_up():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     assert classify_turn("how many AR_YD_Suiting items are active?", state, GAZ)[0] == "follow_up"
+
+
+def test_an_elliptical_subject_change_rebases_rather_than_resetting():
+    """Regression: "What about X?" needs the previous question's shape.
+
+    After "how many delayed tasks in AR_NPD_Suiting?", the question "What
+    about AR_PD_Suiting?" means the same count for a different subject.
+    Clearing the state left nothing to answer, and the system could only ask
+    what was meant.
+    """
+    state, _ = _state_after(
+        "Show delayed tasks in AR_NPD_Suiting",
+        "SELECT task_id FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting' "
+        "AND task_sla_status = 'Delayed'", 4)
+    decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
+    assert decision == "rebase"
+    assert entity == "AR_PD_Suiting"
+
+
+def test_a_rebase_keeps_the_other_filters_but_drops_the_subject():
+    state, _ = _state_after(
+        "Show delayed tasks in AR_NPD_Suiting",
+        "SELECT task_id FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting' "
+        "AND task_sla_status = 'Delayed'", 4)
+    decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
+    update_state(state, "What about AR_PD_Suiting?", None, None, entity, decision)
+    assert state.active_entity == "AR_PD_Suiting"
+    assert "AR_NPD_Suiting" not in str(state.active_filters)
+
+
+def test_a_full_request_for_a_new_subject_still_switches():
+    """The other half: a complete request must not inherit the old filters."""
+    state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
+    state, _ = _state_after("only the active ones", SQL_ACTIVE, 19, state=state)
+    decision, _ = classify_turn("Show AR_NPD_Shirting items", state, GAZ)
+    assert decision == "switch", "a self-contained request starts clean"
 
 
 def test_explicit_reset_wording_starts_a_new_block():

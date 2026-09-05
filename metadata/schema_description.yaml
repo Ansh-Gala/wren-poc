@@ -143,16 +143,23 @@ tables:
         description: Expected completion of the current active milestone.
       total_task_count:
         type: BIGINT
-        description: Total number of tasks associated with the Business Object.
+        description: 'Total number of tasks on this Business Object, pre-aggregated. Prefer it over counting
+          rows in tms_task_flat: same answer, one table.'
       open_task_count:
         type: BIGINT
-        description: Number of open tasks associated with the Business Object.
+        description: Number of open tasks on this Business Object, pre-aggregated. Prefer it over counting
+          tms_task_flat rows with task_status = 'open'.
       closed_task_count:
         type: BIGINT
-        description: Number of closed tasks associated with the Business Object.
+        description: Number of closed tasks on this Business Object, pre-aggregated. Prefer it over counting
+          tms_task_flat rows with task_status = 'closed'.
       delayed_task_count:
         type: BIGINT
-        description: Number of delayed tasks associated with the Business Object.
+        description: 'Number of currently delayed OPEN tasks on this Business Object. It does NOT include
+          closed tasks that breached SLA: across the database it sums to 481 while 635 tasks have task_sla_status
+          = ''Delayed'', the difference being 154 delayed closed tasks. Use this column for "has delayed
+          work outstanding"; join to tms_task_flat on task_sla_status = ''Delayed'' if closed breaches
+          should count too.'
       open_tasks_list:
         type: VARCHAR
         description: List of open task names associated with the Business Object.

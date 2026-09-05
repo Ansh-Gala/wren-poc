@@ -1,0 +1,419 @@
+# Targeted suite: one group per failure mode, generated and validated by
+# scripts/build_targeted_suite.py.
+#
+# Questions with expect_behavior: clarify have no valid SQL answer. Asking
+# is the correct response; producing confident SQL is the failure.
+#
+# Questions tagged zero_result are expected to return nothing. That is the
+# right answer, and quietly dropping a filter to avoid it is not.
+version: 1
+questions:
+- id: T01
+  category: Clarification - No Such Measure
+  question: What is the revenue by business unit?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T02
+  category: Clarification - No Such Measure
+  question: Show the profit margin for each item
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T03
+  category: Clarification - No Such Measure
+  question: What is the average cost of an item?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T04
+  category: Clarification - No Such Concept
+  question: How many orders did we ship last month?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T05
+  category: Clarification - No Such Concept
+  question: Which suppliers are underperforming?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T06
+  category: Clarification - Ambiguous
+  question: Show me the items
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T07
+  category: Clarification - Ambiguous
+  question: Which ones are urgent?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T08
+  category: Clarification - Ambiguous
+  question: Show me the top performers
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T09
+  category: Clarification - No Such Column
+  question: Show the discount applied to each item
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T10
+  category: Clarification - No Such Column
+  question: What is the customer email for each order?
+  expect_behavior: clarify
+  expected_sql: null
+  note: No valid SQL answer. The system should ask rather than guess.
+- id: T11
+  category: Hallucination - Absent Value
+  question: Show items whose colour is Purple
+  expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+    business_object_color = ''Purple''
+
+    '
+  expect_behavior: zero_or_clarify
+  tags:
+  - absent_value
+  note: The value does not exist. Returning nothing and saying so are both correct; substituting a real
+    value to produce rows is not.
+- id: T12
+  category: Hallucination - Absent Value
+  question: How many AR_FAKE_TYPE items are there?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_FAKE_TYPE''
+
+    '
+  expect_behavior: zero_or_clarify
+  tags:
+  - absent_value
+  note: The value does not exist. Returning nothing and saying so are both correct; substituting a real
+    value to produce rows is not.
+- id: T13
+  category: Hallucination - Absent Value
+  question: Show tasks with SLA status Breached
+  expected_sql: 'SELECT task_id FROM tms_task_flat WHERE task_sla_status = ''Breached''
+
+    '
+  expect_behavior: zero_or_clarify
+  tags:
+  - absent_value
+  note: The value does not exist. Returning nothing and saying so are both correct; substituting a real
+    value to produce rows is not.
+- id: T14
+  category: Hallucination - Absent Value
+  question: How many items are in business unit unit9?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_unit = ''unit9''
+
+    '
+  expect_behavior: zero_or_clarify
+  tags:
+  - absent_value
+  note: The value does not exist. Returning nothing and saying so are both correct; substituting a real
+    value to produce rows is not.
+- id: T15
+  category: Complex Filter
+  question: How many active black AR_YD_Suiting items are in unit1?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_YD_Suiting''
+    AND business_object_status = ''Active'' AND business_object_color = ''Black'' AND business_unit =
+    ''unit1''
+
+    '
+- id: T16
+  category: Complex Filter
+  question: Show active green AR_YD_Shirting items
+  expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+    business_object_type = ''AR_YD_Shirting'' AND business_object_status = ''Active'' AND business_object_color
+    = ''Green''
+
+    '
+- id: T17
+  category: Complex Filter
+  question: How many open delayed tasks are in AR_PRINT_Shirting?
+  expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE business_object_type = ''AR_PRINT_Shirting''
+    AND task_status = ''open'' AND task_sla_status = ''Delayed''
+
+    '
+- id: T18
+  category: Complex Filter
+  question: Show closed on-time tasks in AR_PD_Shirting
+  expected_sql: 'SELECT task_id, task_display_name FROM tms_task_flat WHERE business_object_type = ''AR_PD_Shirting''
+    AND task_status = ''closed'' AND task_sla_status = ''On Time''
+
+    '
+- id: T19
+  category: Complex Filter
+  question: How many closed black AR_PD_Shirting items are there?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_PD_Shirting''
+    AND business_object_status = ''Closed'' AND business_object_color = ''Black''
+
+    '
+- id: T20
+  category: Complex Filter
+  question: How many active items are black across all types?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_status = ''Active''
+    AND business_object_color = ''Black''
+
+    '
+- id: T21
+  category: Complex Filter + Null
+  question: How many business objects have no workflow name but are active?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE workflow_name IS NULL AND business_object_status
+    = ''Active''
+
+    '
+- id: T22
+  category: Complex Filter + Group
+  question: How many active items are there by colour and business unit?
+  expected_sql: 'SELECT business_object_color, business_unit, COUNT(*) FROM tms_business_object_flat WHERE
+    business_object_status = ''Active'' GROUP BY business_object_color, business_unit
+
+    '
+- id: T23
+  category: Date Filter
+  question: How many business objects were created before May 2026?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_created_at < DATE
+    ''2026-05-01''
+
+    '
+- id: T24
+  category: Date Filter
+  question: How many business objects were created after June 2026 began?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_created_at >= DATE
+    ''2026-06-01''
+
+    '
+- id: T25
+  category: Date Range
+  question: How many business objects were created in March 2026?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_created_at >= DATE
+    ''2026-03-01'' AND business_object_created_at < DATE ''2026-04-01''
+
+    '
+- id: T26
+  category: Date Range
+  question: How many business objects were created between April and June 2026?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_created_at >= DATE
+    ''2026-04-01'' AND business_object_created_at < DATE ''2026-07-01''
+
+    '
+- id: T27
+  category: Date Semantic
+  question: How many business objects are past their due date?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE days_to_due_date < 0
+
+    '
+- id: T28
+  category: Date Semantic
+  question: How many active business objects are overdue?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE days_to_due_date < 0 AND business_object_status
+    = ''Active''
+
+    '
+- id: T29
+  category: Date Semantic
+  question: How many business objects are due within the next 30 days?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE days_to_due_date BETWEEN 0 AND 30
+
+    '
+- id: T30
+  category: Date Filter
+  question: How many tasks have a closing date in June 2026?
+  expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE task_closed_at >= DATE ''2026-06-01'' AND task_closed_at
+    < DATE ''2026-07-01''
+
+    '
+- id: T31
+  category: Date Sort
+  question: Show the 3 oldest AR_YD_Suiting items
+  expected_sql: 'SELECT business_object_id, business_object_created_at FROM tms_business_object_flat WHERE
+    business_object_type = ''AR_YD_Suiting'' ORDER BY business_object_created_at ASC LIMIT 3
+
+    '
+  ordered: true
+- id: T32
+  category: Zero Result
+  question: How many AR_YD_Suiting items are short closed?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_YD_Suiting''
+    AND business_object_status = ''Short Closed''
+
+    '
+  tags:
+  - zero_result
+  note: Zero is the correct answer; relaxing a filter to avoid it is wrong.
+- id: T33
+  category: Zero Result
+  question: Show AR_NPD_Shirting items in PVH
+  expected_sql: 'SELECT business_object_id FROM tms_business_object_flat WHERE business_object_type =
+    ''AR_NPD_Shirting'' AND business_unit = ''PVH''
+
+    '
+  tags:
+  - zero_result
+  note: Zero is the correct answer; relaxing a filter to avoid it is wrong.
+- id: T34
+  category: Zero Result
+  question: How many AR_YD_Suiting items have a season recorded?
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat b JOIN tms_business_object_attributes_flat
+    a ON a.business_object_id = b.business_object_id WHERE b.business_object_type = ''AR_YD_Suiting''
+    AND a.season IS NOT NULL
+
+    '
+  tags:
+  - zero_result
+  note: Zero is the correct answer; relaxing a filter to avoid it is wrong.
+- id: T35
+  category: Projection
+  question: Show only the ids of active AR_YD_Suiting items
+  expected_sql: 'SELECT business_object_id FROM tms_business_object_flat WHERE business_object_type =
+    ''AR_YD_Suiting'' AND business_object_status = ''Active''
+
+    '
+- id: T36
+  category: Projection
+  question: List the reference ids of closed AR_NPD_Shirting items
+  expected_sql: 'SELECT business_object_ref_id FROM tms_business_object_flat WHERE business_object_type
+    = ''AR_NPD_Shirting'' AND business_object_status = ''Closed''
+
+    '
+- id: T37
+  category: Projection
+  question: Show the id and status of AR_NPD_Suiting items
+  expected_sql: 'SELECT business_object_id, business_object_status FROM tms_business_object_flat WHERE
+    business_object_type = ''AR_NPD_Suiting''
+
+    '
+- id: Y01
+  category: State - Aggregation Switch
+  turns:
+  - id: Y01.1
+    question: Show AR_PD_Suiting items
+    expect_decision: new_block
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_PD_Suiting''
+
+      '
+  - id: Y01.2
+    question: How many?
+    expect_decision: follow_up
+    expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_PD_Suiting''
+
+      '
+  - id: Y01.3
+    question: List them again
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_PD_Suiting''
+
+      '
+- id: Y02
+  category: State - Dimension Replace
+  turns:
+  - id: Y02.1
+    question: Show black AR_YD_Shirting items
+    expect_decision: new_block
+    expected_sql: 'SELECT business_object_id, business_object_color FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_YD_Shirting'' AND business_object_color = ''Black''
+
+      '
+  - id: Y02.2
+    question: Show the green ones instead
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_color FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_YD_Shirting'' AND business_object_color = ''Green''
+
+      '
+  - id: Y02.3
+    question: Now only the active ones
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_color FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_YD_Shirting'' AND business_object_color = ''Green'' AND business_object_status
+      = ''Active''
+
+      '
+- id: Y03
+  category: State - Leakage After Switch
+  turns:
+  - id: Y03.1
+    question: Show active AR_PRINT_Shirting items
+    expect_decision: new_block
+    expected_sql: 'SELECT business_object_id FROM tms_business_object_flat WHERE business_object_type
+      = ''AR_PRINT_Shirting'' AND business_object_status = ''Active''
+
+      '
+  - id: Y03.2
+    question: Only the black ones
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_color FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_PRINT_Shirting'' AND business_object_status = ''Active'' AND business_object_color
+      = ''Black''
+
+      '
+  - id: Y03.3
+    question: Show AR_NPD_Suiting items
+    expect_decision: switch
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_NPD_Suiting''
+
+      '
+  - id: Y03.4
+    question: How many?
+    expect_decision: follow_up
+    expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = ''AR_NPD_Suiting''
+
+      '
+- id: Y04
+  category: State - Sort then Change Sort
+  turns:
+  - id: Y04.1
+    question: Show AR_NPD_Suiting items sorted by id
+    expect_decision: new_block
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_NPD_Suiting'' ORDER BY business_object_id
+
+      '
+    ordered: true
+  - id: Y04.2
+    question: Sort them the other way
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_NPD_Suiting'' ORDER BY business_object_id DESC
+
+      '
+    ordered: true
+  - id: Y04.3
+    question: Just the first 3
+    expect_decision: follow_up
+    expected_sql: 'SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
+      business_object_type = ''AR_NPD_Suiting'' ORDER BY business_object_id DESC LIMIT 3
+
+      '
+    ordered: true
+- id: Y05
+  category: State - Task Domain Switch
+  turns:
+  - id: Y05.1
+    question: Show delayed tasks in AR_NPD_Suiting
+    expect_decision: new_block
+    expected_sql: 'SELECT task_id, task_display_name FROM tms_task_flat WHERE business_object_type = ''AR_NPD_Suiting''
+      AND task_sla_status = ''Delayed''
+
+      '
+  - id: Y05.2
+    question: How many?
+    expect_decision: follow_up
+    expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE business_object_type = ''AR_NPD_Suiting''
+      AND task_sla_status = ''Delayed''
+
+      '
+  - id: Y05.3
+    question: What about AR_PD_Suiting?
+    expect_decision: rebase
+    expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE business_object_type = ''AR_PD_Suiting'' AND
+      task_sla_status = ''Delayed''
+
+      '
+    note: 'Elliptical subject change: the shape of the previous question (a delayed-task count) has to
+      carry over.'
