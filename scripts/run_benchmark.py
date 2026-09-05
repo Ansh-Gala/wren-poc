@@ -46,11 +46,12 @@ def main() -> int:
     register_secrets(settings.secrets())
     log = get_logger("run_benchmark", settings.debug)
 
-    version = claude_version(settings.claude_command)
-    if not version:
-        log.error("Claude Code CLI not found ('%s'). Install it and retry.",
-                  settings.claude_command)
-        return 1
+    if settings.llm_provider == "cli":
+        version = claude_version(settings.claude_command)
+        if not version:
+            log.error("Claude Code CLI not found ('%s'). Install it and retry.",
+                      settings.claude_command)
+            return 1
 
     configs = [c.strip().upper() for c in (args.config or settings.benchmark_config).split(",")]
     for c in configs:
@@ -74,7 +75,8 @@ def main() -> int:
     raw_dir = out_dir / "raw"
     every_result = []
 
-    print(f"claude {version}")
+    llm_info = f"claude {version}" if settings.llm_provider == "cli" else f"{settings.llm_provider} ({settings.openai_model})"
+    print(f"provider: {llm_info}")
     print(f"configs: {', '.join(configs)}   privacy: {privacy_mode}")
     print(f"questions: {len(questions)} of {len(all_questions)}")
     print(f"estimated: ~{len(questions) * len(configs) * 30 / 60:.0f} min "

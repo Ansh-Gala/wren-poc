@@ -47,6 +47,8 @@ def test_ordered_flag_matches_the_expected_sql():
     positive when an ordering the question demanded goes unchecked.
     """
     for q in QS:
+        if q.expected_sql is None:
+            continue
         has_order = _has_top_level_order_by(q.expected_sql)
         if q.ordered:
             assert has_order, f"{q.id} is marked ordered but its SQL has no ORDER BY"
@@ -60,12 +62,17 @@ def test_ordered_flag_matches_the_expected_sql():
 
 def test_date_questions_are_tagged():
     for q in QS:
+        if q.expected_sql is None:
+            continue
         if "current_date" in q.expected_sql.lower() or "date_trunc" in q.expected_sql.lower():
             assert "date" in q.tags, f"{q.id} uses date logic but is not tagged"
 
 
 def test_all_ground_truth_sql_passes_the_read_only_gate():
     for q in QS:
+        # Abstention questions carry no SQL: the agent is expected to refuse.
+        if q.expected_sql is None:
+            continue
         assert_read_only(q.expected_sql)
 
 
@@ -92,6 +99,8 @@ def test_select_filters_by_category_and_id():
 def test_every_expected_sql_executes(settings):
     failures = []
     for q in QS:
+        if q.expected_sql is None:
+            continue
         result = run_readonly(settings, q.expected_sql, 15000)
         if result.error:
             failures.append((q.id, result.error.splitlines()[0]))
@@ -102,13 +111,16 @@ def test_every_expected_sql_executes(settings):
 def test_no_expected_result_is_empty(settings):
     """An empty expected result is passed by almost any wrong query."""
     empty = [q.id for q in QS
-             if not run_readonly(settings, q.expected_sql, 15000).rows]
+             if q.expected_sql is not None
+             and not run_readonly(settings, q.expected_sql, 15000).rows]
     assert not empty, f"vacuous questions: {empty}"
 
 
 @pytest.mark.integration
 def test_expected_results_are_stable_within_a_run(settings):
     for q in QS[:12]:
+        if q.expected_sql is None:
+            continue
         first = run_readonly(settings, q.expected_sql, 15000)
         second = run_readonly(settings, q.expected_sql, 15000)
         assert first.rows == second.rows, f"{q.id} is not stable"

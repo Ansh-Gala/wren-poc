@@ -179,7 +179,7 @@ def render_markdown(results: list[QuestionResult], summary: dict) -> str:
             add("**Expected SQL**")
             add("")
             add("```sql")
-            add(r.expected_sql.strip())
+            add((r.expected_sql or "-- no expected SQL (ambiguous/unanswerable)").strip())
             add("```")
             add("")
             add("**Generated SQL**")
