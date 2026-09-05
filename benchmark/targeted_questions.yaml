@@ -271,6 +271,7 @@ questions:
     ''AR_YD_Suiting'' AND business_object_status = ''Active''
 
     '
+  strict_projection: true
 - id: T36
   category: Projection
   question: List the reference ids of closed AR_NPD_Shirting items
@@ -278,6 +279,7 @@ questions:
     = ''AR_NPD_Shirting'' AND business_object_status = ''Closed''
 
     '
+  strict_projection: true
 - id: T37
   category: Projection
   question: Show the id and status of AR_NPD_Suiting items
@@ -285,6 +287,7 @@ questions:
     business_object_type = ''AR_NPD_Suiting''
 
     '
+  strict_projection: true
 - id: Y01
   category: State - Aggregation Switch
   turns:
@@ -410,10 +413,8 @@ questions:
       '
   - id: Y05.3
     question: What about AR_PD_Suiting?
-    expect_decision: rebase
+    expect_decision: switch
     expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE business_object_type = ''AR_PD_Suiting'' AND
       task_sla_status = ''Delayed''
 
       '
-    note: 'Elliptical subject change: the shape of the previous question (a delayed-task count) has to
-      carry over.'

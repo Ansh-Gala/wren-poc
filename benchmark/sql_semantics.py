@@ -311,13 +311,27 @@ class SemanticComparison:
     projection_verdict: str = PROJECTION_EXACT
     issues: list[str] = field(default_factory=list)
 
+    strict_projection: bool = False
+
     @property
     def semantically_correct(self) -> bool:
         """Every decision that changes meaning agrees.
 
-        Projection is judged separately: an extra column is untidy, a wrong or
-        missing one is not, so only the latter two count against correctness.
+        Projection only counts when the question named its columns. "Show the
+        AR_YD_Suiting items" does not say which columns to return, so the
+        ground truth's list is one reasonable choice among several and a
+        different one is not an error -- scoring it as one measured our
+        arbitrary choice rather than the model's correctness, and moved with
+        run-to-run variation.
+
+        "Show the id and status of..." does name them, and there a missing or
+        substituted column is a real failure. Callers say which case they are
+        in; the verdict is reported either way.
         """
+        projection_ok = (
+            self.projection_verdict in (PROJECTION_EXACT, PROJECTION_SUPERSET)
+            if self.strict_projection else True
+        )
         return (
             self.parsed
             and self.tables_match
@@ -327,7 +341,7 @@ class SemanticComparison:
             and self.grouping_match
             and self.ordering_match
             and self.limit_match
-            and self.projection_verdict in (PROJECTION_EXACT, PROJECTION_SUPERSET)
+            and projection_ok
         )
 
 
@@ -336,14 +350,17 @@ def _bare(name: str) -> str:
 
 
 def compare(expected_sql: str | None, generated_sql: str | None,
-            ordered: bool = False) -> SemanticComparison:
+            ordered: bool = False,
+            strict_projection: bool = False) -> SemanticComparison:
     """Component-by-component comparison of two queries.
 
-    ``ordered`` says whether the question actually demanded an order. When it
-    did not, a query that sorts anyway is not wrong, so ordering is not checked.
+    ``ordered`` says whether the question actually demanded an order; when it
+    did not, a query that sorts anyway is not wrong. ``strict_projection``
+    says whether the question named its output columns; when it did not, any
+    reasonable column list answers it.
     """
     exp_sig, act_sig = signature(expected_sql), signature(generated_sql)
-    c = SemanticComparison()
+    c = SemanticComparison(strict_projection=strict_projection)
     if not exp_sig.parsed or not act_sig.parsed:
         c.parsed = False
         c.issues.append("could not parse one of the queries")

@@ -51,6 +51,9 @@ class SuiteTurn:
     tags: list[str] = field(default_factory=list)
     expect_decision: str | None = None
     expect_behavior: str = "sql"
+    # True when the question names its output columns, so a different column
+    # list is a real error rather than a different reasonable choice.
+    strict_projection: bool = False
     note: str | None = None
 
     @property
@@ -88,6 +91,7 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
         tags=list(raw.get("tags", []) or []),
         expect_decision=decision,
         expect_behavior=behavior,
+        strict_projection=bool(raw.get("strict_projection", False)),
         note=raw.get("note"),
     )
 

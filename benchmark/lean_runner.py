@@ -30,7 +30,7 @@ from benchmark.evaluator import (
 )
 from benchmark.lean_suite import Conversation, SuiteTurn
 from benchmark.sql_semantics import compare as compare_semantics
-from benchmark.models import Session, Turn
+from benchmark.models import ParsedSQL, Session, Turn
 from benchmark.safety import UnsafeSQLError, assert_read_only
 from claude.parser import parse_clarification, parse_sql
 from config.logging import get_logger
@@ -228,8 +228,16 @@ def run_turn(
         r.error = run.error
 
     parsed = parse_sql(run.result_text)
-    r.generated_sql = parsed.sql
     r.clarification = parse_clarification(run.result_text)
+
+    # A clarification is not a query, but parse_sql's looser fallbacks will
+    # happily lift a fragment out of the prose -- "with SLA status 'Delayed'?"
+    # was scraped from a correct clarification and scored as a silent
+    # substitution. parse_clarification only fires on a JSON object that has a
+    # clarify key and no sql key, so when it fires it is the authority.
+    if r.clarification is not None:
+        parsed = ParsedSQL(sql=None, strategy="clarification", raw=run.result_text)
+    r.generated_sql = parsed.sql
 
     # Did it do the kind of thing the question called for? A confident query
     # in answer to an unanswerable question is a failure even if it runs, and
@@ -319,7 +327,8 @@ def run_turn(
         r.result_match = False
         r.match_mode = "rows ok, context misread"
 
-    sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered)
+    sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered,
+                            strict_projection=turn.strict_projection)
     r.semantic_match = sem.semantically_correct
     r.semantic_issues = list(sem.issues)
     r.projection_verdict = sem.projection_verdict

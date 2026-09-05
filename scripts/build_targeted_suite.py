@@ -279,6 +279,10 @@ def main() -> int:
         e = {"id": qid, "category": cat, "question": question, "expected_sql": sql + "\n"}
         if ordered:
             e["ordered"] = True
+        if qid in {"T35", "T36", "T37"}:
+            # These name their output columns, so a different list is an error
+            # rather than a different reasonable choice.
+            e["strict_projection"] = True
         if qid in ABSENT_VALUE:
             e["expect_behavior"] = "zero_or_clarify"
             e["tags"] = ["absent_value"]
