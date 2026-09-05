@@ -192,14 +192,30 @@ def test_projection_verdicts():
     assert compare(exact, superset).projection_verdict == PROJECTION_SUPERSET
 
     missing = "SELECT business_object_id FROM tms_business_object_flat"
-    c = compare(exact, missing)
-    assert c.projection_verdict == PROJECTION_MISSING
-    assert not c.semantically_correct, "a missing requested column is a real failure"
+    assert compare(exact, missing).projection_verdict == PROJECTION_MISSING
 
     substituted = "SELECT business_object_id, business_unit FROM tms_business_object_flat"
-    c = compare(exact, substituted)
-    assert c.projection_verdict == PROJECTION_SUBSTITUTED
-    assert not c.semantically_correct
+    assert compare(exact, substituted).projection_verdict == PROJECTION_SUBSTITUTED
+
+
+def test_projection_counts_only_when_the_question_named_its_columns():
+    """"Show the items" does not say which columns; "show the id and status" does.
+
+    Judging the first strictly measured our arbitrary choice of ground-truth
+    columns rather than the model, and moved with run-to-run variation. The
+    verdict is still reported in both cases.
+    """
+    exact = "SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat"
+    missing = "SELECT business_object_id FROM tms_business_object_flat"
+    substituted = "SELECT business_object_id, business_unit FROM tms_business_object_flat"
+
+    for wrong in (missing, substituted):
+        loose = compare(exact, wrong, strict_projection=False)
+        assert loose.semantically_correct, "unspecified columns: any reasonable list answers it"
+        assert loose.projection_verdict in (PROJECTION_MISSING, PROJECTION_SUBSTITUTED)
+
+        strict = compare(exact, wrong, strict_projection=True)
+        assert not strict.semantically_correct, "named columns: a different list is wrong"
 
 
 def test_a_superset_projection_is_tolerated_but_reported():
@@ -234,3 +250,29 @@ def test_signature_extracts_the_pieces():
     assert any(f[0].endswith("business_object_status") for f in s.filters)
     assert any(g.endswith("business_unit") for g in s.grouping)
     assert s.limit == 5
+
+
+# ------------------------------------------------- clarification parsing ----
+
+def test_a_clarification_is_not_mistaken_for_sql():
+    """Regression: parse_sql lifted a fragment out of clarifying prose.
+
+    Both of these were correct clarifications, and the looser fallbacks
+    scraped a phrase from the text; the runner then saw "SQL was produced" and
+    scored a correct refusal as a silent substitution.
+    """
+    from claude.parser import parse_clarification
+
+    for raw in (
+        """{"clarify": "There is no SLA status value 'Breached'. """
+        """Did you mean tasks with SLA status 'Delayed'?"}""",
+        """{"clarify": "'Top performers' is not a defined metric - did you mean """
+        """users with the most closed tasks, fewest delayed tasks, or something else?"}""",
+    ):
+        assert parse_clarification(raw) is not None, raw[:50]
+
+
+def test_an_answer_that_explains_itself_is_still_an_answer():
+    from claude.parser import parse_clarification
+    raw = '{"sql": "SELECT 1 FROM tms_task_flat"}  (note: did you want closed tasks too?)'
+    assert parse_clarification(raw) is None
