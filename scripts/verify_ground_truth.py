@@ -36,6 +36,10 @@ def main() -> int:
           f"{settings.pg_database}...\n")
 
     for q in questions:
+        if q.expected_sql is None:
+            if args.verbose:
+                print(f"  skip  {q.id}  (No expected SQL)")
+            continue
         result = run_readonly(settings, q.expected_sql, settings.statement_timeout_ms)
         if result.error:
             failures.append((q.id, result.error.splitlines()[0]))

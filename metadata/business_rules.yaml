@@ -1,178 +1,55 @@
-# Business rules, compiled into knowledge/rules/*.md by wren_setup/build.py.
-#
-# These are the rules that MUST change the SQL a model writes. Each has a
-# prose definition (what a business user means) and a sql_fragment (how that
-# cashes out in PostgreSQL). Rules that would not alter any benchmark answer
-# have been left out deliberately - padding this file would make configuration
-# C look better without teaching the model anything.
-
 rules:
-
-  - name: active_user
+  - name: active_business_object
     definition: >-
-      A user is active when they are available to receive new task
-      assignments. Questions saying "active users", "available people" or
-      "who can take work" mean this.
-    sql_fragment: "users.status = 'ACTIVE'"
+      An Active business object (Initiative, Order, BO) is one where business_object_status = 'Active'.
+    sql_fragment: "tms_business_object_flat.business_object_status = 'Active'"
 
-  - name: inactive_user
+  - name: short_closed_business_object
     definition: >-
-      A user is inactive when they cannot receive new assignments. Inactive
-      users still appear in historical data as assignees and owners and must
-      not be silently excluded from historical reporting.
-    sql_fragment: "users.status = 'INACTIVE'"
+      A Short Closed business object is one where business_object_status = 'Short Closed'.
+    sql_fragment: "tms_business_object_flat.business_object_status = 'Short Closed'"
 
-  - name: completed_task
-    definition: A task is completed when its work has finished.
-    sql_fragment: "tasks.status = 'COMPLETED'"
+  - name: closed_business_object
+    definition: >-
+      A Closed business object is one where business_object_status = 'Closed'.
+    sql_fragment: "tms_business_object_flat.business_object_status = 'Closed'"
 
   - name: open_task
     definition: >-
-      A task is open, unfinished or incomplete when it has not finished. This
-      INCLUDES blocked tasks - being blocked is not being done. Use the
-      inequality rather than listing TODO, IN_PROGRESS and BLOCKED, so new
-      statuses cannot silently fall out of the definition.
-    sql_fragment: "tasks.status <> 'COMPLETED'"
+      An open task is one where task_status = 'open'.
+    sql_fragment: "tms_task_flat.task_status = 'open'"
 
-  - name: blocked_task
+  - name: closed_task
     definition: >-
-      A task that cannot currently proceed. Blocked tasks are a subset of open
-      tasks and are usually the subject of escalation questions.
-    sql_fragment: "tasks.status = 'BLOCKED'"
+      A closed task is one where task_status = 'closed'.
+    sql_fragment: "tms_task_flat.task_status = 'closed'"
 
-  - name: overdue_task
+  - name: delayed_task
     definition: >-
-      A task is overdue when its deadline has passed and it is still not
-      finished. Both conditions are required: a completed task with a past due
-      date is not overdue.
-    sql_fragment: "tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED'"
+      A task is delayed when calculated elapsed duration exceeds its SLA buffer.
+    sql_fragment: "tms_task_flat.task_sla_status = 'Delayed'"
 
-  - name: due_today
-    definition: A task due today that has not yet been completed.
-    sql_fragment: "tasks.due_date = CURRENT_DATE AND tasks.status <> 'COMPLETED'"
-
-  - name: high_priority
+  - name: my_tasks
     definition: >-
-      "High priority" in business language covers both HIGH and CRITICAL. Do
-      not read it as priority = 'HIGH' alone.
-    sql_fragment: "tasks.priority IN ('HIGH', 'CRITICAL')"
+      My tasks means tasks assigned to the current signed-in user, still open, and
+      flagged for display. In this benchmark the signed-in user is user id 1
+      ('Admin'); use that literal id, never a bind placeholder.
+    sql_fragment: "tms_task_flat.assigned_user_id = 1 AND tms_task_flat.task_status = 'open' AND tms_task_flat.display_flag = 1"
+    scope: >-
+      The open + display_flag conditions apply only to the bare concept "my tasks".
+      Do NOT add them when the question supplies its own status or asks for a
+      distribution across statuses -- they would contradict or empty the answer.
+      "my closed tasks" is assigned_user_id = 1 AND task_status = 'closed'.
+      "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = 'Delayed'.
+      "my task status breakdown" is assigned_user_id = 1 GROUP BY task_status.
+      The only invariant across all of them is assigned_user_id = 1.
 
-  - name: priority_ranking
+  - name: count_business_objects_from_tasks
     definition: >-
-      priority is stored as text, so ORDER BY priority sorts alphabetically and
-      is wrong. Rank explicitly when a question asks for the highest priority
-      first.
-    sql_fragment: >-
-      CASE tasks.priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
-      WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END
+      When counting Business Objects from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).
+    sql_fragment: "COUNT(DISTINCT tms_task_flat.bo_id)"
 
-  - name: workflow_owner_join
+  - name: entity_alias
     definition: >-
-      To find who owns, runs or is accountable for a workflow, join workflows
-      to users through owner_user_id.
-    sql_fragment: "JOIN users ON users.id = workflows.owner_user_id"
-
-  - name: task_assignee_join
-    definition: >-
-      To find who is performing, assigned to or working on a task, join tasks
-      to users through assigned_user_id. Use a LEFT JOIN when unassigned tasks
-      must be retained.
-    sql_fragment: "LEFT JOIN users ON users.id = tasks.assigned_user_id"
-
-  - name: never_confuse_owner_with_assignee
-    definition: >-
-      workflows.owner_user_id and tasks.assigned_user_id are different
-      relationships and answer different questions. Never substitute one for
-      the other. If a question asks for the owners of workflows that contain
-      certain tasks, the filter applies to the tasks and the output identifies
-      the owner - the two joins both appear in the query.
-    sql_fragment: >-
-      SELECT DISTINCT owner.full_name FROM workflows w
-      JOIN users owner ON owner.id = w.owner_user_id
-      JOIN tasks t ON t.workflow_id = w.id
-      WHERE /* condition on t */
-
-  - name: count_tasks
-    definition: Counting tasks means counting task rows.
-    sql_fragment: "COUNT(tasks.id)"
-
-  - name: count_workflows_after_join
-    definition: >-
-      Joining workflows to tasks repeats each workflow row once per task, so a
-      plain count of workflows after such a join returns the number of tasks.
-      Always de-duplicate.
-    sql_fragment: "COUNT(DISTINCT workflows.id)"
-
-  - name: zero_task_workflows_need_left_join
-    definition: >-
-      Workflows with no tasks exist and are frequently the point of the
-      question. An INNER JOIN removes them. Use a LEFT JOIN and COUNT(tasks.id),
-      which correctly yields 0, rather than COUNT(*), which yields 1.
-    sql_fragment: >-
-      LEFT JOIN tasks ON tasks.workflow_id = workflows.id
-      GROUP BY workflows.id HAVING COUNT(tasks.id) = 0
-
-  - name: unassigned_users_need_left_join
-    definition: >-
-      Users with no assigned tasks are found with a LEFT JOIN and a NULL check,
-      or with NOT EXISTS. An INNER JOIN cannot express this.
-    sql_fragment: >-
-      LEFT JOIN tasks ON tasks.assigned_user_id = users.id
-      WHERE tasks.id IS NULL
-
-  - name: unassigned_tasks_are_nullable
-    definition: >-
-      tasks.assigned_user_id is nullable. When a question is about all tasks,
-      join to users with a LEFT JOIN so unassigned work is not silently dropped
-      from totals.
-    sql_fragment: "tasks.assigned_user_id IS NULL"
-
-  - name: completion_timestamp_consistency
-    definition: >-
-      completed_at is non-NULL exactly when status = 'COMPLETED'. The two tests
-      are equivalent; either is acceptable, but do not combine them in a way
-      that implies they can disagree.
-    sql_fragment: "tasks.completed_at IS NOT NULL"
-
-  - name: completed_this_month
-    definition: >-
-      Work finished in the current calendar month is filtered on completed_at,
-      not created_at, and anchored on the start of the month rather than a
-      rolling 30-day window.
-    sql_fragment: >-
-      tasks.completed_at >= date_trunc('month', CURRENT_DATE)
-      AND tasks.completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
-
-  - name: recent_workflow
-    definition: >-
-      A workflow is recent when it was created within the last 30 days. Use
-      created_at, not updated_at.
-    sql_fragment: "workflows.created_at >= CURRENT_DATE - INTERVAL '30 days'"
-
-  - name: active_operational_workflow
-    definition: >-
-      Operational reporting concerns workflows that are actually in use, which
-      excludes DRAFT and ARCHIVED. Apply this when a question says "active
-      workflows" or asks about live operational state.
-    sql_fragment: "workflows.status = 'ACTIVE'"
-
-  - name: overloaded_user
-    definition: >-
-      A user is overloaded when they carry more open tasks than the average
-      user carries. This is a relative measure, so it needs a comparison
-      against the average rather than a hard-coded threshold. Only assigned
-      work counts, and only open work counts.
-    sql_fragment: >-
-      COUNT(*) FILTER (WHERE tasks.status <> 'COMPLETED')
-      > (SELECT AVG(c) FROM (SELECT COUNT(*) AS c FROM tasks
-         WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
-         GROUP BY assigned_user_id) s)
-
-  - name: workflow_health
-    definition: >-
-      A workflow is "at risk" or "has overdue work" when at least one of its
-      tasks is overdue. The condition is existential over tasks, so the
-      workflow appears once regardless of how many overdue tasks it has.
-    sql_fragment: >-
-      EXISTS (SELECT 1 FROM tasks t WHERE t.workflow_id = workflows.id
-              AND t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED')
+      Initiative, Order, BO and Business Object are all the same TMS entity (tms_business_object_flat).
+    sql_fragment: "tms_business_object_flat"

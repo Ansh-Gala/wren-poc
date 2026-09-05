@@ -1,280 +1,152 @@
-# Semantic description of the demo schema.
-#
-# This is the single source of truth for the meaning of the data. It is
-# compiled into Wren model YAML (properties.description) by
-# wren_setup/build.py, and into knowledge/glossary and knowledge/caveats.
-#
-# Descriptions state BUSINESS MEANING and operational consequence, never a
-# restatement of the column name. "status = status of the user" teaches a model
-# nothing; "ACTIVE means the user may receive new task assignments" changes the
-# SQL it writes.
-
 data_source: postgres
 catalog: ""
 schema: public
 
 tables:
-
-  users:
+  tms_business_object_flat:
     description: >-
-      People who participate in the workflow system. A user can relate to work
-      in two distinct ways that must never be conflated: they may OWN a
-      workflow (accountable for the whole process, via workflows.owner_user_id)
-      and they may be ASSIGNED individual tasks (responsible for one unit of
-      work, via tasks.assigned_user_id). These are independent - a user may do
-      either, both, or neither.
-    primary_key: id
+      Flat TMS Business Object table containing business-object identity, business unit,
+      type, priority/color, due dates, buffers, workflow, process status, milestone and
+      task summary information. Also known as Initiative, Order, or BO.
+    primary_key: business_object_id
     columns:
-      id:
+      business_object_id:
         type: INTEGER
-        description: >-
-          Stable internal identifier for the user. Referenced by
-          workflows.owner_user_id and tasks.assigned_user_id. Never reused.
-      full_name:
+        description: Unique identifier of the Business Object / Initiative / Order / BO.
+      business_object_ref_id:
         type: VARCHAR
-        description: >-
-          The person's display name, as shown in the interface. This is the
-          value to match when a question names somebody, for example "workflows
-          owned by Alice". Not guaranteed unique in principle, though it is
-          unique in this dataset.
-      email:
+        description: Human-readable reference identifier of the Business Object.
+      business_unit:
         type: VARCHAR
-        description: >-
-          Work email address, unique across all users. Serves as the human-
-          readable natural key and the address for task notifications.
-      department:
+        description: Business unit associated with the Business Object.
+      business_object_type:
         type: VARCHAR
-        description: >-
-          Organisational unit the person belongs to: Engineering, Product,
-          Design, Operations or Finance. Used for grouping and for reporting
-          workload by team. It carries no permission meaning.
-      role:
+        description: Type of the Business Object (e.g. AR_YD_Suiting, AR_NPD_Shirting).
+      business_object_color:
         type: VARCHAR
-        description: >-
-          The user's permission level in the workflow system.
-          MANAGER: can create workflows and assign work to others.
-          MEMBER: can be assigned tasks and update their own work.
-          VIEWER: read-only access; a VIEWER is not normally given task
-          assignments. Role is about capability and is independent of whether
-          the person is currently available - that is what status records.
-      status:
+        description: Priority/color classification of the Business Object.
+      business_object_status:
         type: VARCHAR
-        description: >-
-          Represents the user's current availability in the workflow system.
-          ACTIVE: the user is available and may receive new task assignments.
-          INACTIVE: the user is unavailable and must not receive new
-          assignments; they may still appear as the assignee of historical
-          tasks and as the owner of existing workflows, so INACTIVE users must
-          not be filtered out of historical reporting unless the question asks
-          about availability. "Active user" always means status = 'ACTIVE'.
+        description: Business Object process status, mapped as Active, Closed, or Short Closed.
+      total_task_count:
+        type: BIGINT
+        description: Total number of tasks associated with the Business Object.
 
-  workflows:
+  tms_business_object_attributes_flat:
     description: >-
-      A repeatable business process made up of tasks. A workflow groups related
-      work and has exactly one accountable owner. Note that a workflow can
-      legitimately have zero tasks - newly drafted or archived processes often
-      do - so counting workflows by joining to tasks will silently drop them
-      unless a LEFT JOIN is used.
-    primary_key: id
+      Dynamic JSON attributes for the Business Object, such as season, category, quality, etc.
+    primary_key: business_object_id
     columns:
-      id:
+      business_object_id:
         type: INTEGER
-        description: >-
-          Stable internal identifier for the workflow. Referenced by
-          tasks.workflow_id.
-      name:
-        type: VARCHAR
-        description: >-
-          Human-readable name of the process, for example "Employee
-          Onboarding". This is the value to show when a question asks to
-          identify a workflow.
-      description:
-        type: VARCHAR
-        description: >-
-          Free-text explanation of what the process covers. Descriptive only;
-          it carries no structured meaning and should not be filtered on.
+        description: Unique identifier of the Business Object.
       category:
         type: VARCHAR
-        description: >-
-          The business area the workflow belongs to: HR, FINANCE, ENGINEERING,
-          QUALITY or MARKETING. Used to group processes by function. Distinct
-          from status, which is about lifecycle rather than subject matter.
-      status:
+        description: Category attribute for the Business Object.
+      season:
         type: VARCHAR
         description: >-
-          Lifecycle state of the workflow itself, not of its tasks.
-          ACTIVE: the process is in use and its tasks are being worked on.
-          DRAFT: the process is still being designed and is not yet in use.
-          ARCHIVED: the process is retired and should be excluded from
-          operational reporting unless explicitly requested.
-          An ACTIVE workflow may still contain completed tasks, and an ARCHIVED
-          workflow may still contain unfinished ones; workflow status says
-          nothing about the status of individual tasks.
-      owner_user_id:
-        type: INTEGER
+          Season attribute for the Business Object. Sparsely populated: only 16 of
+          307 rows have a value, and they all belong to the AR_NPD_YD_SALESPLAN,
+          AR_SALESPLAN_Shirting and AR_SALESPLAN_Suiting types.
+      quality:
+        type: VARCHAR
         description: >-
-          The user who is accountable for the workflow as a whole. Foreign key
-          to users.id. THIS IS THE WORKFLOW OWNER AND IS NOT THE SAME AS
-          tasks.assigned_user_id, which identifies the person doing one
-          specific task. A question about who is "responsible for", "owns" or
-          "runs" a workflow means this column. A question about who is "working
-          on", "assigned" or "doing" a task means tasks.assigned_user_id.
-      created_at:
-        type: TIMESTAMP
-        description: >-
-          When the workflow was first created. Used for "new" or "recent"
-          workflow questions and for ordering workflows by age.
-      updated_at:
-        type: TIMESTAMP
-        description: >-
-          When the workflow definition was last modified. Always greater than
-          or equal to created_at. This tracks changes to the process itself,
-          not activity on its tasks.
+          Quality attribute for the Business Object. Present in the view but NULL
+          for every row in this database, so no filter on it can return results.
 
-  tasks:
+  tms_task_flat:
     description: >-
-      An individual unit of work belonging to exactly one workflow, optionally
-      assigned to one user. Tasks carry both a lifecycle status and a due date,
-      and most operational questions combine the two - "overdue", for instance,
-      is a statement about both.
-    primary_key: id
+      Flat TMS task table containing task identity, assignment, status, dates, SLA/buffer,
+      workflow/process context, Business Object context, and task-related business fields.
+    primary_key: task_id
     columns:
-      id:
+      task_id:
         type: INTEGER
-        description: >-
-          Stable internal identifier for the task. Counting tasks means
-          COUNT(tasks.id).
-      workflow_id:
-        type: INTEGER
-        description: >-
-          The workflow this task belongs to. Foreign key to workflows.id.
-          Mandatory: every task belongs to exactly one workflow.
-      name:
+        description: Unique identifier of the task.
+      task_display_name:
+        type: VARCHAR
+        description: User-facing display name of the task.
+      task_status:
         type: VARCHAR
         description: >-
-          Short human-readable name of the unit of work, for example
-          "Provision laptop".
-      description:
+          Database status of the task, lowercase. Observed values: 'open', 'closed'.
+          This is the canonical status column -- use it for all filtering, grouping
+          and status breakdowns.
+      task_display_status:
         type: VARCHAR
         description: >-
-          Free-text detail about what the task involves. Descriptive only;
-          should not be filtered on.
-      status:
-        type: VARCHAR
-        description: >-
-          Current lifecycle state of the task.
-          TODO: the task has not been started.
-          IN_PROGRESS: the task is currently being worked on.
-          BLOCKED: the task cannot currently proceed because something external
-          is preventing it; blocked work is unfinished and still counts as open.
-          COMPLETED: the task has finished.
-          A task is "open", "unfinished" or "incomplete" when status is
-          anything other than 'COMPLETED' - that includes BLOCKED. Only
-          COMPLETED means finished.
-      priority:
-        type: VARCHAR
-        description: >-
-          Business urgency of the task, from lowest to highest: LOW, MEDIUM,
-          HIGH, CRITICAL. "High priority" in a business question means HIGH or
-          CRITICAL, not HIGH alone. Priority is stored as text, so ordering by
-          urgency requires explicit ranking rather than alphabetical sorting.
+          Capitalised presentation form of task_status ('Open', 'Closed'), for UI
+          display only. Do not filter or group by this column; use task_status.
       assigned_user_id:
         type: INTEGER
-        description: >-
-          The user responsible for performing this specific task. Foreign key
-          to users.id. NULLABLE - an unassigned task has NULL here, so any
-          count of work per user must decide deliberately whether to include
-          unassigned work. THIS IS THE TASK ASSIGNEE AND IS NOT THE SAME AS
-          workflows.owner_user_id.
-      due_date:
-        type: DATE
-        description: >-
-          The date by which the task should be finished. NULL for completed
-          tasks in this dataset, since a finished task no longer has a
-          deadline. A task is overdue when due_date is earlier than today AND
-          the task is not COMPLETED; a past due_date on a completed task is not
-          overdue.
-      completed_at:
-        type: TIMESTAMP
-        description: >-
-          When the task was actually finished. NULL exactly when the task is
-          not COMPLETED, and non-NULL exactly when it is - the two are
-          equivalent tests. Use this column, not created_at, for questions
-          about when work was finished.
-      created_at:
-        type: TIMESTAMP
-        description: >-
-          When the task record was created. Use for "newest"/"oldest" task
-          questions. Not to be confused with completed_at.
+        description: Unique identifier of the user assigned to the task.
+      assigned_user_name:
+        type: VARCHAR
+        description: Name of the user assigned to the task.
+      business_object_type:
+        type: VARCHAR
+        description: Type of the associated Business Object.
+      business_object_ref_id:
+        type: VARCHAR
+        description: Reference ID of the associated Business Object.
+      bo_id:
+        type: INTEGER
+        description: Foreign key to tms_business_object_flat.business_object_id.
+      display_flag:
+        type: INTEGER
+        description: Indicates whether the task is configured to be displayed.
+      task_sla_status:
+        type: VARCHAR
+        description: SLA status of the task (e.g. Delayed, On Time).
+
+  tms_user_flat:
+    description: Flat TMS user table containing user identity, roles and organizational information.
+    primary_key: user_id
+    columns:
+      user_id:
+        type: INTEGER
+        description: Unique identifier of the TMS user.
+      user_name:
+        type: VARCHAR
+        description: Full name of the TMS user.
+
+  tms_role_flat:
+    description: Flat TMS organizational role mapping table.
+    primary_key: role_dept_id
+    columns:
+      role_dept_id:
+        type: INTEGER
+        description: Unique identifier of the role/department mapping.
+      role:
+        type: VARCHAR
+        description: TMS role name.
+      department:
+        type: VARCHAR
+        description: Department associated with the role.
 
 relationships:
-  - name: workflows_owner
-    from: workflows.owner_user_id
-    to: users.id
+  - name: task_business_object
+    from: tms_task_flat.bo_id
+    to: tms_business_object_flat.business_object_id
     join_type: MANY_TO_ONE
     description: >-
-      The accountable owner of a workflow. Join through this to answer
-      questions about who owns, runs or is responsible for a process.
-  - name: tasks_workflow
-    from: tasks.workflow_id
-    to: workflows.id
-    join_type: MANY_TO_ONE
+      A task belongs to a Business Object.
+
+  - name: business_object_attributes
+    from: tms_business_object_attributes_flat.business_object_id
+    to: tms_business_object_flat.business_object_id
+    join_type: ONE_TO_ONE
     description: >-
-      The workflow a task belongs to. Every task has exactly one.
-  - name: tasks_assignee
-    from: tasks.assigned_user_id
-    to: users.id
-    join_type: MANY_TO_ONE
-    description: >-
-      The person performing a task. Optional - assigned_user_id may be NULL, so
-      joining tasks to users through this relationship with an INNER JOIN
-      silently discards unassigned tasks.
+      Attributes for a business object.
 
 terminology:
-  active user: A user whose status is 'ACTIVE'; they may receive new assignments.
-  inactive user: A user whose status is 'INACTIVE'; they may not receive new work.
-  open task: Any task whose status is not 'COMPLETED', including BLOCKED tasks.
-  unfinished work: Synonym for open task.
-  overdue task: An open task whose due_date is earlier than today.
-  blocked work: Tasks with status 'BLOCKED'; these are open, not finished.
-  high priority: Priority of 'HIGH' or 'CRITICAL'.
-  workflow owner: The user in workflows.owner_user_id, accountable for a process.
-  task assignee: The user in tasks.assigned_user_id, performing one task.
-  overloaded user: A user carrying an unusually high number of open tasks.
-  workload: The number of tasks assigned to a user, normally counting open ones.
+  business object: Also known as Initiative, Order, or BO. Represents a workflow process.
+  delayed task: A task whose elapsed duration exceeds its SLA buffer.
+  my tasks: Tasks assigned to the current user that are open and meant to be displayed.
 
 ambiguities:
-  - subject: owner versus assignee
-    note: >-
-      The single most common source of wrong SQL in this schema. "Who is
-      responsible for the Onboarding workflow?" means workflows.owner_user_id.
-      "Who is working on the laptop provisioning task?" means
-      tasks.assigned_user_id. A question mentioning both a workflow and a
-      person is ambiguous unless it says owner or assignee; prefer owner when
-      the sentence is about the workflow, assignee when it is about tasks.
-  - subject: workflow status versus task status
-    note: >-
-      Both tables have a status column with different value sets. An ACTIVE
-      workflow is not a workflow whose tasks are in progress; it is a process
-      that is in use. Qualify the column explicitly when both tables are joined.
-  - subject: counting after a join
-    note: >-
-      Joining workflows to tasks multiplies workflow rows by their task count.
-      COUNT(workflows.id) after such a join counts tasks, not workflows; use
-      COUNT(DISTINCT workflows.id). Conversely COUNT(*) on a LEFT JOIN counts 1
-      for a workflow with no tasks, so use COUNT(tasks.id) to get a true zero.
-  - subject: completed_at versus created_at
-    note: >-
-      Questions about when work finished use completed_at. Questions about when
-      work appeared use created_at. "Tasks completed this month" filters
-      completed_at, not created_at.
-  - subject: NULL assignee
-    note: >-
-      tasks.assigned_user_id is nullable. An INNER JOIN from tasks to users
-      drops unassigned tasks, which changes totals. Use a LEFT JOIN when the
-      question is about all tasks.
-  - subject: priority ordering
-    note: >-
-      priority is text, so ORDER BY priority sorts alphabetically
-      (BLOCKED-style nonsense: CRITICAL, HIGH, LOW, MEDIUM). Ranking by real
-      urgency needs an explicit CASE expression.
+  - subject: business object synonyms
+    note: Initiative, Order, BO, and Business Object all refer to tms_business_object_flat.
+  - subject: task assignment
+    note: Use assigned_user_id to check who is assigned to a task.
