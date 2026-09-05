@@ -24,6 +24,13 @@ SUITE_FILE = Path(__file__).resolve().parent / "lean_questions.yaml"
 # wrongly, and that would break on the next turn instead of this one.
 DECISIONS = ("new_block", "follow_up", "switch")
 
+# What the turn should produce.
+#   sql      -- a query (the default)
+#   clarify  -- the question cannot or should not be answered as asked, and the
+#               system should say so rather than guess. Without this the only
+#               way to score "should not guess" is to hope the model fails.
+BEHAVIOURS = ("sql", "clarify")
+
 
 @dataclass(frozen=True)
 class SuiteTurn:
@@ -36,6 +43,7 @@ class SuiteTurn:
     ordered: bool = False
     tags: list[str] = field(default_factory=list)
     expect_decision: str | None = None
+    expect_behavior: str = "sql"
     note: str | None = None
 
     @property
@@ -58,6 +66,9 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
     decision = raw.get("expect_decision")
     if decision is not None and decision not in DECISIONS:
         raise ValueError(f"{raw.get('id')}: expect_decision must be one of {DECISIONS}")
+    behavior = raw.get("expect_behavior", "sql")
+    if behavior not in BEHAVIOURS:
+        raise ValueError(f"{raw.get('id')}: expect_behavior must be one of {BEHAVIOURS}")
     sql = raw.get("expected_sql")
     return SuiteTurn(
         id=raw["id"],
@@ -69,6 +80,7 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
         ordered=bool(raw.get("ordered", False)),
         tags=list(raw.get("tags", []) or []),
         expect_decision=decision,
+        expect_behavior=behavior,
         note=raw.get("note"),
     )
 

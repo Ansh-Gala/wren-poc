@@ -144,3 +144,39 @@ def parse_sql(text: str) -> ParsedSQL:
             return ParsedSQL(sql=cleaned, strategy=name, raw=text)
 
     return ParsedSQL(sql=None, strategy="none", raw=text)
+
+
+# ------------------------------------------------------------- clarification --
+
+_CLARIFY_KEYS = ("clarify", "clarification", "question")
+
+
+def parse_clarification(text: str) -> str | None:
+    """The clarifying question the model asked, if it asked one.
+
+    A system that can only emit SQL has no way to say "which department did
+    you mean?", so it guesses, and a guess dressed as SQL is indistinguishable
+    from an answer. Allowing {"clarify": "..."} gives it somewhere to put the
+    doubt, which is what makes "should not guess" testable at all.
+
+    Only the structured form counts. Prose that happens to contain a question
+    mark is not a refusal to answer -- the model often explains itself while
+    still returning SQL, and treating that as a clarification would score a
+    confident wrong answer as correct restraint.
+    """
+    if not text:
+        return None
+    for match in re.finditer(r"\{.*?\}", text, re.DOTALL):
+        try:
+            obj = json.loads(match.group(0))
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if any(k in obj for k in ("sql", "SQL")):
+            return None  # it answered; that is not a clarification
+        for key in _CLARIFY_KEYS:
+            value = obj.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None

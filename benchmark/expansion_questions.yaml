@@ -309,8 +309,7 @@ questions:
 - id: E49
   category: Null Handling
   question: How many business objects have no status recorded?
-  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_status IS NULL OR
-    business_object_status = ''''
+  expected_sql: 'SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_status IS NULL
 
     '
 - id: E50

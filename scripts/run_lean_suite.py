@@ -65,6 +65,14 @@ def summarise(results, out_dir: Path) -> dict:
         "avg_context_chars": avg(lambda r: r.context_chars),
         "sql_generated": sum(1 for r in results if r.generated_sql),
         "sql_executed": sum(1 for r in results if r.execution_success),
+        "semantic_accuracy": sum(1 for r in results if r.semantic_match) / n * 100,
+        "hidden_semantic_failures": sum(
+            1 for r in results if r.result_match and not r.semantic_match),
+        "projection_exact": sum(1 for r in results if r.projection_verdict == "exact"),
+        "projection_superset": sum(1 for r in results if r.projection_verdict == "superset"),
+        "projection_missing": sum(1 for r in results if r.projection_verdict == "missing"),
+        "projection_substituted": sum(
+            1 for r in results if r.projection_verdict == "substituted"),
     }
 
     print("\n" + "=" * 66)
@@ -76,6 +84,15 @@ def summarise(results, out_dir: Path) -> dict:
     print(f"    context reset/switch   {s['context_reset_accuracy']:.1f}%  (n={s['context_reset_n']})")
     print(f"    turn classification    {s['decision_accuracy']:.1f}%  (n={s['decision_n']})")
     print(f"  sql generated / executed {s['sql_generated']}/{n}  {s['sql_executed']}/{n}")
+    print()
+    print(f"  SEMANTIC accuracy        {s['semantic_accuracy']:.1f}%   "
+          f"(right query, not just right rows)")
+    print(f"    right rows, wrong sql  {s['hidden_semantic_failures']}"
+          f"   <- hidden by result matching")
+    print(f"    projection exact       {s['projection_exact']}/{n}")
+    print(f"    projection superset    {s['projection_superset']}/{n}")
+    print(f"    projection missing     {s['projection_missing']}/{n}")
+    print(f"    projection substituted {s['projection_substituted']}/{n}")
     print()
     print(f"  avg prompt tokens        {s['avg_prompt_tokens']:>10,.0f}")
     print(f"  avg cache read tokens    {s['avg_cache_read_tokens']:>10,.0f}")
@@ -94,6 +111,14 @@ def summarise(results, out_dir: Path) -> dict:
         print()
         for r in failures:
             print(f"    {r.turn_id:<7} {r.failure_category:<24} {r.question[:44]}")
+
+    hidden = [r for r in results if r.result_match and not r.semantic_match]
+    if hidden:
+        print(f"\n  right rows but wrong query ({len(hidden)}):")
+        for r in hidden:
+            print(f"    {r.turn_id:<8} {r.question[:44]}")
+            for issue in r.semantic_issues[:3]:
+                print(f"       - {issue[:88]}")
 
     bad_decisions = [r for r in results if r.decision_match is False]
     if bad_decisions:
@@ -124,6 +149,8 @@ def main() -> int:
     ap.add_argument("--ids", default=None, help="conversation or turn ids, comma separated")
     ap.add_argument("--categories", default=None)
     ap.add_argument("--out", default="results/lean", help="output directory")
+    ap.add_argument("--suite", default=None,
+                    help="path to a suite yaml (default benchmark/lean_questions.yaml)")
     ap.add_argument("--config", default="D")
     ap.add_argument("--privacy", default="strict")
     ap.add_argument("--context-mode", default="state",
@@ -136,7 +163,7 @@ def main() -> int:
     register_secrets(settings.secrets())
     log = get_logger("run_lean_suite", settings.debug)
 
-    conversations = load_suite()
+    conversations = load_suite(Path(args.suite) if args.suite else None)
     if args.ids or args.categories:
         conversations = select(
             conversations,

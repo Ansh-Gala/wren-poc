@@ -26,7 +26,11 @@ tables:
         - unit1
       business_object_type:
         type: VARCHAR
-        description: Type of the Business Object (e.g. AR_YD_Suiting, AR_NPD_Shirting).
+        description: 'Type of the Business Object, e.g. AR_YD_Suiting, AR_NPD_Shirting. This is the canonical
+          column for the kind of item a question names: when a user says "AR_YD_Suiting items" or "TESTING_MG
+          items", filter on this column. Values are case-sensitive and include near-duplicates that are
+          genuinely distinct types (AR_YD_Shirting and AR_YD_SHIRTING). Do not substitute workflow_code
+          or workflow_name for it.'
       business_object_color:
         type: VARCHAR
         description: Priority/color classification of the Business Object.
@@ -70,7 +74,9 @@ tables:
         description: Identifier of the workflow associated with the Business Object.
       workflow_code:
         type: VARCHAR
-        description: Code of the workflow.
+        description: 'Code of the workflow attached to the Business Object. NOT a substitute for business_object_type:
+          it is NULL for 72 of 307 rows and differs from the type on 75, so filtering on it silently drops
+          rows. Use it only when the question is explicitly about the workflow rather than the item type.'
         values:
         - AR_NPD_Shirting
         - AR_NPD_Suiting
@@ -85,7 +91,8 @@ tables:
         - test
       workflow_name:
         type: VARCHAR
-        description: Name of the workflow. NULL for 72 rows.
+        description: Name of the workflow attached to the Business Object. NULL for 72 of 307 rows. Like
+          workflow_code, not a substitute for business_object_type.
         values:
         - AR_NPD_Shirting
         - AR_NPD_Suiting
