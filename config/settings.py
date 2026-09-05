@@ -43,6 +43,7 @@ class Settings:
     debug: bool = False
     
     llm_provider: str = "cli" # 'cli' or 'openai'
+    cli_lean: bool = False
     openai_api_key: str = field(repr=False, default="")
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o"
@@ -97,6 +98,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "WREN_MEMORY_BACKEND", "CLAUDE_CLI_COMMAND", "CLAUDE_MODEL",
         "CLAUDE_TIMEOUT_SECONDS", "BENCHMARK_CONFIG", "BENCHMARK_PRIVACY_MODE", "DEBUG",
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
+        "CLI_LEAN",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -123,6 +125,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         benchmark_privacy_mode=(g("BENCHMARK_PRIVACY_MODE") or "strict").strip().lower(),
         debug=_as_bool(g("DEBUG"), False),
         llm_provider=(g("LLM_PROVIDER") or "cli").strip().lower(),
+        cli_lean=_as_bool(g("CLI_LEAN"), False),
         openai_api_key=(
             g("GROQ_API_KEY") if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
             else g("GEMINI_API_KEY") if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"

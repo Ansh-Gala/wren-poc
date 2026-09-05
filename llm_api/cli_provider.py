@@ -49,6 +49,27 @@ def build_command(
     settings: Settings,
     session: Session | None = None,
 ) -> list[str]:
+    if settings.cli_lean:
+        # No MCP, no built-in tools, default system prompt replaced. One turn.
+        from claude.prompts import build_lean_system_prompt
+        cmd = [
+            settings.claude_command,
+            "-p",
+            build_user_prompt(question, session),
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--system-prompt",
+            build_lean_system_prompt(),
+            "--tools",
+            "",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+        if settings.claude_model:
+            cmd += ["--model", settings.claude_model]
+        return cmd
+
     cmd = [
         settings.claude_command,
         "-p",

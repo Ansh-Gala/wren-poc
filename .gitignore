@@ -8,7 +8,13 @@ __pycache__/
 wren_projects/
 
 # Benchmark output. latest.md is kept so results stay reviewable in-repo.
+# Both the top level and per-run subdirectories (results/<run-name>/...).
 results/*.json
 results/*.csv
 results/*.jsonl
 results/raw/
+results/**/*.json
+results/**/*.csv
+results/**/*.jsonl
+results/**/*.log
+results/**/raw/
