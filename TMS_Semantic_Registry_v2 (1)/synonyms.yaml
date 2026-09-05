@@ -1,0 +1,97 @@
+version: "2.1"
+
+entity_synonyms:
+  business_object:
+    canonical: "business_object"
+    table: "tms_business_object_flat"
+    terms:
+      - "business object"
+      - "business objects"
+      - "BO"
+      - "BOs"
+      - "initiative"
+      - "initiatives"
+      - "order"
+      - "orders"
+      - "business initiative"
+      - "TMS initiative"
+      - "TMS order"
+
+  task:
+    canonical: "task"
+    table: "tms_task_flat"
+    terms:
+      - "task"
+      - "tasks"
+      - "TMS task"
+      - "work item"
+      - "work items"
+      - "ticket"
+      - "tickets"
+      - "TMS ticket"
+
+  user:
+    canonical: "user"
+    table: "tms_user_flat"
+    terms:
+      - "user"
+      - "users"
+      - "employee"
+      - "employees"
+      - "assignee"
+      - "assigned user"
+
+  role:
+    canonical: "role"
+    table: "tms_role_flat"
+    terms:
+      - "role"
+      - "roles"
+      - "TMS role"
+
+business_terms:
+  my_tasks: ["my tasks", "my task", "tasks assigned to me", "my tickets", "my work"]
+  other_tasks: ["other tasks", "department tasks", "tasks in my department", "department task pool"]
+  delayed: ["delayed", "late", "tasks beyond SLA", "SLA breach", "crossed SLA"]   # -> task_sla_status = 'Delayed'
+  overdue: ["overdue", "past due", "late initiative", "late order", "overdue BO"]
+  not_started: ["not started", "upcoming task", "future task"]
+  followup: ["follow-up", "followup", "follow-up ticket", "followup ticket"]
+  current_ticket: ["current ticket", "current tickets", "active ticket"]
+
+field_synonyms:
+  business_object_ref_id:
+    - "BO number"
+    - "BO reference"
+    - "initiative number"
+    - "initiative reference"
+    - "order number"
+    - "order reference"
+  business_object_client_due_at:
+    - "client due date"
+    - "customer due date"
+    - "initiative due date"
+    - "order due date"
+    - "required client date"
+  assigned_user_id:
+    - "assigned user"
+    - "assignee"
+    - "task owner"
+  task_code:
+    - "ticket code"
+    - "task code"
+    - "ticket number"
+  workflow_code:
+    - "workflow code"
+  workflow_name:
+    - "workflow"
+    - "workflow name"
+
+# Attribute-level synonyms resolve to tms_business_object_attributes_flat,
+# joined on business_object_id. They are NOT columns of tms_business_object_flat.
+attribute_synonyms:
+  category: ["category", "product category"]
+  season: ["season"]
+  buyer: ["buyer"]
+  vendor: ["vendor"]
+  program: ["program"]
+  shade: ["shade"]

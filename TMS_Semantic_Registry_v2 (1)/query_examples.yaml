@@ -1,0 +1,91 @@
+version: "2.1"
+
+examples:
+  - question: "Show me Initiative 123"
+    semantic_resolution:
+      entity: "business_object"
+      table: "tms_business_object_flat"
+      filter: "business_object_ref_id = 123"
+
+  - question: "Show me Order 123"
+    semantic_resolution:
+      entity: "business_object"
+      table: "tms_business_object_flat"
+      filter: "business_object_ref_id = 123"
+
+  - question: "Show me BO 123"
+    semantic_resolution:
+      entity: "business_object"
+      table: "tms_business_object_flat"
+      filter: "business_object_ref_id = 123"
+
+  - question: "What is the client due date for Initiative 123?"
+    semantic_resolution:
+      entity: "business_object"
+      field: "business_object_client_due_at"
+      rule: "Use client due date, not system/buffered due date."
+
+  - question: "How many open tasks are in BO 123?"
+    semantic_resolution:
+      entity: "task"
+      table: "tms_task_flat"
+      relationship: "tms_task_flat.bo_id = tms_business_object_flat.business_object_id"
+      filter: "task status = open; BO reference = 123"
+      aggregation: "COUNT(task_id)"
+
+  - question: "How many initiatives have delayed tasks?"
+    semantic_resolution:
+      entity: "business_object"
+      source: "tms_task_flat"
+      aggregation: "COUNT(DISTINCT bo_id)"
+      rule: "Delayed means task_sla_status = 'Delayed'."
+
+  - question: "What are my current tasks?"
+    semantic_resolution:
+      entity: "task"
+      concept: "my_tasks"
+      required_context: "signed-in user ID, written as a literal integer"
+      rule: "Use the governed My Tasks eligibility rules."
+
+  - question: "What other tasks are available in my department?"
+    semantic_resolution:
+      entity: "task"
+      concept: "other_tasks"
+      required_context: "user department/sub-department"
+      rule: "Use departmental/sub-department task-pool logic."
+
+  - question: "Which tasks are delayed?"
+    semantic_resolution:
+      entity: "task"
+      concept: "delayed_task"
+      rule: "Filter task_sla_status = 'Delayed'; do not recompute from task_sla_hours."
+
+  - question: "Which tasks have not started?"
+    semantic_resolution:
+      entity: "task"
+      concept: "not_started_task"
+      rule: "task_start_at is in the future, or is_not_started_task is true."
+
+  - question: "Which initiatives are active?"
+    semantic_resolution:
+      entity: "business_object"
+      table: "tms_business_object_flat"
+      filter: "business_object_status = Active"
+
+  - question: "Which initiatives are short closed?"
+    semantic_resolution:
+      entity: "business_object"
+      table: "tms_business_object_flat"
+      filter: "business_object_status = Short Closed"
+
+  - question: "Which roles belong to the Sales department?"
+    semantic_resolution:
+      entity: "role"
+      table: "tms_role_flat"
+      filter: "department = Sales"
+
+  - question: "What is Amit's full name?"
+    semantic_resolution:
+      entity: "user"
+      table: "tms_user_flat"
+      note: "Use the user identifier/name information actually present in the flat table; do not invent additional user attributes."

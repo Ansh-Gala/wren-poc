@@ -1,0 +1,143 @@
+version: "2.1"
+domain: "TMS"
+
+# Verified against database arvind_retail_chatbot_test_1 on 2026-09-05.
+# v2.0 stated these rules in terms of the pre-flattening source columns
+# (assigned_uid, status, buffer_hrs, closed_on, next_followup, task_start_date).
+# None of those exist in the flat views. Every rule below now names a column
+# that is really there, and points at the derived column the view already
+# provides instead of asking for the logic to be recomputed.
+
+critical_rules:
+  entity_alias:
+    rule: "Initiative, Order, BO and Business Object are the same TMS entity."
+    table: "tms_business_object_flat"
+
+  task_business_object:
+    rule: "A task belongs to a Business Object through tms_task_flat.bo_id = tms_business_object_flat.business_object_id."
+    note: "tms_task_flat has no business_object_id column. The join key on the task side is bo_id."
+
+  my_tasks:
+    rule: >
+      My Tasks requires the signed-in user's ID and the TMS eligibility conditions:
+      assigned_user_id = signed-in user; task_status = 'open'; display_flag = 1;
+      task_start_at <= current/reference time; Business Object status = 'Active';
+      process is not short-closed; and task entity configuration is active.
+    warning: "Do not replace this with assigned_user_id != current user."
+    note: >
+      The flat view carries no session context, so the signed-in user's ID must be
+      supplied by the caller. Emit it as a literal integer. A named bind
+      placeholder such as :current_user_id is a PostgreSQL syntax error.
+
+  other_tasks:
+    rule: >
+      Other Tasks is a department/sub-department task-pool concept. It is fundamentally
+      different from My Tasks. Do not define it as merely tasks not assigned to the user.
+    scope: "user's department/sub-department"
+    columns: "tms_task_flat.task_department and tms_task_flat.task_sub_department; per-user mapping lives in tms_user_department_flat."
+
+  task_status:
+    rule: >
+      task_status holds the database status in lowercase ('open', 'closed').
+      task_display_status holds the capitalised display form ('Open', 'Closed').
+      Filter on task_status and match case exactly.
+    note: >
+      Boolean helpers is_open_task, is_closed_task and is_not_started_task are
+      already present and may be used instead of string comparison.
+
+  elapsed_task_days:
+    rule: >
+      Do not recompute elapsed duration. The view exposes task_elapsed_hours and
+      task_elapsed_days directly.
+    underlying:
+      closed: "task_closed_at - task_start_at"
+      open_started: "current/reference time - task_start_at"
+      not_started: "NULL"
+
+  delayed_task:
+    rule: "A task is delayed when task_sla_status = 'Delayed'. Observed values are 'On Time' and 'Delayed'."
+    underlying: "task_elapsed_hours exceeds task_sla_hours; the view has already applied this."
+    also_available: "is_delayed_open_task and is_delayed_closed_task hold 'Yes' or 'Not Applicable'."
+    warning: "Do not determine task delay from the Business Object client due date."
+
+  followup:
+    rule: >
+      next_followup_at > reference time means Followup Ticket.
+      next_followup_at <= reference time means current ticket.
+    also_available: "is_followup is a boolean already derived from this."
+
+  client_due_date:
+    rule: >
+      Client/actual due date is business_object_client_due_at in the flat Business Object
+      table. Do not confuse it with the system/buffered due date.
+
+  business_object_status:
+    rule: >
+      business_object_status in tms_business_object_flat is already resolved to text.
+      Filter on the text, not on the source code.
+    observed_values:
+      Active: 258
+      Closed: 42
+      "Short Closed": 1
+      "(no value)": 6
+    source_codes_for_reference_only:
+      "1": "Active"
+      "2": "Closed"
+      "80": "Short Closed"
+
+  business_object_priority:
+    field: "business_object_color"
+    rule: "Already resolved to a colour name in the flat view. Filter on the name."
+    observed_values:
+      Black: 196
+      Green: 95
+      White: 15
+      Red: 1
+    source_codes_for_reference_only:
+      a_bl: "Black"
+      b_re: "Red"
+      c_ye: "Yellow"
+      d_gr: "Green"
+
+  business_object_type:
+    rule: >
+      Values are case-sensitive and contain near-duplicates that are genuinely
+      different types: AR_YD_Shirting (52) and AR_YD_SHIRTING (2) both exist, as do
+      AR_PRINT_Shirting (49), AR_Print_Shirting (1) and AR_Printing_Shirting (2).
+      Match the exact string the user names; do not normalise case.
+
+  business_unit:
+    rule: >
+      Nearly all data is in a single business unit. Observed values: 'unit1' (306 rows)
+      and 'PVH' (1 row, business_object_id 23, type AR_NPD_YD_SHIRTING). Grouping or
+      filtering by business unit is close to a no-op on this database.
+
+  aggregation:
+    rule: >
+      tms_task_flat is at task grain. When counting Business Objects from task data,
+      use COUNT(DISTINCT bo_id) rather than COUNT(*).
+
+  dates:
+    rule: >
+      Date/time columns in the flat views are PostgreSQL timestamptz values, already
+      converted from the source epoch integers. Use them directly; do not call
+      to_timestamp() on them.
+    exception: >
+      Date-like attributes in tms_business_object_attributes_flat (end_date, pi_date,
+      csbd_date, request_receipt_date, assign_date, ex_mill_date) are stored as text
+      and need an explicit cast before date arithmetic.
+
+  dynamic_client_attributes:
+    rule: >
+      Client-specific attributes live in tms_business_object_attributes_flat, joined on
+      business_object_id. This view exists in the current database; v2.0 wrongly
+      described it as a planned extension.
+    warning: >
+      Coverage is uneven. quality is NULL for all 307 rows, and season is populated for
+      only 16. Confirm an attribute has data before filtering on it, and do not assume
+      an attribute registered for one client exists for another.
+
+  read_only:
+    rule: >
+      AI-generated SQL must be read-only. Never generate INSERT, UPDATE, DELETE, DROP,
+      ALTER, TRUNCATE, CREATE, GRANT, REVOKE or other data/schema mutation statements.

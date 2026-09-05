@@ -1,0 +1,110 @@
+version: "2.1"
+domain: "TMS"
+
+canonical_entities:
+  business_object:
+    name: "Business Object"
+    synonyms: ["Business Object", "BO", "Initiative", "Order"]
+    table: "tms_business_object_flat"
+    key: "business_object_id"
+    reference_key: "business_object_ref_id"
+    rule: >
+      Business Object, BO, Initiative, and Order refer to the same top-level TMS entity.
+      Do not treat them as separate entities.
+
+  task:
+    name: "Task"
+    synonyms: ["Task", "TMS Task", "Work Item", "Ticket", "TMS Ticket"]
+    table: "tms_task_flat"
+    key: "task_id"
+
+  user:
+    name: "User"
+    synonyms: ["User", "TMS User", "Employee", "Assignee"]
+    table: "tms_user_flat"
+    key: "user_id"
+
+  role:
+    name: "Role"
+    synonyms: ["Role", "TMS Role", "Organizational Role"]
+    table: "tms_role_flat"
+    key: "role_dept_id"
+
+core_business_terms:
+  my_tasks:
+    definition: >
+      Tasks assigned to the logged-in user that satisfy the TMS My Task eligibility rules:
+      assigned_user_id = signed-in user, task_status = 'open', display_flag = 1, task_start_at
+      has been reached, related Business Object is active, process is not short-closed,
+      and task entity configuration is active.
+  other_tasks:
+    definition: >
+      Department/sub-department task pool used to view departmental work and identify
+      tasks available for the user to pick or assign. It must not be interpreted simply
+      as tasks not assigned to the current user.
+  open_task:
+    definition: "A task whose database task status is open."
+  closed_task:
+    definition: "A task whose database task status is closed."
+  not_started_task:
+    definition: >
+      A task whose task_start_at is in the future. A task may have task_status 'open'
+      but still display as Not Started. The derived boolean is_not_started_task is
+      already available.
+  delayed_task:
+    definition: >
+      A task where task_sla_status = 'Delayed'. The view has already compared
+      task_elapsed_hours against task_sla_hours. This is a task-level SLA/buffer
+      concept and is not the same as an overdue Business Object.
+  followup_ticket:
+    definition: >
+      A task where next_followup_at is later than the reference/current time.
+      The derived boolean is_followup is already available.
+  current_ticket:
+    definition: >
+      A task where next_followup_at is less than or equal to the reference/current time.
+  client_due_date:
+    definition: >
+      The actual client/customer-required due date of the Business Object. Use
+      business_object_client_due_at / the flat-table client due-date column for client
+      due-date questions. Do not confuse it with the system/buffered due date.
+  business_object_status:
+    note: >
+      Already text in the flat view. Filter on 'Active', 'Closed' or 'Short Closed';
+      the codes below are source values and are NOT present in tms_business_object_flat.
+    source_codes_for_reference_only:
+      "1": "Active"
+      "2": "Closed"
+      "80": "Short Closed"
+  business_object_priority:
+    note: >
+      business_object_color is already a colour name in the flat view. Observed values:
+      Black, Green, White, Red. The codes below are source values and are NOT present.
+    source_codes_for_reference_only:
+      "a_bl": "Black"
+      "b_re": "Red"
+      "c_ye": "Yellow"
+      "d_gr": "Green"
+
+terminology_rules:
+  - "Initiative = Order = BO = Business Object."
+  - "Task and Business Object are different levels of information."
+  - "Assigned to me means the task is assigned to the logged-in user."
+  - "Available in my department means departmental/sub-department task-pool context."
+  - "Task delayed means SLA/buffer elapsed-time breach, not simply a client due-date breach."
+  - "Client due date is different from system/buffered due date."
+
+# Entities added in 2.1: both views exist in the current database.
+additional_entities:
+  business_object_attributes:
+    name: "Business Object Attributes"
+    table: "tms_business_object_attributes_flat"
+    key: "business_object_id"
+    rule: >
+      Client-specific attributes such as category and season. Join on business_object_id.
+      Coverage is uneven: quality is NULL for all rows, season for all but 16.
+  user_department:
+    name: "User Department"
+    table: "tms_user_department_flat"
+    key: "user_id"
+    rule: "Maps a user to department and sub-department. Use for 'my department' questions."

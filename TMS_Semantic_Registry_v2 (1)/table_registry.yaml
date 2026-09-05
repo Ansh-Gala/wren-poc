@@ -1,0 +1,202 @@
+version: "2.1"
+domain: "TMS"
+
+# Verified against database arvind_retail_chatbot_test_1 on 2026-09-05.
+# Every column below was read from information_schema; nothing is inferred.
+# v2.0 described the pre-flattening source columns (assigned_uid, status,
+# buffer_hrs, tkt_code, ...). The flat views expose different, already-derived
+# names, so those entries were replaced rather than kept alongside.
+
+tables:
+  tms_task_flat:
+    grain: "One row per task"
+    row_count_observed: 3354
+    description: >
+      Flat TMS task table containing task identity, assignment, status, dates, SLA,
+      department context, and denormalised Business Object context. Date/time columns
+      are PostgreSQL timestamptz values, already converted from the source epoch
+      integers -- do not wrap them in to_timestamp().
+    primary_key: "task_id"
+    relationship_to_business_object:
+      local_key: "bo_id"
+      remote_table: "tms_business_object_flat"
+      remote_key: "business_object_id"
+      cardinality: "many_to_one"
+    columns:
+      task_id: "Unique identifier of the task."
+      task_code: "Human-readable ticket/task code."
+      task_machine_code: "Machine-readable task code."
+      task_display_name: "User-facing display name of the task."
+      task_status: "Database status of the task. Observed values: 'open', 'closed' (lowercase)."
+      task_display_status: "Display status of the task. Observed values: 'Open', 'Closed' (capitalised)."
+      is_open_task: "Boolean flag, true when the task is open."
+      is_closed_task: "Boolean flag, true when the task is closed."
+      is_not_started_task: "Boolean flag, true when the task has not started."
+      display_flag: "1 when the task is configured to be displayed, 0 when hidden."
+      instant_closer: "Indicates whether instant closure is configured for the task."
+      reopen_count: "Number of times the task has been reopened."
+      assigned_user_id: "Identifier of the user assigned to the task. Never NULL in this database."
+      assigned_user_name: "Name of the user assigned to the task."
+      assigned_role: "Role to which the task is assigned."
+      task_sub_department: "Sub-department associated with the task."
+      task_department: "Department associated with the task."
+      created_at: "Timestamp when the task was created."
+      task_start_at: "Timestamp when the task was scheduled to start."
+      task_assigned_at: "Timestamp when the task was assigned."
+      task_closed_at: "Timestamp when the task was closed."
+      task_reopen_at: "Timestamp when the task was reopened."
+      next_followup_at: "Timestamp of the next follow-up."
+      is_followup: "Boolean flag, true when the task is a follow-up ticket."
+      task_sla_hours: "Allowed task duration / SLA buffer, in hours."
+      task_elapsed_hours: "Elapsed task duration in hours, already calculated by the view."
+      task_elapsed_days: "Elapsed task duration in days, already calculated by the view."
+      is_delayed_open_task: "'Yes' when an open task has breached SLA, else 'Not Applicable'."
+      is_delayed_closed_task: "'Yes' when a closed task breached SLA, else 'Not Applicable'."
+      task_sla_status: "Pre-computed SLA verdict. Observed values: 'On Time', 'Delayed'. Prefer this over recomputing elapsed vs task_sla_hours."
+      bo_id: "Foreign key to tms_business_object_flat.business_object_id."
+      business_object_ref_id: "Reference identifier of the parent Business Object."
+      business_unit: "Business unit of the parent Business Object."
+      business_object_status: "Status of the parent Business Object, as text."
+      business_object_type: "Type of the parent Business Object."
+      business_object_color: "Priority/colour of the parent Business Object."
+      is_business_object_delayed: "Indicates whether the parent Business Object is delayed."
+
+  tms_business_object_flat:
+    grain: "One row per Business Object / Initiative / Order / BO"
+    row_count_observed: 307
+    description: >
+      Flat TMS Business Object table containing identity, business unit, type,
+      priority/colour, due dates, buffers, workflow, process status, milestone and
+      task summary information.
+    primary_key: "business_object_id"
+    synonyms: ["Business Object", "BO", "Initiative", "Order"]
+    relationship_to_task:
+      remote_table: "tms_task_flat"
+      remote_key: "bo_id"
+      cardinality: "one_to_many"
+    columns:
+      business_object_id: "Unique identifier of the Business Object / Initiative / Order / BO."
+      business_object_ref_id: "Human-readable reference identifier of the Business Object."
+      business_unit: "Business unit associated with the Business Object. Observed values: 'unit1' (306 rows), 'PVH' (1 row)."
+      business_object_type: "Type of the Business Object, e.g. AR_YD_Suiting, AR_NPD_YD_SHIRTING. Values are case-sensitive and near-duplicates exist (AR_YD_Shirting vs AR_YD_SHIRTING)."
+      business_object_color: "Priority/colour classification, already resolved to a name. Observed values: 'Black', 'Green', 'White', 'Red'."
+      business_object_note: "Business note or remark associated with the Business Object."
+      business_object_created_at: "Timestamp when the Business Object was created."
+      business_object_updated_at: "Timestamp when the Business Object was last updated."
+      business_object_client_due_at: "Client/customer-required due date. Not the system/buffered due date."
+      common_buffer: "Common buffer associated with the Business Object."
+      buff_penetration_prcnt: "Percentage of buffer penetration."
+      buff_penetration_days: "Buffer penetration expressed in days."
+      total_remaining_duration: "Total remaining duration for the Business Object."
+      days_to_due_date: "Days remaining until the due date; negative means the due date has passed."
+      hold_days: "Number of days the Business Object has been on hold."
+      workflow_id: "Identifier of the workflow associated with the Business Object."
+      workflow_code: "Code of the workflow."
+      workflow_name: "Name of the workflow. NULL for 72 rows."
+      business_object_status: "Process status, already resolved to text. Observed values: 'Active' (258), 'Closed' (42), 'Short Closed' (1), plus 6 rows with no value."
+      business_object_start_date: "Start timestamp of the Business Object process."
+      business_object_end_date: "End timestamp of the Business Object process."
+      elapsed_days: "Elapsed duration of the process in days."
+      business_object_expected_completion_date: "Expected completion date based on remaining duration."
+      short_closed_by: "User who short-closed the Business Object."
+      short_closed_on: "Timestamp when the Business Object was short-closed."
+      current_active_milestone: "Current active milestone."
+      current_milestone_delay_days: "Days the current active milestone is delayed."
+      current_milestone_expected_completion: "Expected completion of the current active milestone."
+      total_task_count: "Total number of tasks associated with the Business Object."
+      open_task_count: "Number of open tasks associated with the Business Object."
+      closed_task_count: "Number of closed tasks associated with the Business Object."
+      delayed_task_count: "Number of delayed tasks associated with the Business Object."
+      open_tasks_list: "List of open task names associated with the Business Object."
+
+  tms_business_object_attributes_flat:
+    grain: "One row per Business Object"
+    row_count_observed: 307
+    description: >
+      Client-specific Business Object attributes, one column per registered attribute.
+      This IS a real view in the current database, contrary to v2.0 which described it
+      as a planned extension. Every attribute column is typed text and most are sparsely
+      populated, so filters on them frequently return nothing. Check coverage before use.
+    primary_key: "business_object_id"
+    relationship_to_business_object:
+      local_key: "business_object_id"
+      remote_table: "tms_business_object_flat"
+      remote_key: "business_object_id"
+      cardinality: "one_to_one"
+    data_coverage_warning:
+      quality: "NULL for all 307 rows. No filter on quality can return results."
+      season: "Populated for only 16 of 307 rows, all of the AR_NPD_YD_SALESPLAN, AR_SALESPLAN_Shirting and AR_SALESPLAN_Suiting types. Observed values: Winter (5), Autumn (4), S6002 (3), Summer (2), Dummy01 (1), S6010 (1)."
+      category: "Populated for all 307 rows. Dominated by 'Shirting' (192) and 'Suiting' (94); tracks the business_object_type name closely."
+    columns:
+      business_object_id: "Foreign key to tms_business_object_flat.business_object_id."
+      category: "Category attribute."
+      initiative_type: "Initiative type attribute."
+      end_date: "End date attribute, stored as text."
+      season: "Season attribute."
+      program: "Program attribute."
+      request_receipt_date: "Request receipt date attribute, stored as text."
+      pi_date: "PI date attribute, stored as text."
+      stage: "Stage attribute."
+      data_color: "Colour attribute recorded on the Business Object data."
+      brandix_t_a: "Brandix T&A attribute."
+      csbd_date: "CSBD date attribute, stored as text."
+      batch_no: "Batch number attribute."
+      item_code: "Item code attribute."
+      volume: "Volume attribute."
+      event: "Event attribute."
+      channel: "Channel attribute."
+      vendor: "Vendor attribute."
+      total_qty: "Total quantity attribute."
+      moq: "Minimum order quantity attribute."
+      number_of_options: "Number of options attribute."
+      count: "Count attribute. Quote this identifier in SQL; it collides with the COUNT function."
+      merchant_name: "Merchant name attribute."
+      person: "Person attribute."
+      assign_date: "Assign date attribute, stored as text."
+      quality: "Quality attribute. NULL for every row in this database."
+      buyer: "Buyer attribute."
+      mcode_won_number: "MCode/WON number attribute."
+      ex_mill_date: "Ex-mill date attribute, stored as text."
+      garment_desc: "Garment description attribute."
+      matching_instruction: "Matching instruction attribute."
+      fabric_description: "Fabric description attribute."
+      dye_part: "Dye part attribute."
+      shade: "Shade attribute."
+      internal_or_confirmed: "Internal-or-confirmed attribute."
+      division: "Division attribute."
+      style_or_garment_code: "Style or garment code attribute."
+
+  tms_user_flat:
+    grain: "One row per user"
+    row_count_observed: 63
+    description: "Flat TMS user table containing user identity and role/department counts."
+    primary_key: "user_id"
+    columns:
+      user_id: "Unique identifier of the TMS user."
+      user_name: "Full name of the TMS user."
+      role_count: "Number of roles mapped to the user."
+      department_count: "Number of departments mapped to the user."
+
+  tms_user_department_flat:
+    grain: "One row per user/department mapping"
+    row_count_observed: 160
+    description: >
+      Flat mapping of users to departments and sub-departments. Use this, not
+      tms_user_flat, when a question needs a user's department. Absent from v2.0.
+    columns:
+      user_id: "Identifier of the TMS user."
+      user_name: "Full name of the TMS user."
+      department: "Department associated with the user."
+      sub_department: "Sub-department associated with the user."
+
+  tms_role_flat:
+    grain: "One row per role/department mapping"
+    row_count_observed: 21
+    description: "Flat TMS organizational role mapping table."
+    primary_key: "role_dept_id"
+    columns:
+      role_dept_id: "Unique identifier of the role/department mapping."
+      role: "TMS role name."
+      department: "Department associated with the role."
+      sub_department: "Sub-department associated with the role."
+      department_path: "Full department/sub-department path for the role."

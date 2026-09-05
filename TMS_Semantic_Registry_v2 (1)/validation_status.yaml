@@ -1,0 +1,36 @@
+version: "2.1"
+status: "verified_against_live_database"
+
+verified_against:
+  database: "arvind_retail_chatbot_test_1"
+  date: "2026-09-05"
+  method: "every table and column checked against information_schema; value domains and NULL coverage profiled from the data"
+
+confirmed:
+  - "Six flat views exist, not four."
+  - "Business Object, Initiative, Order and BO are synonyms."
+  - "Tasks join to Business Objects on tms_task_flat.bo_id = tms_business_object_flat.business_object_id."
+  - "My Tasks uses the governed signed-in-user eligibility rules."
+  - "Other Tasks is department/sub-department based."
+  - "Current active milestone fields exist in tms_business_object_flat."
+  - "Client due date is business_object_client_due_at."
+  - "tms_business_object_attributes_flat is a real view with 307 rows."
+
+corrected_in_2_1:
+  - "tms_task_flat: 22 documented columns did not exist; 31 real columns were undocumented."
+  - "tms_user_flat: primary key and all three documented columns were wrong."
+  - "tms_business_object_flat: open_task_list -> open_tasks_list."
+  - "tms_role_flat: department_path was missing."
+  - "tms_business_object_attributes_flat and tms_user_department_flat were absent."
+  - "Flat-view date columns are timestamptz, not Unix epoch."
+  - "business_object_status and business_object_color are already text, not source codes."
+
+known_data_limits:
+  - "quality is NULL for all 307 business objects."
+  - "season is populated for only 16 of 307, all SALESPLAN types."
+  - "business_unit is 'unit1' for 306 of 307 rows; 'PVH' has exactly one."
+  - "business_object_type contains case-variant near-duplicates that are distinct types."
+
+source_note: >
+  Column definitions follow the live schema of arvind_retail_chatbot_test_1 as read on
+  2026-09-05, superseding the four-table schema assumed by v2.0.
