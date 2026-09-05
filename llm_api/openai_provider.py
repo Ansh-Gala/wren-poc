@@ -86,7 +86,9 @@ class OpenAIProvider(LLMProvider):
             
             messages: list[ChatCompletionMessageParam] = [
                 {"role": "system", "content": build_system_prompt()},
-                {"role": "user", "content": build_user_prompt(question, session)}
+                {"role": "user", "content": build_user_prompt(
+                    question, session,
+                    context=session.context_block if session else None)}
             ]
             
             tools_used = []

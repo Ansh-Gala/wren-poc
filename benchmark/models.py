@@ -123,3 +123,7 @@ class Turn:
 class Session:
     session_id: str
     turns: list[Turn] = field(default_factory=list)
+    # Rendered by benchmark.context. When set, providers send this instead of
+    # replaying `turns`, which keeps prompt size flat across a long thread.
+    context_block: str | None = None
+    lean: bool = False
