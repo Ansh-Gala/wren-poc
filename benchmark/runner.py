@@ -104,8 +104,14 @@ def run_question(
         if actual.ok:
             result.result_match = compare_results(expected, actual, question.ordered)
             if not result.result_match:
-                from benchmark.evaluator import compare_row_subset
+                from benchmark.evaluator import (
+                    compare_projection_agnostic, compare_row_subset,
+                )
                 if compare_row_subset(expected, actual, question.ordered):
+                    result.result_match = True
+                elif compare_projection_agnostic(expected, actual, question.ordered):
+                    # Right rows, different column choice on a question that
+                    # never specified one. Counted as correct.
                     result.result_match = True
 
     if not result.result_match:

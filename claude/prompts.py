@@ -79,3 +79,46 @@ def build_user_prompt(question: str, session: Session | None = None) -> str:
     prompt += f"Question: {question}\n\n"
     prompt += "Consult Wren, then reply with only the JSON object containing the SQL that answers this question."
     return prompt
+
+
+# ---------------------------------------------------------------- lean mode
+# The MCP path costs ~6.6 tool round-trips and ~30k of context per question,
+# almost all of it Claude Code's default system prompt and built-in tool
+# definitions. The whole semantic layer is 2,443 tokens, so inlining it and
+# running a single turn is far cheaper than fetching it on demand.
+#
+# Used with `--system-prompt` (replaces the default rather than appending) and
+# `--tools ""` (drops the built-in tool definitions from context).
+
+LEAN_SYSTEM_PROMPT = """You generate read-only SQL for a PostgreSQL TMS analytics database.
+
+Use ONLY the tables and columns in the schema below. Never invent a table or
+column name. Apply the business rules exactly as written -- they define what
+terms like "active", "open", "delayed" and "my tasks" mean in SQL.
+
+Rules for your answer:
+
+1. Target PostgreSQL. Write a single read-only SELECT (a leading WITH is fine).
+   No INSERT, UPDATE, DELETE or DDL.
+2. Return the columns the question actually asks for.
+3. Do NOT execute the query and do not report or invent results.
+4. Reply with ONE JSON object and nothing else, in this exact shape:
+
+   {"sql": "SELECT ..."}
+
+   No prose before or after it, no markdown fence.
+
+# SCHEMA AND SEMANTICS
+"""
+
+
+def build_lean_system_prompt() -> str:
+    """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined."""
+    from pathlib import Path
+    meta_dir = Path(__file__).resolve().parents[1] / "metadata"
+    parts = [
+        (meta_dir / name).read_text(encoding="utf-8")
+        for name in ("schema_description.yaml", "business_rules.yaml",
+                     "question_sql_pairs.yaml")
+    ]
+    return LEAN_SYSTEM_PROMPT + chr(10).join(parts)
