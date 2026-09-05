@@ -22,14 +22,21 @@ SUITE_FILE = Path(__file__).resolve().parent / "lean_questions.yaml"
 # What the session layer should decide for a turn. Asserted alongside the SQL,
 # because a thread can produce the right answer while classifying the turn
 # wrongly, and that would break on the next turn instead of this one.
-DECISIONS = ("new_block", "follow_up", "switch")
+DECISIONS = ("new_block", "follow_up", "switch", "rebase")
 
 # What the turn should produce.
 #   sql      -- a query (the default)
 #   clarify  -- the question cannot or should not be answered as asked, and the
 #               system should say so rather than guess. Without this the only
 #               way to score "should not guess" is to hope the model fails.
-BEHAVIOURS = ("sql", "clarify")
+#   zero_or_clarify
+#            -- the question names a value the column does not have (colour
+#               "Purple", unit "unit9"). Two answers are defensible: run the
+#               query and return nothing, or point out that the value does not
+#               exist. Both are accepted. What is not accepted is substituting
+#               a value that does exist in order to return rows, which is how
+#               "no results" silently becomes a confident wrong answer.
+BEHAVIOURS = ("sql", "clarify", "zero_or_clarify")
 
 
 @dataclass(frozen=True)

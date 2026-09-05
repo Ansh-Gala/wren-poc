@@ -221,8 +221,17 @@ def classify_turn(
 
     Returns (decision, entity) where decision is one of:
       new_block  -- unrelated subject, or the user said so outright
-      switch     -- a different known entity, so the old filters are stale
+      switch     -- a different subject, stated in full, so the old state goes
+      rebase     -- a different subject named elliptically ("what about X?"),
+                    which swaps the subject but keeps the question's shape
       follow_up  -- refines what is already on the table
+
+    The distinction between switch and rebase matters. "Show AR_NPD_Shirting
+    items" after filtering the previous subject to Active is a fresh request
+    and must not inherit Active. "What about AR_PD_Suiting?" after "how many
+    delayed tasks?" is the same question about a different subject, and
+    discarding the state leaves nothing to answer -- the system can only ask
+    what was meant, which is what it did before this case was separated out.
 
     Done without an LLM call on purpose. The signals are unambiguous enough to
     decide deterministically, and a model call here would cost more than the
@@ -238,8 +247,14 @@ def classify_turn(
 
     # A different subject invalidates the filters that were narrowing the old
     # one. "Show AR_NPD_Shirting items" after AR_YD_Suiting is a new subject,
-    # even mid-conversation.
+    # even mid-conversation -- unless it arrives elliptically, in which case
+    # only the subject changes and everything else was meant to carry.
     if named and state.active_entity and named != state.active_entity:
+        # Only the elliptical form rebases. Length is not the discriminator:
+        # "Show AR_NPD_Shirting items" is four words and still a complete
+        # request that carries its own shape, so it starts clean.
+        if _ELLIPTICAL.match(question):
+            return "rebase", named
         return "switch", named
     if named and not state.active_entity:
         return "follow_up", named
@@ -283,6 +298,13 @@ def update_state(
     """
     if decision in ("new_block", "switch"):
         state.reset()
+    elif decision == "rebase":
+        # Keep the shape, drop only what identified the old subject.
+        state.active_filters = {
+            col: pred for col, pred in state.active_filters.items()
+            if state.active_entity is None or state.active_entity not in pred
+        }
+        state.turns_in_block = 0
 
     if entity:
         state.active_entity = entity

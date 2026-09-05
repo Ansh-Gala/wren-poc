@@ -169,7 +169,11 @@ STANDALONE: list[tuple] = [
     ("E44", "Cross Dimension", "Which users belong to more than one department?",
      "SELECT user_id, user_name, department_count FROM tms_user_flat WHERE department_count > 1",
      False, False),
-    ("E47", "Cross Dimension", "Which business objects have delayed tasks?",
+    # "have delayed tasks" was ambiguous: delayed_task_count counts open delayed
+    # tasks (245 BOs), while joining on task_sla_status counts closed breaches
+    # too (260). Say which is meant.
+    ("E47", "Cross Dimension",
+     "Which business objects have delayed tasks still open?",
      f"SELECT business_object_id, delayed_task_count FROM {BO} WHERE delayed_task_count > 0",
      False, False),
     ("E48", "Join", "How many AR_YD_Suiting items have a vendor?",
@@ -199,7 +203,9 @@ STANDALONE: list[tuple] = [
      f"SELECT COUNT(*) FROM {AT} WHERE quality IS NOT NULL", False, True),
     ("E58", "Empty Result", "How many tasks have not started yet?",
      f"SELECT COUNT(*) FROM {TK} WHERE is_not_started_task", False, True),
-    ("E59", "Distinct", "How many different departments are there?",
+    # "different departments" could mean the task departments or the ones in
+    # tms_role_flat, and the model reasonably picked the other. Name the domain.
+    ("E59", "Distinct", "How many different departments do tasks belong to?",
      f"SELECT COUNT(DISTINCT task_department) FROM {TK}", False, False),
 ]
 
