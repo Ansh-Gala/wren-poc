@@ -1,0 +1,14 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated Wren projects (rebuild with scripts/setup_demo.py)
+wren_projects/
+
+# Benchmark output. latest.md is kept so results stay reviewable in-repo.
+results/*.json
+results/*.csv
+results/*.jsonl
+results/raw/

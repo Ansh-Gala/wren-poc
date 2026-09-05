@@ -1,0 +1,119 @@
+{
+  "summary": {
+    "prompt_tokens_avg": 14781,
+    "prompt_tokens_max": 14781,
+    "prompt_tokens_total": 14781,
+    "completion_tokens_avg": 190,
+    "cache_read_tokens_total": 0,
+    "cache_write_tokens_total": 0,
+    "wren_tool_calls_avg": 5.0,
+    "questions_without_wren": 0,
+    "total": 1,
+    "sql_generated": 1,
+    "sql_executable": 1,
+    "result_match": 1,
+    "sql_generation_pct": 100.0,
+    "execution_success_pct": 100.0,
+    "result_accuracy_pct": 100.0,
+    "by_category": {
+      "L": {
+        "total": 1,
+        "sql_generated": 1,
+        "execution_success": 1,
+        "result_match": 1,
+        "result_accuracy_pct": 100.0
+      }
+    },
+    "failure_categories": {},
+    "heuristic_failure_count": 0,
+    "tools_used": {
+      "mcp__wren__recall_queries": 1,
+      "mcp__wren__list_models": 1,
+      "mcp__wren__get_instructions": 1,
+      "mcp__wren__describe_model": 1,
+      "mcp__wren__dry_plan": 1
+    },
+    "median_total_ms": 79427.5397999445,
+    "total_wall_ms": 79427.5397999445,
+    "total_cost_note": "see latest.json records for per-question timings",
+    "configs": [
+      "D"
+    ],
+    "privacy_modes": [
+      "strict"
+    ],
+    "generated_at": "2026-09-05T11:53:41+00:00"
+  },
+  "results": [
+    {
+      "question_id": "L01",
+      "category": "L",
+      "question": "Which tasks are due today and not yet finished?",
+      "expected_sql": "SELECT name FROM tasks\nWHERE due_date = CURRENT_DATE AND status <> 'COMPLETED'",
+      "generated_sql": "SELECT id, name, status, priority, due_date\nFROM tasks\nWHERE due_date = CURRENT_DATE\n  AND status <> 'COMPLETED'\nORDER BY id",
+      "sql_valid": true,
+      "execution_success": true,
+      "result_match": true,
+      "expected_result": {
+        "columns": [
+          "name"
+        ],
+        "row_count": 1,
+        "rows": [
+          [
+            "Sign off staging validation"
+          ]
+        ],
+        "truncated": false
+      },
+      "actual_result": {
+        "columns": [
+          "id",
+          "name",
+          "status",
+          "priority",
+          "due_date"
+        ],
+        "row_count": 1,
+        "rows": [
+          [
+            43,
+            "Sign off staging validation",
+            "TODO",
+            "HIGH",
+            "2026-09-05"
+          ]
+        ],
+        "truncated": false
+      },
+      "claude_time_ms": 73891.4496001089,
+      "sql_execution_time_ms": 148.96579994820058,
+      "total_time_ms": 79427.5397999445,
+      "error": null,
+      "failure_category": null,
+      "prompt_tokens": 14781,
+      "completion_tokens": 190,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "parse_strategy": "json",
+      "tools_used": [
+        "mcp__wren__recall_queries",
+        "mcp__wren__list_models",
+        "mcp__wren__get_instructions",
+        "mcp__wren__describe_model",
+        "mcp__wren__dry_plan"
+      ],
+      "wren_tool_calls": 5,
+      "mcp_errors": [],
+      "sqlstate": null,
+      "timed_out": false,
+      "cli_ok": true,
+      "tags": [
+        "date"
+      ],
+      "config_name": "D",
+      "privacy_mode": "strict",
+      "raw_output": "{\"sql\": \"SELECT id, name, status, priority, due_date\\nFROM tasks\\nWHERE due_date = CURRENT_DATE\\n  AND status <> 'COMPLETED'\\nORDER BY id\"}"
+    }
+  ]
+}

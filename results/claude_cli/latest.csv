@@ -1,0 +1,435 @@
+question_id,category,question,config_name,privacy_mode,sql_valid,execution_success,result_match,failure_category,parse_strategy,tools_used,sqlstate,timed_out,cli_ok,claude_time_ms,sql_execution_time_ms,total_time_ms,expected_sql,generated_sql,error
+A01,A,"List every user with their name, email and department.",D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,5003.0,110.77669996302575,12408.261999953538,"SELECT full_name, email, department FROM users","SELECT full_name, email, department FROM users",
+A02,A,List all workflows showing the name and category of each.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12139.0,115.3344000922516,20733.376200078055,"SELECT name, category FROM workflows","SELECT name, category FROM workflows",
+A03,A,Show the name and status of every task.,D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,3465.0,136.88870007172227,11024.95660004206,"SELECT name, status FROM tasks","SELECT name, status FROM tasks",
+A04,A,Which departments exist in the organisation?,D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,3958.0,118.99840005207807,11335.614399984479,SELECT DISTINCT department FROM users,SELECT DISTINCT department FROM users ORDER BY department,
+B01,B,Which users are currently unavailable for new assignments?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9452.0,141.79719996172935,17008.27260001097,SELECT full_name FROM users WHERE status = 'INACTIVE',"SELECT id, full_name, email FROM users WHERE status = 'INACTIVE'",
+B02,B,List the tasks that have not been started yet.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10321.0,141.9418000150472,17750.609899987467,SELECT name FROM tasks WHERE status = 'TODO',"SELECT id, name, workflow_id, assigned_user_id, due_date FROM tasks WHERE status = 'TODO'",
+B03,B,Which tasks are currently blocked?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8046.0,141.80470001883805,15660.321300034411,SELECT name FROM tasks WHERE status = 'BLOCKED',"SELECT tasks.id, tasks.name FROM tasks WHERE tasks.status = 'BLOCKED'",
+B04,B,Show the tasks that have critical priority.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,6937.0,141.89520000945777,14528.242800035514,SELECT name FROM tasks WHERE priority = 'CRITICAL',"SELECT id, name, status, priority, due_date FROM tasks WHERE priority = 'CRITICAL'",
+B05,B,Which workflows are still in draft?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,17859.0,127.4565999628976,25433.88040002901,SELECT name FROM workflows WHERE status = 'DRAFT',"SELECT workflows.id, workflows.name FROM workflows WHERE workflows.status = 'DRAFT'",
+C01,C,List the workflows from newest to oldest by creation date.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9224.0,144.50769999530166,18019.821899943054,SELECT name FROM workflows ORDER BY created_at DESC,"SELECT name, created_at FROM workflows ORDER BY created_at DESC",
+C02,C,List all users sorted alphabetically by name.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7539.0,131.8849999224767,15607.839400065131,SELECT full_name FROM users ORDER BY full_name,"SELECT id, full_name, email, department, role, status FROM users ORDER BY full_name ASC",
+C03,C,Show the unfinished tasks with the earliest due date first.,D,strict,True,True,False,RESULT_MISMATCH,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10770.0,161.29720001481473,19002.13830010034,"SELECT name, due_date FROM tasks
+WHERE status <> 'COMPLETED'
+ORDER BY due_date, name","SELECT id, name, status, priority, due_date FROM tasks WHERE status <> 'COMPLETED' ORDER BY due_date ASC",
+C04,C,"List the workflows sorted by category, and within each category by name.",D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,4828.0,130.3691000211984,12541.407000040635,"SELECT category, name FROM workflows ORDER BY category, name","SELECT name, category FROM workflows ORDER BY category, name",
+D01,D,What are the 5 most recently created tasks?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9035.0,161.16310004144907,17013.014799915254,SELECT name FROM tasks ORDER BY created_at DESC LIMIT 5,"SELECT id, name, created_at FROM tasks ORDER BY created_at DESC LIMIT 5",
+D02,D,Which three users have the most tasks assigned to them?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10540.0,170.31980003230274,18614.131600013934,"SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name
+ORDER BY task_count DESC
+LIMIT 3","SELECT users.full_name, COUNT(tasks.id) AS task_count FROM users JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.id, users.full_name ORDER BY task_count DESC LIMIT 3",
+D03,D,What are the three workflows containing the greatest number of tasks?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,13013.0,177.35669994726777,21026.842900086194,"SELECT w.name, COUNT(t.id) AS task_count
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+ORDER BY task_count DESC
+LIMIT 3","SELECT w.id, w.name, COUNT(t.id) AS task_count
+FROM workflows w
+LEFT JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+ORDER BY task_count DESC
+LIMIT 3",
+D04,D,Show the 5 unfinished tasks with the earliest deadlines.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8024.0,150.47090000007302,15964.27280001808,"SELECT name, due_date FROM tasks
+WHERE status <> 'COMPLETED'
+ORDER BY due_date
+LIMIT 5","SELECT tasks.id, tasks.name, tasks.status, tasks.due_date FROM tasks WHERE tasks.status <> 'COMPLETED' ORDER BY tasks.due_date ASC NULLS LAST LIMIT 5",
+E01,E,How many users are there in total?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7717.0,139.69510002061725,15722.461499972269,SELECT COUNT(*) FROM users,SELECT COUNT(*) AS total_users FROM users,
+E02,E,How many workflows exist?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7948.0,134.5873000100255,15799.512599944137,SELECT COUNT(*) FROM workflows,SELECT COUNT(*) AS workflow_count FROM workflows,
+E03,E,How many tasks are there altogether?,D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,3543.0,157.2133000008762,11328.300799941644,SELECT COUNT(*) FROM tasks,SELECT COUNT(tasks.id) AS task_count FROM tasks,
+E04,E,What is the highest number of tasks belonging to any single workflow?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8401.0,146.03289996739477,16127.275199978612,"SELECT MAX(c) FROM (
+  SELECT COUNT(*) AS c FROM tasks GROUP BY workflow_id
+) s","SELECT MAX(task_count) AS max_tasks FROM (SELECT workflow_id, COUNT(*) AS task_count FROM tasks GROUP BY workflow_id) t",
+E05,E,"What is the average number of tasks per workflow, counting workflows that have no tasks?",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10057.0,169.07820000778884,18180.831099976785,"SELECT AVG(c) FROM (
+  SELECT COUNT(t.id) AS c
+  FROM workflows w
+  LEFT JOIN tasks t ON t.workflow_id = w.id
+  GROUP BY w.id
+) s","SELECT AVG(task_count) AS avg_tasks_per_workflow FROM (SELECT workflows.id, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id) sub",
+F01,F,How many tasks are there in each status?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9324.0,149.7451999457553,17408.183899940923,"SELECT status, COUNT(*) FROM tasks GROUP BY status","SELECT status, COUNT(id) AS task_count FROM tasks GROUP BY status",
+F02,F,How many tasks fall into each priority level?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,15604.0,155.952800065279,23703.01479997579,"SELECT priority, COUNT(*) FROM tasks GROUP BY priority","SELECT priority, COUNT(id) AS task_count FROM tasks GROUP BY priority",
+F03,F,How many workflows are there in each category?,D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,4079.0,120.88860000949353,12641.604700009339,"SELECT category, COUNT(*) FROM workflows GROUP BY category","SELECT category, COUNT(*) AS workflow_count FROM workflows GROUP BY category",
+F04,F,How many users are in each department?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11451.0,152.34150004107505,19572.504300042056,"SELECT department, COUNT(*) FROM users GROUP BY department","SELECT department, COUNT(*) AS user_count FROM users GROUP BY department",
+F05,F,"For each user, how many tasks are they assigned? Include users with none.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11698.0,184.48269995860755,19952.338199946098,"SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name","SELECT users.full_name, COUNT(tasks.id) AS task_count
+FROM users
+LEFT JOIN tasks ON tasks.assigned_user_id = users.id
+GROUP BY users.id, users.full_name
+ORDER BY users.id",
+G01,G,Which users are assigned more than 3 tasks?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12057.0,145.20550007000566,20322.289400035515,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 3","SELECT u.full_name, COUNT(t.id) AS task_count FROM users u JOIN tasks t ON t.assigned_user_id = u.id GROUP BY u.id, u.full_name HAVING COUNT(t.id) > 3",
+G02,G,Which workflows have more than 5 tasks?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11968.0,185.1854999549687,20187.58590007201,"SELECT w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+HAVING COUNT(t.id) > 5","SELECT workflows.name, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id, workflows.name HAVING COUNT(tasks.id) > 5",
+G03,G,Which departments have more than 2 users?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10659.0,199.8246000148356,18666.457599960268,"SELECT department FROM users
+GROUP BY department
+HAVING COUNT(*) > 2","SELECT department, COUNT(*) AS user_count FROM users GROUP BY department HAVING COUNT(*) > 2",
+G04,G,Which task priority levels are used by more than 10 tasks?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9500.0,160.82220000680536,17522.016100003384,"SELECT priority FROM tasks
+GROUP BY priority
+HAVING COUNT(*) > 10","SELECT priority, COUNT(id) AS task_count FROM tasks GROUP BY priority HAVING COUNT(id) > 10",
+H01,H,"For each workflow, show its category and the email address of its owner.",D,strict,True,True,True,,json,mcp__wren__dry_plan,,False,True,3886.0,161.05429991148412,11690.94420003239,"SELECT w.category, u.email
+FROM workflows w
+JOIN users u ON u.id = w.owner_user_id","SELECT w.name AS workflow_name, w.category, u.email AS owner_email FROM workflows w JOIN users u ON u.id = w.owner_user_id",
+H02,H,Show each task's name alongside the name of the workflow it belongs to.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9291.0,143.42770003713667,17176.27659998834,"SELECT t.name AS task_name, w.name AS workflow_name
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id","SELECT tasks.name AS task_name, workflows.name AS workflow_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id",
+H03,H,Show every assigned task together with the name of the person doing it.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10600.0,167.3626999836415,18637.18050008174,"SELECT t.name AS task_name, u.full_name AS assignee
+FROM tasks t
+JOIN users u ON u.id = t.assigned_user_id","SELECT tasks.id AS task_id, tasks.name AS task_name, users.full_name AS assignee_name FROM tasks JOIN users ON users.id = tasks.assigned_user_id WHERE tasks.assigned_user_id IS NOT NULL",
+H04,H,Show each assigned task with the department of the person assigned to it.,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10755.0,187.14219995308667,18844.50939996168,"SELECT t.name AS task_name, u.department
+FROM tasks t
+JOIN users u ON u.id = t.assigned_user_id","SELECT tasks.id AS task_id, tasks.name AS task_name, users.department AS assignee_department FROM tasks JOIN users ON users.id = tasks.assigned_user_id WHERE tasks.assigned_user_id IS NOT NULL",
+I01,I,"For every assigned task, show the task name, its workflow name and the department of the person assigned to it.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10223.0,187.12610006332397,18209.950900054537,"SELECT t.name AS task_name, w.name AS workflow_name, u.department
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users u ON u.id = t.assigned_user_id","SELECT t.name AS task_name, w.name AS workflow_name, u.department AS assignee_department
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users u ON u.id = t.assigned_user_id
+WHERE t.assigned_user_id IS NOT NULL",
+I02,I,Show each task with the name of its workflow and the name of that workflow's owner.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9590.0,187.22530000377446,17548.886600066908,"SELECT t.name AS task_name, w.name AS workflow_name, o.full_name AS owner
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users o ON o.id = w.owner_user_id","SELECT tasks.name AS task_name, workflows.name AS workflow_name, users.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users ON users.id = workflows.owner_user_id",
+I03,I,"For each blocked task, show the task name, the workflow name and the workflow owner's name.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10325.0,188.36039991583675,18326.22559997253,"SELECT t.name AS task_name, w.name AS workflow_name, o.full_name AS owner
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users o ON o.id = w.owner_user_id
+WHERE t.status = 'BLOCKED'","SELECT tasks.name AS task_name, workflows.name AS workflow_name, owner.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users owner ON owner.id = workflows.owner_user_id WHERE tasks.status = 'BLOCKED'",
+I04,I,"For every assigned task show the task name, the workflow name, the assignee's name and the workflow owner's name.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12908.0,171.18479998316616,20765.00459993258,"SELECT t.name AS task_name,
+       w.name AS workflow_name,
+       a.full_name AS assignee,
+       o.full_name AS owner
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users a ON a.id = t.assigned_user_id
+JOIN users o ON o.id = w.owner_user_id","SELECT tasks.name AS task_name, workflows.name AS workflow_name, assignee.full_name AS assignee_name, owner.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users assignee ON assignee.id = tasks.assigned_user_id JOIN users owner ON owner.id = workflows.owner_user_id WHERE tasks.assigned_user_id IS NOT NULL",
+J01,J,Which users do not own any workflow?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9345.0,152.64929994009435,17600.173600018024,"SELECT u.full_name
+FROM users u
+LEFT JOIN workflows w ON w.owner_user_id = u.id
+WHERE w.id IS NULL","SELECT u.id, u.full_name FROM users u LEFT JOIN workflows w ON w.owner_user_id = u.id WHERE w.id IS NULL",
+J02,J,"List every user together with how many workflows they own, including those who own none.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10899.0,141.13110001198947,19046.213899971917,"SELECT u.full_name, COUNT(w.id) AS workflow_count
+FROM users u
+LEFT JOIN workflows w ON w.owner_user_id = u.id
+GROUP BY u.id, u.full_name","SELECT users.full_name, COUNT(workflows.id) AS workflow_count
+FROM users
+LEFT JOIN workflows ON workflows.owner_user_id = users.id
+GROUP BY users.id, users.full_name
+ORDER BY users.full_name",
+J03,J,"List every task with its assignee's name, including tasks that nobody is assigned to.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9733.0,149.52079998329282,17660.519500030205,"SELECT t.name AS task_name, u.full_name AS assignee
+FROM tasks t
+LEFT JOIN users u ON u.id = t.assigned_user_id","SELECT tasks.id, tasks.name, users.full_name AS assignee_name FROM tasks LEFT JOIN users ON users.id = tasks.assigned_user_id ORDER BY tasks.id",
+J04,J,Which users neither own a workflow nor have any task assigned to them?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11625.0,169.2740999860689,19646.974500035867,"SELECT u.full_name
+FROM users u
+WHERE NOT EXISTS (SELECT 1 FROM workflows w WHERE w.owner_user_id = u.id)
+  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.assigned_user_id = u.id)","SELECT users.id, users.full_name
+FROM users
+WHERE NOT EXISTS (SELECT 1 FROM workflows WHERE workflows.owner_user_id = users.id)
+  AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.assigned_user_id = users.id)",
+K01,K,Which tasks have no completion date recorded?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7931.0,124.0029000909999,16110.937100020237,SELECT name FROM tasks WHERE completed_at IS NULL,"SELECT tasks.id, tasks.name FROM tasks WHERE tasks.completed_at IS NULL",
+K02,K,"Which tasks have a completion date recorded, and when were they completed?",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8503.0,133.05100006982684,16040.522199939005,"SELECT name, completed_at FROM tasks WHERE completed_at IS NOT NULL","SELECT id, name, completed_at FROM tasks WHERE completed_at IS NOT NULL",
+K03,K,Which tasks have nobody assigned to them?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7345.0,135.2211000630632,14779.521899996325,SELECT name FROM tasks WHERE assigned_user_id IS NULL,"SELECT id, name FROM tasks WHERE assigned_user_id IS NULL",
+K04,K,Which tasks have no due date set?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,6574.0,146.15019992925227,14090.373300015926,SELECT name FROM tasks WHERE due_date IS NULL,"SELECT tasks.id, tasks.name FROM tasks WHERE tasks.due_date IS NULL",
+L01,L,Which tasks are due today and not yet finished?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7949.0,134.6714999526739,16246.596599929035,"SELECT name FROM tasks
+WHERE due_date = CURRENT_DATE AND status <> 'COMPLETED'","SELECT id, name FROM tasks WHERE due_date = CURRENT_DATE AND status <> 'COMPLETED'",
+L02,L,"For each late unfinished task, how many days past its due date is it?",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9561.0,147.7725999429822,17775.01270000357,"SELECT name, CURRENT_DATE - due_date AS days_overdue
+FROM tasks
+WHERE due_date < CURRENT_DATE AND status <> 'COMPLETED'","SELECT tasks.id AS task_id, tasks.name AS task_name, tasks.due_date, (CURRENT_DATE - tasks.due_date) AS days_overdue FROM tasks WHERE tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED'",
+L03,L,Which tasks were completed during the current calendar month?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8332.0,142.1249998966232,16626.543599995784,"SELECT name FROM tasks
+WHERE completed_at >= date_trunc('month', CURRENT_DATE)
+  AND completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'","SELECT tasks.id, tasks.name FROM tasks WHERE tasks.completed_at >= date_trunc('month', CURRENT_DATE) AND tasks.completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'",
+L04,L,Which workflows were created in the last 30 days?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8718.0,141.72279997728765,16716.448699939065,"SELECT name FROM workflows
+WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'","SELECT workflows.id, workflows.name FROM workflows WHERE workflows.created_at >= CURRENT_DATE - INTERVAL '30 days'",
+L05,L,"Which unfinished tasks are due within the next 7 days, including today?",D,strict,True,True,False,WRONG_DATE_LOGIC,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9065.0,152.08639996126294,17575.603899895214,"SELECT name FROM tasks
+WHERE status <> 'COMPLETED'
+  AND due_date >= CURRENT_DATE
+  AND due_date <= CURRENT_DATE + INTERVAL '7 days'","SELECT tasks.id, tasks.name, tasks.status, tasks.priority, tasks.due_date, tasks.assigned_user_id FROM tasks WHERE tasks.status <> 'COMPLETED' AND tasks.due_date >= CURRENT_DATE AND tasks.due_date < CURRENT_DATE + INTERVAL '7 days' ORDER BY tasks.due_date",
+M01,M,Label each unfinished task as 'Overdue' if its due date has passed and 'On time' otherwise.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7837.0,136.8635999970138,15710.889099980704,"SELECT name,
+       CASE WHEN due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS label
+FROM tasks
+WHERE status <> 'COMPLETED'","SELECT id, name, due_date, CASE WHEN due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS status_label FROM tasks WHERE status <> 'COMPLETED'",
+M02,M,"Categorise every user's workload as 'None' when they have no assigned tasks, 'Light' for 1 to 3 tasks, and 'Heavy' for 4 or more.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,14727.0,162.45629999320954,22870.80919998698,"SELECT u.full_name,
+       CASE WHEN COUNT(t.id) = 0 THEN 'None'
+            WHEN COUNT(t.id) <= 3 THEN 'Light'
+            ELSE 'Heavy' END AS workload
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name","SELECT users.id, users.full_name, COUNT(tasks.id) AS task_count, CASE WHEN COUNT(tasks.id) = 0 THEN 'None' WHEN COUNT(tasks.id) BETWEEN 1 AND 3 THEN 'Light' ELSE 'Heavy' END AS workload FROM users LEFT JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.id, users.full_name ORDER BY users.id",
+M03,M,"Categorise each workflow as 'Empty' when it has no tasks, 'Small' for 1 to 8 tasks, and 'Large' for 9 or more.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11416.0,156.6711999475956,19484.57720002625,"SELECT w.name,
+       CASE WHEN COUNT(t.id) = 0 THEN 'Empty'
+            WHEN COUNT(t.id) <= 8 THEN 'Small'
+            ELSE 'Large' END AS size_band
+FROM workflows w
+LEFT JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name","SELECT w.id AS workflow_id, w.name AS workflow_name, CASE WHEN COUNT(t.id) = 0 THEN 'Empty' WHEN COUNT(t.id) BETWEEN 1 AND 8 THEN 'Small' ELSE 'Large' END AS task_size_category FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY w.id",
+M04,M,"Show each task with a numeric urgency score: 4 for critical, 3 for high, 2 for medium and 1 for low priority.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12268.0,146.1468000197783,20050.39459990803,"SELECT name,
+       CASE priority
+         WHEN 'CRITICAL' THEN 4
+         WHEN 'HIGH' THEN 3
+         WHEN 'MEDIUM' THEN 2
+         WHEN 'LOW' THEN 1
+       END AS urgency
+FROM tasks","SELECT tasks.id, tasks.name, tasks.priority, CASE tasks.priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END AS urgency_score FROM tasks",
+N01,N,Which user has completed the most tasks?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,6800.0,156.08139999676496,14779.739800025709,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE t.status = 'COMPLETED'
+GROUP BY u.id, u.full_name
+ORDER BY COUNT(t.id) DESC
+LIMIT 1","SELECT u.full_name, COUNT(t.id) AS completed_count
+FROM tasks t
+JOIN users u ON u.id = t.assigned_user_id
+WHERE t.status = 'COMPLETED'
+GROUP BY u.full_name
+ORDER BY completed_count DESC
+LIMIT 1",
+N02,N,"Among workflows that have tasks, which one has the fewest?",D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10451.0,146.44989999942482,18448.700099950656,"SELECT w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+ORDER BY COUNT(t.id) ASC
+LIMIT 1","SELECT w.id, w.name, COUNT(t.id) AS task_count FROM workflows w JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY task_count ASC LIMIT 1",
+N03,N,Which users are assigned more tasks than Carol Chen?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,15466.0,152.79760002158582,23874.616699991748,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > (
+  SELECT COUNT(*) FROM tasks t2
+  JOIN users u2 ON u2.id = t2.assigned_user_id
+  WHERE u2.full_name = 'Carol Chen'
+)","WITH carol_count AS (
+  SELECT COUNT(t.id) AS cnt
+  FROM tasks t
+  JOIN users u ON u.id = t.assigned_user_id
+  WHERE u.full_name = 'Carol Chen'
+)
+SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.full_name
+HAVING COUNT(t.id) > (SELECT cnt FROM carol_count)
+ORDER BY task_count DESC",
+N04,N,"Which workflows have more tasks than the average across all workflows, counting workflows with no tasks in that average?",D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,13584.0,168.88670006301254,21055.772199993953,"SELECT w.name
+FROM workflows w
+LEFT JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+HAVING COUNT(t.id) > (
+  SELECT AVG(c) FROM (
+    SELECT COUNT(t2.id) AS c
+    FROM workflows w2
+    LEFT JOIN tasks t2 ON t2.workflow_id = w2.id
+    GROUP BY w2.id
+  ) s
+)","WITH workflow_task_counts AS (SELECT workflows.id AS workflow_id, workflows.name AS workflow_name, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id, workflows.name) SELECT workflow_name, task_count FROM workflow_task_counts WHERE task_count > (SELECT AVG(task_count) FROM workflow_task_counts) ORDER BY task_count DESC",
+N05,N,Which users are assigned at least one critical task?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,7975.0,215.96180007327348,16284.262000001036,"SELECT DISTINCT u.full_name
+FROM users u
+WHERE EXISTS (
+  SELECT 1 FROM tasks t
+  WHERE t.assigned_user_id = u.id AND t.priority = 'CRITICAL'
+)","SELECT DISTINCT u.id, u.full_name FROM users u JOIN tasks t ON t.assigned_user_id = u.id WHERE t.priority = 'CRITICAL'",
+O01,O,"Using a common table expression, list each workflow with its task count and the name of its owner.",D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11875.0,167.55839996039867,19868.060200009495,"WITH counts AS (
+  SELECT workflow_id, COUNT(*) AS task_count
+  FROM tasks GROUP BY workflow_id
+)
+SELECT w.name, COALESCE(c.task_count, 0) AS task_count, o.full_name AS owner
+FROM workflows w
+JOIN users o ON o.id = w.owner_user_id
+LEFT JOIN counts c ON c.workflow_id = w.id","WITH task_counts AS (
+  SELECT workflow_id, COUNT(id) AS task_count
+  FROM tasks
+  GROUP BY workflow_id
+)
+SELECT w.name AS workflow_name,
+       COALESCE(tc.task_count, 0) AS task_count,
+       u.full_name AS owner_name
+FROM workflows w
+JOIN users u ON u.id = w.owner_user_id
+LEFT JOIN task_counts tc ON tc.workflow_id = w.id
+ORDER BY w.name",
+O02,O,"Work out how many unfinished tasks each user has, then list the users with more than 2 of them.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,11287.0,142.72560004610568,18991.11780000385,"WITH open_counts AS (
+  SELECT assigned_user_id, COUNT(*) AS open_tasks
+  FROM tasks
+  WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
+  GROUP BY assigned_user_id
+)
+SELECT u.full_name, oc.open_tasks
+FROM open_counts oc
+JOIN users u ON u.id = oc.assigned_user_id
+WHERE oc.open_tasks > 2","SELECT u.full_name, COUNT(t.id) AS unfinished_task_count
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 2",
+O03,O,"Break the tasks down by workflow and status, showing the count for each combination.",D,strict,True,True,False,WRONG_NULL_HANDLING,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8175.0,163.30440004821867,16554.53399999533,"SELECT w.name AS workflow_name, t.status, COUNT(*) AS task_count
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+GROUP BY w.name, t.status","SELECT w.name AS workflow_name, t.status AS task_status, COUNT(t.id) AS task_count FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.name, t.status ORDER BY w.name, t.status",
+O04,O,"For each department, how many tasks in total are assigned to its members?",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12535.0,151.83799993246794,21423.901599948294,"SELECT u.department, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.department","SELECT users.department, COUNT(tasks.id) AS total_tasks FROM users LEFT JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.department ORDER BY users.department",
+P01,P,"Rank the workflows by how many tasks they contain, showing the rank next to the count.",D,strict,True,True,False,RESULT_MISMATCH,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,17279.0,154.8913000151515,25538.462099968456,"SELECT w.name,
+       COUNT(t.id) AS task_count,
+       RANK() OVER (ORDER BY COUNT(t.id) DESC) AS rank
+FROM workflows w
+LEFT JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+ORDER BY task_count DESC, w.name","SELECT w.id AS workflow_id, w.name AS workflow_name, COUNT(t.id) AS task_count, RANK() OVER (ORDER BY COUNT(t.id) DESC) AS rank FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY task_count DESC",
+P02,P,"Within each workflow, number the tasks in order of their due date, earliest first.",D,strict,True,True,False,MISSING_JOIN,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8359.0,140.47570002730936,16252.011899952777,"SELECT w.name AS workflow_name,
+       t.name AS task_name,
+       ROW_NUMBER() OVER (PARTITION BY t.workflow_id ORDER BY t.due_date, t.id) AS seq
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id","SELECT tasks.id AS task_id, tasks.workflow_id, tasks.name, tasks.due_date, ROW_NUMBER() OVER (PARTITION BY tasks.workflow_id ORDER BY tasks.due_date) AS task_order FROM tasks ORDER BY tasks.workflow_id, task_order",
+P03,P,Show each task alongside the total number of tasks belonging to the same workflow.,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10009.0,163.3622000226751,18227.69349999726,"SELECT name,
+       COUNT(*) OVER (PARTITION BY workflow_id) AS workflow_task_count
+FROM tasks","SELECT tasks.id AS task_id, tasks.name AS task_name, tasks.workflow_id, COUNT(*) OVER (PARTITION BY tasks.workflow_id) AS workflow_task_count FROM tasks ORDER BY tasks.workflow_id, tasks.id",
+P04,P,"For each workflow category, which workflow contains the most tasks?",D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,15086.0,150.32699995208532,23365.767500014044,"WITH counted AS (
+  SELECT w.id, w.name, w.category, COUNT(t.id) AS task_count,
+         ROW_NUMBER() OVER (PARTITION BY w.category
+                            ORDER BY COUNT(t.id) DESC, w.id) AS rn
+  FROM workflows w
+  LEFT JOIN tasks t ON t.workflow_id = w.id
+  GROUP BY w.id, w.name, w.category
+)
+SELECT category, name, task_count FROM counted WHERE rn = 1","WITH task_counts AS (
+  SELECT w.id AS workflow_id, w.name AS workflow_name, w.category, COUNT(t.id) AS task_count,
+    RANK() OVER (PARTITION BY w.category ORDER BY COUNT(t.id) DESC) AS rnk
+  FROM workflows w
+  LEFT JOIN tasks t ON t.workflow_id = w.id
+  GROUP BY w.id, w.name, w.category
+)
+SELECT category, workflow_name, task_count
+FROM task_counts
+WHERE rnk = 1
+ORDER BY category",
+P05,P,Show each task with its priority and the number of tasks that share that priority.,D,strict,True,True,False,RESULT_MISMATCH,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,8453.0,140.32240002416074,16170.55659997277,"SELECT name, priority,
+       COUNT(*) OVER (PARTITION BY priority) AS same_priority_count
+FROM tasks","SELECT tasks.id, tasks.priority, COUNT(*) OVER (PARTITION BY tasks.priority) AS priority_count FROM tasks",
+Q01,Q,Which active users have more than 2 unfinished tasks?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10079.0,162.1517000021413,17667.206299956888,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE u.status = 'ACTIVE' AND t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 2","SELECT u.full_name, COUNT(t.id) AS unfinished_tasks
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE u.status = 'ACTIVE' AND t.status <> 'COMPLETED'
+GROUP BY u.full_name
+HAVING COUNT(t.id) > 2
+ORDER BY unfinished_tasks DESC",
+Q02,Q,Which workflows have at least one overdue task and an active owner?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10726.0,163.67110004648566,17887.183799990453,"SELECT DISTINCT w.name
+FROM workflows w
+JOIN users o ON o.id = w.owner_user_id
+JOIN tasks t ON t.workflow_id = w.id
+WHERE o.status = 'ACTIVE'
+  AND t.due_date < CURRENT_DATE
+  AND t.status <> 'COMPLETED'","SELECT DISTINCT w.id, w.name FROM workflows w JOIN users owner ON owner.id = w.owner_user_id WHERE owner.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM tasks t WHERE t.workflow_id = w.id AND t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED')",
+Q03,Q,Which workflows contain more than 3 unfinished tasks of high or critical priority?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,9097.0,154.72730004694313,16639.781399979256,"SELECT w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+WHERE t.status <> 'COMPLETED'
+  AND t.priority IN ('HIGH', 'CRITICAL')
+GROUP BY w.id, w.name
+HAVING COUNT(t.id) > 3","SELECT w.id, w.name, COUNT(t.id) AS unfinished_high_priority_count FROM workflows w JOIN tasks t ON t.workflow_id = w.id WHERE t.status <> 'COMPLETED' AND t.priority IN ('HIGH', 'CRITICAL') GROUP BY w.id, w.name HAVING COUNT(t.id) > 3",
+Q04,Q,Which inactive users still have unfinished work assigned to them?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10494.0,152.03340002335608,17925.379700027406,"SELECT DISTINCT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE u.status = 'INACTIVE' AND t.status <> 'COMPLETED'","SELECT DISTINCT users.id, users.full_name FROM users JOIN tasks ON tasks.assigned_user_id = users.id WHERE users.status = 'INACTIVE' AND tasks.status <> 'COMPLETED'",
+Q05,Q,Which active workflows contain blocked tasks that are assigned to active users?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,10868.0,175.50199991092086,18069.984499947168,"SELECT DISTINCT w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+JOIN users a ON a.id = t.assigned_user_id
+WHERE w.status = 'ACTIVE'
+  AND t.status = 'BLOCKED'
+  AND a.status = 'ACTIVE'","SELECT DISTINCT w.id, w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+JOIN users u ON u.id = t.assigned_user_id
+WHERE w.status = 'ACTIVE'
+  AND t.status = 'BLOCKED'
+  AND u.status = 'ACTIVE'",
+R01,R,Show the active workflows that currently have overdue work.,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,14105.0,135.9756999881938,21281.96699998807,"SELECT DISTINCT w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+WHERE w.status = 'ACTIVE'
+  AND t.due_date < CURRENT_DATE
+  AND t.status <> 'COMPLETED'","SELECT workflows.id, workflows.name FROM workflows WHERE workflows.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED')",
+R02,R,Which users are overloaded?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10938.0,146.46009996067733,18405.642200028524,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > (
+  SELECT AVG(c) FROM (
+    SELECT COUNT(*) AS c FROM tasks
+    WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
+    GROUP BY assigned_user_id
+  ) s
+)","SELECT u.id, u.full_name, COUNT(*) FILTER (WHERE t.status <> 'COMPLETED') AS open_task_count FROM users u JOIN tasks t ON t.assigned_user_id = u.id GROUP BY u.id, u.full_name HAVING COUNT(*) FILTER (WHERE t.status <> 'COMPLETED') > (SELECT AVG(c) FROM (SELECT COUNT(*) AS c FROM tasks WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL GROUP BY assigned_user_id) s) ORDER BY open_task_count DESC",
+R03,R,Which workflow owners have unfinished high-priority work inside their workflows?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,9835.0,139.22559993807226,17262.267100042664,"SELECT DISTINCT o.full_name
+FROM workflows w
+JOIN users o ON o.id = w.owner_user_id
+JOIN tasks t ON t.workflow_id = w.id
+WHERE t.status <> 'COMPLETED'
+  AND t.priority IN ('HIGH', 'CRITICAL')","SELECT DISTINCT owner.full_name
+FROM workflows w
+JOIN users owner ON owner.id = w.owner_user_id
+JOIN tasks t ON t.workflow_id = w.id
+WHERE t.status <> 'COMPLETED'
+  AND t.priority IN ('HIGH', 'CRITICAL')",
+R04,R,"Which workflows are healthy, meaning they have no overdue and no blocked tasks?",D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__dry_plan,,False,True,12298.0,153.80679990630597,20257.32340000104,"SELECT w.name
+FROM workflows w
+WHERE NOT EXISTS (
+  SELECT 1 FROM tasks t
+  WHERE t.workflow_id = w.id
+    AND (t.status = 'BLOCKED'
+         OR (t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED'))
+)","SELECT workflows.id, workflows.name FROM workflows WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED') AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.status = 'BLOCKED')",
+R05,R,Which departments are carrying the most unfinished work?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__dry_plan;mcp__wren__dry_plan,,False,True,13212.0,159.68249994330108,20998.059000005014,"SELECT u.department, COUNT(t.id) AS open_tasks
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE t.status <> 'COMPLETED'
+GROUP BY u.department
+ORDER BY open_tasks DESC, u.department","SELECT u.department, COUNT(t.id) AS unfinished_tasks FROM tasks t JOIN users u ON u.id = t.assigned_user_id WHERE t.status <> 'COMPLETED' GROUP BY u.department ORDER BY unfinished_tasks DESC",
+R06,R,Who owns workflows but is not doing any of the task work themselves?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan;Bash,,False,True,15187.0,170.83920002914965,23013.032600050792,"SELECT DISTINCT o.full_name
+FROM users o
+WHERE EXISTS (SELECT 1 FROM workflows w WHERE w.owner_user_id = o.id)
+  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.assigned_user_id = o.id)","SELECT DISTINCT u.id, u.full_name
+FROM users u
+JOIN workflows w ON w.owner_user_id = u.id
+WHERE NOT EXISTS (
+  SELECT 1 FROM tasks t WHERE t.assigned_user_id = u.id
+)
+ORDER BY u.full_name",
+S01,S,Which people can take on new work right now?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,8183.0,130.34090003930032,15452.031600056216,SELECT full_name FROM users WHERE status = 'ACTIVE',"SELECT id, full_name, email, department FROM users WHERE status = 'ACTIVE' ORDER BY full_name",
+S02,S,How much work is still outstanding in each workflow?,D,strict,True,True,True,,embedded_json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10028.0,152.45439996942878,17254.279399989173,"SELECT w.name, COUNT(t.id) AS outstanding
+FROM workflows w
+LEFT JOIN tasks t
+       ON t.workflow_id = w.id AND t.status <> 'COMPLETED'
+GROUP BY w.id, w.name","SELECT w.id AS workflow_id, w.name AS workflow_name, COUNT(t.id) FILTER (WHERE t.status <> 'COMPLETED') AS outstanding_tasks FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY w.id",
+S03,S,Which tasks need urgent attention?,D,strict,True,True,False,WRONG_TABLE,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,16206.0,152.27870002854615,24088.33890000824,"SELECT name FROM tasks
+WHERE priority IN ('HIGH', 'CRITICAL')
+  AND status <> 'COMPLETED'
+  AND due_date < CURRENT_DATE","SELECT tasks.id, tasks.name, tasks.status, tasks.priority, tasks.due_date, workflows.name AS workflow_name, users.full_name AS assignee_name
+FROM tasks
+JOIN workflows ON workflows.id = tasks.workflow_id
+LEFT JOIN users ON users.id = tasks.assigned_user_id
+WHERE tasks.status <> 'COMPLETED'
+  AND (tasks.due_date < CURRENT_DATE OR tasks.priority IN ('HIGH','CRITICAL'))
+ORDER BY (tasks.due_date < CURRENT_DATE) DESC,
+         CASE tasks.priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END DESC,
+         tasks.due_date ASC",
+S04,S,Which processes are no longer in use?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_cubes;mcp__wren__dry_plan,,False,True,10064.0,116.49429996032268,17535.13329999987,SELECT name FROM workflows WHERE status = 'ARCHIVED',SELECT workflows.name FROM workflows WHERE workflows.status = 'ARCHIVED',
+S05,S,"Show the people accountable for each process, not the people doing the work.",D,strict,True,True,True,,json,mcp__wren__dry_plan;mcp__wren__recall_queries,,False,True,7577.0,162.84640005324036,15086.34829998482,"SELECT w.name AS workflow_name, o.full_name AS accountable
+FROM workflows w
+JOIN users o ON o.id = w.owner_user_id","SELECT workflows.name AS workflow_name, users.full_name AS owner_name FROM workflows JOIN users ON users.id = workflows.owner_user_id ORDER BY workflows.name",

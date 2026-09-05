@@ -1,0 +1,404 @@
+claude 2.1.234 (Claude Code)
+configs: D   privacy: strict
+questions: 86 of 86
+estimated: ~43 min at ~30s per question
+
+INFO    wrenpoc.benchmark.runner | preflight ok: 14 Wren MCP tools available
+INFO    wrenpoc.benchmark.runner | config D / strict: 86 question(s), mcp config C:\Users\ansh.gala\Desktop\Python\wren-poc\wren_projects\mcp\mcp.D.strict.json
+[A01] PASS - 12.4s
+  SQL: SELECT full_name, email, department FROM users
+
+[A02] PASS - 20.7s
+  SQL: SELECT name, category FROM workflows
+
+[A03] PASS - 11.0s
+  SQL: SELECT name, status FROM tasks
+
+[A04] PASS - 11.3s
+  SQL: SELECT DISTINCT department FROM users ORDER BY department
+
+[B01] PASS - 17.0s
+  SQL: SELECT id, full_name, email FROM users WHERE status = 'INACTIVE'
+
+[B02] PASS - 17.8s
+  SQL: SELECT id, name, workflow_id, assigned_user_id, due_date FROM tasks WHERE status = 'TODO'
+
+[B03] PASS - 15.7s
+  SQL: SELECT tasks.id, tasks.name FROM tasks WHERE tasks.status = 'BLOCKED'
+
+[B04] PASS - 14.5s
+  SQL: SELECT id, name, status, priority, due_date FROM tasks WHERE priority = 'CRITICAL'
+
+[B05] PASS - 25.4s
+  SQL: SELECT workflows.id, workflows.name FROM workflows WHERE workflows.status = 'DRAFT'
+
+[C01] PASS - 18.0s
+  SQL: SELECT name, created_at FROM workflows ORDER BY created_at DESC
+
+[C02] PASS - 15.6s
+  SQL: SELECT id, full_name, email, department, role, status FROM users ORDER BY full_name ASC
+
+[C03] RESULT_MISMATCH - 19.0s
+  SQL: SELECT id, name, status, priority, due_date FROM tasks WHERE status <> 'COMPLETED' ORDER BY due_date ASC
+
+[C04] PASS - 12.5s
+  SQL: SELECT name, category FROM workflows ORDER BY category, name
+
+[D01] PASS - 17.0s
+  SQL: SELECT id, name, created_at FROM tasks ORDER BY created_at DESC LIMIT 5
+
+[D02] PASS - 18.6s
+  SQL: SELECT users.full_name, COUNT(tasks.id) AS task_count FROM users JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.id, users.full_name ORDER BY task_count DESC LIMIT 3
+
+[D03] PASS - 21.0s
+  SQL: SELECT w.id, w.name, COUNT(t.id) AS task_count
+FROM workflows w
+LEFT JOIN tasks t ON t.workflow_id = w.id
+GROUP BY w.id, w.name
+ORDER BY task_count DESC
+LIMIT 3
+
+[D04] PASS - 16.0s
+  SQL: SELECT tasks.id, tasks.name, tasks.status, tasks.due_date FROM tasks WHERE tasks.status <> 'COMPLETED' ORDER BY tasks.due_date ASC NULLS LAST LIMIT 5
+
+[E01] PASS - 15.7s
+  SQL: SELECT COUNT(*) AS total_users FROM users
+
+[E02] PASS - 15.8s
+  SQL: SELECT COUNT(*) AS workflow_count FROM workflows
+
+[E03] PASS - 11.3s
+  SQL: SELECT COUNT(tasks.id) AS task_count FROM tasks
+
+[E04] PASS - 16.1s
+  SQL: SELECT MAX(task_count) AS max_tasks FROM (SELECT workflow_id, COUNT(*) AS task_count FROM tasks GROUP BY workflow_id) t
+
+[E05] PASS - 18.2s
+  SQL: SELECT AVG(task_count) AS avg_tasks_per_workflow FROM (SELECT workflows.id, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id) sub
+
+[F01] PASS - 17.4s
+  SQL: SELECT status, COUNT(id) AS task_count FROM tasks GROUP BY status
+
+[F02] PASS - 23.7s
+  SQL: SELECT priority, COUNT(id) AS task_count FROM tasks GROUP BY priority
+
+[F03] PASS - 12.6s
+  SQL: SELECT category, COUNT(*) AS workflow_count FROM workflows GROUP BY category
+
+[F04] PASS - 19.6s
+  SQL: SELECT department, COUNT(*) AS user_count FROM users GROUP BY department
+
+[F05] PASS - 20.0s
+  SQL: SELECT users.full_name, COUNT(tasks.id) AS task_count
+FROM users
+LEFT JOIN tasks ON tasks.assigned_user_id = users.id
+GROUP BY users.id, users.full_name
+ORDER BY users.id
+
+[G01] PASS - 20.3s
+  SQL: SELECT u.full_name, COUNT(t.id) AS task_count FROM users u JOIN tasks t ON t.assigned_user_id = u.id GROUP BY u.id, u.full_name HAVING COUNT(t.id) > 3
+
+[G02] PASS - 20.2s
+  SQL: SELECT workflows.name, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id, workflows.name HAVING COUNT(tasks.id) > 5
+
+[G03] PASS - 18.7s
+  SQL: SELECT department, COUNT(*) AS user_count FROM users GROUP BY department HAVING COUNT(*) > 2
+
+[G04] PASS - 17.5s
+  SQL: SELECT priority, COUNT(id) AS task_count FROM tasks GROUP BY priority HAVING COUNT(id) > 10
+
+[H01] PASS - 11.7s
+  SQL: SELECT w.name AS workflow_name, w.category, u.email AS owner_email FROM workflows w JOIN users u ON u.id = w.owner_user_id
+
+[H02] PASS - 17.2s
+  SQL: SELECT tasks.name AS task_name, workflows.name AS workflow_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id
+
+[H03] PASS - 18.6s
+  SQL: SELECT tasks.id AS task_id, tasks.name AS task_name, users.full_name AS assignee_name FROM tasks JOIN users ON users.id = tasks.assigned_user_id WHERE tasks.assigned_user_id IS NOT NULL
+
+[H04] PASS - 18.8s
+  SQL: SELECT tasks.id AS task_id, tasks.name AS task_name, users.department AS assignee_department FROM tasks JOIN users ON users.id = tasks.assigned_user_id WHERE tasks.assigned_user_id IS NOT NULL
+
+[I01] PASS - 18.2s
+  SQL: SELECT t.name AS task_name, w.name AS workflow_name, u.department AS assignee_department
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users u ON u.id = t.assigned_user_id
+WHERE t.assigned_user_id IS NOT NULL
+
+[I02] PASS - 17.5s
+  SQL: SELECT tasks.name AS task_name, workflows.name AS workflow_name, users.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users ON users.id = workflows.owner_user_id
+
+[I03] PASS - 18.3s
+  SQL: SELECT tasks.name AS task_name, workflows.name AS workflow_name, owner.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users owner ON owner.id = workflows.owner_user_id WHERE tasks.status = 'BLOCKED'
+
+[I04] PASS - 20.8s
+  SQL: SELECT tasks.name AS task_name, workflows.name AS workflow_name, assignee.full_name AS assignee_name, owner.full_name AS owner_name FROM tasks JOIN workflows ON workflows.id = tasks.workflow_id JOIN users assignee ON assignee.id = tasks.assigned_user_id JOIN users owner ON owner.id = workflows.owner_user_id WHERE tasks.assigned_user_id IS NOT NULL
+
+[J01] PASS - 17.6s
+  SQL: SELECT u.id, u.full_name FROM users u LEFT JOIN workflows w ON w.owner_user_id = u.id WHERE w.id IS NULL
+
+[J02] PASS - 19.0s
+  SQL: SELECT users.full_name, COUNT(workflows.id) AS workflow_count
+FROM users
+LEFT JOIN workflows ON workflows.owner_user_id = users.id
+GROUP BY users.id, users.full_name
+ORDER BY users.full_name
+
+[J03] PASS - 17.7s
+  SQL: SELECT tasks.id, tasks.name, users.full_name AS assignee_name FROM tasks LEFT JOIN users ON users.id = tasks.assigned_user_id ORDER BY tasks.id
+
+[J04] PASS - 19.6s
+  SQL: SELECT users.id, users.full_name
+FROM users
+WHERE NOT EXISTS (SELECT 1 FROM workflows WHERE workflows.owner_user_id = users.id)
+  AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.assigned_user_id = users.id)
+
+[K01] PASS - 16.1s
+  SQL: SELECT tasks.id, tasks.name FROM tasks WHERE tasks.completed_at IS NULL
+
+[K02] PASS - 16.0s
+  SQL: SELECT id, name, completed_at FROM tasks WHERE completed_at IS NOT NULL
+
+[K03] PASS - 14.8s
+  SQL: SELECT id, name FROM tasks WHERE assigned_user_id IS NULL
+
+[K04] PASS - 14.1s
+  SQL: SELECT tasks.id, tasks.name FROM tasks WHERE tasks.due_date IS NULL
+
+[L01] PASS - 16.2s
+  SQL: SELECT id, name FROM tasks WHERE due_date = CURRENT_DATE AND status <> 'COMPLETED'
+
+[L02] PASS - 17.8s
+  SQL: SELECT tasks.id AS task_id, tasks.name AS task_name, tasks.due_date, (CURRENT_DATE - tasks.due_date) AS days_overdue FROM tasks WHERE tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED'
+
+[L03] PASS - 16.6s
+  SQL: SELECT tasks.id, tasks.name FROM tasks WHERE tasks.completed_at >= date_trunc('month', CURRENT_DATE) AND tasks.completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
+
+[L04] PASS - 16.7s
+  SQL: SELECT workflows.id, workflows.name FROM workflows WHERE workflows.created_at >= CURRENT_DATE - INTERVAL '30 days'
+
+[L05] WRONG_DATE_LOGIC - 17.6s
+  SQL: SELECT tasks.id, tasks.name, tasks.status, tasks.priority, tasks.due_date, tasks.assigned_user_id FROM tasks WHERE tasks.status <> 'COMPLETED' AND tasks.due_date >= CURRENT_DATE AND tasks.due_date < CURRENT_DATE + INTERVAL '7 days' ORDER BY tasks.due_date
+
+[M01] PASS - 15.7s
+  SQL: SELECT id, name, due_date, CASE WHEN due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS status_label FROM tasks WHERE status <> 'COMPLETED'
+
+[M02] PASS - 22.9s
+  SQL: SELECT users.id, users.full_name, COUNT(tasks.id) AS task_count, CASE WHEN COUNT(tasks.id) = 0 THEN 'None' WHEN COUNT(tasks.id) BETWEEN 1 AND 3 THEN 'Light' ELSE 'Heavy' END AS workload FROM users LEFT JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.id, users.full_name ORDER BY users.id
+
+[M03] PASS - 19.5s
+  SQL: SELECT w.id AS workflow_id, w.name AS workflow_name, CASE WHEN COUNT(t.id) = 0 THEN 'Empty' WHEN COUNT(t.id) BETWEEN 1 AND 8 THEN 'Small' ELSE 'Large' END AS task_size_category FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY w.id
+
+[M04] PASS - 20.1s
+  SQL: SELECT tasks.id, tasks.name, tasks.priority, CASE tasks.priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END AS urgency_score FROM tasks
+
+[N01] PASS - 14.8s
+  SQL: SELECT u.full_name, COUNT(t.id) AS completed_count
+FROM tasks t
+JOIN users u ON u.id = t.assigned_user_id
+WHERE t.status = 'COMPLETED'
+GROUP BY u.full_name
+ORDER BY completed_count DESC
+LIMIT 1
+
+[N02] PASS - 18.4s
+  SQL: SELECT w.id, w.name, COUNT(t.id) AS task_count FROM workflows w JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY task_count ASC LIMIT 1
+
+[N03] PASS - 23.9s
+  SQL: WITH carol_count AS (
+  SELECT COUNT(t.id) AS cnt
+  FROM tasks t
+  JOIN users u ON u.id = t.assigned_user_id
+  WHERE u.full_name = 'Carol Chen'
+)
+SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.full_name
+HAVING COUNT(t.id) > (SELECT cnt FROM carol_count)
+ORDER BY task_count DESC
+
+[N04] PASS - 21.1s
+  SQL: WITH workflow_task_counts AS (SELECT workflows.id AS workflow_id, workflows.name AS workflow_name, COUNT(tasks.id) AS task_count FROM workflows LEFT JOIN tasks ON tasks.workflow_id = workflows.id GROUP BY workflows.id, workflows.name) SELECT workflow_name, task_count FROM workflow_task_counts WHERE task_count > (SELECT AVG(task_count) FROM workflow_task_counts) ORDER BY task_count DESC
+
+[N05] PASS - 16.3s
+  SQL: SELECT DISTINCT u.id, u.full_name FROM users u JOIN tasks t ON t.assigned_user_id = u.id WHERE t.priority = 'CRITICAL'
+
+[O01] PASS - 19.9s
+  SQL: WITH task_counts AS (
+  SELECT workflow_id, COUNT(id) AS task_count
+  FROM tasks
+  GROUP BY workflow_id
+)
+SELECT w.name AS workflow_name,
+       COALESCE(tc.task_count, 0) AS task_count,
+       u.full_name AS owner_name
+FROM workflows w
+JOIN users u ON u.id = w.owner_user_id
+LEFT JOIN task_counts tc ON tc.workflow_id = w.id
+ORDER BY w.name
+
+[O02] PASS - 19.0s
+  SQL: SELECT u.full_name, COUNT(t.id) AS unfinished_task_count
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 2
+
+[O03] WRONG_NULL_HANDLING - 16.6s
+  SQL: SELECT w.name AS workflow_name, t.status AS task_status, COUNT(t.id) AS task_count FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.name, t.status ORDER BY w.name, t.status
+
+[O04] PASS - 21.4s
+  SQL: SELECT users.department, COUNT(tasks.id) AS total_tasks FROM users LEFT JOIN tasks ON tasks.assigned_user_id = users.id GROUP BY users.department ORDER BY users.department
+
+[P01] RESULT_MISMATCH - 25.5s
+  SQL: SELECT w.id AS workflow_id, w.name AS workflow_name, COUNT(t.id) AS task_count, RANK() OVER (ORDER BY COUNT(t.id) DESC) AS rank FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY task_count DESC
+
+[P02] MISSING_JOIN - 16.3s
+  SQL: SELECT tasks.id AS task_id, tasks.workflow_id, tasks.name, tasks.due_date, ROW_NUMBER() OVER (PARTITION BY tasks.workflow_id ORDER BY tasks.due_date) AS task_order FROM tasks ORDER BY tasks.workflow_id, task_order
+
+[P03] PASS - 18.2s
+  SQL: SELECT tasks.id AS task_id, tasks.name AS task_name, tasks.workflow_id, COUNT(*) OVER (PARTITION BY tasks.workflow_id) AS workflow_task_count FROM tasks ORDER BY tasks.workflow_id, tasks.id
+
+[P04] PASS - 23.4s
+  SQL: WITH task_counts AS (
+  SELECT w.id AS workflow_id, w.name AS workflow_name, w.category, COUNT(t.id) AS task_count,
+    RANK() OVER (PARTITION BY w.category ORDER BY COUNT(t.id) DESC) AS rnk
+  FROM workflows w
+  LEFT JOIN tasks t ON t.workflow_id = w.id
+  GROUP BY w.id, w.name, w.category
+)
+SELECT category, workflow_name, task_count
+FROM task_counts
+WHERE rnk = 1
+ORDER BY category
+
+[P05] RESULT_MISMATCH - 16.2s
+  SQL: SELECT tasks.id, tasks.priority, COUNT(*) OVER (PARTITION BY tasks.priority) AS priority_count FROM tasks
+
+[Q01] PASS - 17.7s
+  SQL: SELECT u.full_name, COUNT(t.id) AS unfinished_tasks
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE u.status = 'ACTIVE' AND t.status <> 'COMPLETED'
+GROUP BY u.full_name
+HAVING COUNT(t.id) > 2
+ORDER BY unfinished_tasks DESC
+
+[Q02] PASS - 17.9s
+  SQL: SELECT DISTINCT w.id, w.name FROM workflows w JOIN users owner ON owner.id = w.owner_user_id WHERE owner.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM tasks t WHERE t.workflow_id = w.id AND t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED')
+
+[Q03] PASS - 16.6s
+  SQL: SELECT w.id, w.name, COUNT(t.id) AS unfinished_high_priority_count FROM workflows w JOIN tasks t ON t.workflow_id = w.id WHERE t.status <> 'COMPLETED' AND t.priority IN ('HIGH', 'CRITICAL') GROUP BY w.id, w.name HAVING COUNT(t.id) > 3
+
+[Q04] PASS - 17.9s
+  SQL: SELECT DISTINCT users.id, users.full_name FROM users JOIN tasks ON tasks.assigned_user_id = users.id WHERE users.status = 'INACTIVE' AND tasks.status <> 'COMPLETED'
+
+[Q05] PASS - 18.1s
+  SQL: SELECT DISTINCT w.id, w.name
+FROM workflows w
+JOIN tasks t ON t.workflow_id = w.id
+JOIN users u ON u.id = t.assigned_user_id
+WHERE w.status = 'ACTIVE'
+  AND t.status = 'BLOCKED'
+  AND u.status = 'ACTIVE'
+
+[R01] PASS - 21.3s
+  SQL: SELECT workflows.id, workflows.name FROM workflows WHERE workflows.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED')
+
+[R02] PASS - 18.4s
+  SQL: SELECT u.id, u.full_name, COUNT(*) FILTER (WHERE t.status <> 'COMPLETED') AS open_task_count FROM users u JOIN tasks t ON t.assigned_user_id = u.id GROUP BY u.id, u.full_name HAVING COUNT(*) FILTER (WHERE t.status <> 'COMPLETED') > (SELECT AVG(c) FROM (SELECT COUNT(*) AS c FROM tasks WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL GROUP BY assigned_user_id) s) ORDER BY open_task_count DESC
+
+[R03] PASS - 17.3s
+  SQL: SELECT DISTINCT owner.full_name
+FROM workflows w
+JOIN users owner ON owner.id = w.owner_user_id
+JOIN tasks t ON t.workflow_id = w.id
+WHERE t.status <> 'COMPLETED'
+  AND t.priority IN ('HIGH', 'CRITICAL')
+
+[R04] PASS - 20.3s
+  SQL: SELECT workflows.id, workflows.name FROM workflows WHERE NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.due_date < CURRENT_DATE AND tasks.status <> 'COMPLETED') AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.workflow_id = workflows.id AND tasks.status = 'BLOCKED')
+
+[R05] PASS - 21.0s
+  SQL: SELECT u.department, COUNT(t.id) AS unfinished_tasks FROM tasks t JOIN users u ON u.id = t.assigned_user_id WHERE t.status <> 'COMPLETED' GROUP BY u.department ORDER BY unfinished_tasks DESC
+
+[R06] PASS - 23.0s
+  SQL: SELECT DISTINCT u.id, u.full_name
+FROM users u
+JOIN workflows w ON w.owner_user_id = u.id
+WHERE NOT EXISTS (
+  SELECT 1 FROM tasks t WHERE t.assigned_user_id = u.id
+)
+ORDER BY u.full_name
+
+[S01] PASS - 15.5s
+  SQL: SELECT id, full_name, email, department FROM users WHERE status = 'ACTIVE' ORDER BY full_name
+
+[S02] PASS - 17.3s
+  SQL: SELECT w.id AS workflow_id, w.name AS workflow_name, COUNT(t.id) FILTER (WHERE t.status <> 'COMPLETED') AS outstanding_tasks FROM workflows w LEFT JOIN tasks t ON t.workflow_id = w.id GROUP BY w.id, w.name ORDER BY w.id
+
+[S03] WRONG_TABLE - 24.1s
+  SQL: SELECT tasks.id, tasks.name, tasks.status, tasks.priority, tasks.due_date, workflows.name AS workflow_name, users.full_name AS assignee_name
+FROM tasks
+JOIN workflows ON workflows.id = tasks.workflow_id
+LEFT JOIN users ON users.id = tasks.assigned_user_id
+WHERE tasks.status <> 'COMPLETED'
+  AND (tasks.due_date < CURRENT_DATE OR tasks.priority IN ('HIGH','CRITICAL'))
+ORDER BY (tasks.due_date < CURRENT_DATE) DESC,
+         CASE tasks.priority WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END DESC,
+         tasks.due_date ASC
+
+[S04] PASS - 17.5s
+  SQL: SELECT workflows.name FROM workflows WHERE workflows.status = 'ARCHIVED'
+
+[S05] PASS - 15.1s
+  SQL: SELECT workflows.name AS workflow_name, users.full_name AS owner_name FROM workflows JOIN users ON users.id = workflows.owner_user_id ORDER BY workflows.name
+
+
+--- config D ---
+========================================
+WREN + CLAUDE BENCHMARK
+========================================
+
+Total questions:        86
+
+SQL generated:          86 / 86
+SQL executable:         86 / 86
+Correct results:        79 / 86
+
+SQL generation:         100.00%
+Execution success:      100.00%
+Result accuracy:        91.86%
+
+By category:
+  A    4/4    100.0%  ########################
+  B    5/5    100.0%  ########################
+  C    3/4     75.0%  ##################......
+  D    4/4    100.0%  ########################
+  E    5/5    100.0%  ########################
+  F    5/5    100.0%  ########################
+  G    4/4    100.0%  ########################
+  H    4/4    100.0%  ########################
+  I    4/4    100.0%  ########################
+  J    4/4    100.0%  ########################
+  K    4/4    100.0%  ########################
+  L    4/5     80.0%  ###################.....
+  M    4/4    100.0%  ########################
+  N    5/5    100.0%  ########################
+  O    3/4     75.0%  ##################......
+  P    2/5     40.0%  ##########..............
+  Q    5/5    100.0%  ########################
+  R    6/6    100.0%  ########################
+  S    4/5     80.0%  ###################.....
+
+Failures:
+  RESULT_MISMATCH                3  (heuristic)
+  WRONG_DATE_LOGIC               1  (heuristic)
+  WRONG_NULL_HANDLING            1  (heuristic)
+  MISSING_JOIN                   1  (heuristic)
+  WRONG_TABLE                    1  (deterministic)
+
+Reports written to results\claude_cli/latest.{json,csv,md}

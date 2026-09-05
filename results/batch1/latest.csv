@@ -1,0 +1,111 @@
+question_id,category,question,config_name,privacy_mode,sql_valid,execution_success,result_match,failure_category,parse_strategy,tools_used,sqlstate,timed_out,cli_ok,claude_time_ms,sql_execution_time_ms,total_time_ms,prompt_tokens,completion_tokens,cache_read_tokens,cache_write_tokens,wren_tool_calls,expected_sql,generated_sql,error
+A02,A,List all workflows showing the name and category of each.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,29126.972099998966,125.37890009116381,32110.04860000685,9902,127,0,0,4,"SELECT name, category FROM workflows","SELECT name, category FROM workflows ORDER BY id",
+A03,A,Show the name and status of every task.,D,strict,False,False,False,CLI_FAILURE,none,mcp__wren__recall_queries;mcp__wren__list_models,,False,False,30434.22539997846,0.0,30669.262400013395,1419,48,0,0,2,"SELECT name, status FROM tasks",,"Error code: 429 - {'error': {'message': ""Request too large for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1049. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing"", 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+B03,B,Which tasks are currently blocked?,D,strict,False,False,False,CLI_FAILURE,none,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__dry_plan,,False,False,67397.5863000378,0.0,67650.36229998805,9917,128,0,0,5,SELECT name FROM tasks WHERE status = 'BLOCKED',,"Error code: 429 - {'error': {'message': ""Request too large for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1049. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing"", 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+C04,C,"List the workflows sorted by category, and within each category by name.",D,strict,False,False,False,CLI_FAILURE,none,,,False,False,10611.952899955213,0.0,10873.113800073043,0,0,0,0,0,"SELECT category, name FROM workflows ORDER BY category, name",,"Error code: 429 - {'error': {'message': ""Request too large for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1049. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing"", 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+D04,D,Show the 5 unfinished tasks with the earliest deadlines.,D,strict,False,False,False,CLI_FAILURE,none,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions,,False,False,2997.2827000310645,0.0,3277.6940000476316,1421,64,0,0,3,"SELECT name, due_date FROM tasks
+WHERE status <> 'COMPLETED'
+ORDER BY due_date
+LIMIT 5",,"Error code: 429 - {'error': {'message': ""Request too large for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1049. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing"", 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+E04,E,What is the highest number of tasks belonging to any single workflow?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,83041.43870004918,161.41040006186813,83472.78670000378,10047,191,0,0,4,"SELECT MAX(c) FROM (
+  SELECT COUNT(*) AS c FROM tasks GROUP BY workflow_id
+) s","SELECT MAX(cnt) AS max_tasks_per_workflow
+FROM (
+  SELECT t.workflow_id, COUNT(t.id) AS cnt
+  FROM tasks t
+  GROUP BY t.workflow_id
+) s",
+F05,F,"For each user, how many tasks are they assigned? Include users with none.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,102862.27150005288,153.21070002391934,103275.45730001293,11960,236,0,0,5,"SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name","SELECT u.full_name, COUNT(t.id) AS task_count
+FROM users u
+LEFT JOIN tasks t ON t.assigned_user_id = u.id
+GROUP BY u.id, u.full_name
+ORDER BY task_count DESC, u.id",
+G03,G,Which departments have more than 2 users?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,81684.14080003276,131.8412000546232,82085.75520000886,9588,161,0,0,4,"SELECT department FROM users
+GROUP BY department
+HAVING COUNT(*) > 2","SELECT department, COUNT(*) AS user_count
+FROM users
+GROUP BY department
+HAVING COUNT(*) > 2
+ORDER BY department",
+H02,H,Show each task's name alongside the name of the workflow it belongs to.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,102336.40110003762,156.4047000138089,102783.73410005588,11976,197,0,0,5,"SELECT t.name AS task_name, w.name AS workflow_name
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id","SELECT t.name AS task_name, w.name AS workflow_name FROM tasks t JOIN workflows w ON w.id = t.workflow_id ORDER BY t.id",
+I03,I,"For each blocked task, show the task name, the workflow name and the workflow owner's name.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,116493.00630006474,181.66289990767837,116969.6461999556,13634,281,0,0,6,"SELECT t.name AS task_name, w.name AS workflow_name, o.full_name AS owner
+FROM tasks t
+JOIN workflows w ON w.id = t.workflow_id
+JOIN users o ON o.id = w.owner_user_id
+WHERE t.status = 'BLOCKED'","SELECT t.name AS task_name, w.name AS workflow_name, u.full_name AS owner_name FROM tasks t JOIN workflows w ON w.id = t.workflow_id JOIN users u ON u.id = w.owner_user_id WHERE t.status = 'BLOCKED' ORDER BY t.id",
+J02,J,"List every user together with how many workflows they own, including those who own none.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,98505.37110003643,147.63240003958344,99029.57649994642,11599,233,0,0,5,"SELECT u.full_name, COUNT(w.id) AS workflow_count
+FROM users u
+LEFT JOIN workflows w ON w.owner_user_id = u.id
+GROUP BY u.id, u.full_name","SELECT u.id, u.full_name, COUNT(w.id) AS workflow_count
+FROM users u
+LEFT JOIN workflows w ON w.owner_user_id = u.id
+GROUP BY u.id, u.full_name
+ORDER BY u.id",
+K01,K,Which tasks have no completion date recorded?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,86768.35350005422,136.5112999919802,87157.25629997905,10163,134,0,0,4,SELECT name FROM tasks WHERE completed_at IS NULL,"SELECT id, name FROM tasks WHERE completed_at IS NULL ORDER BY id",
+L05,L,"Which unfinished tasks are due within the next 7 days, including today?",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__dry_plan;mcp__wren__dry_plan,,False,True,173272.9969000211,145.2601000200957,173676.33059993386,20259,261,0,0,6,"SELECT name FROM tasks
+WHERE status <> 'COMPLETED'
+  AND due_date >= CURRENT_DATE
+  AND due_date <= CURRENT_DATE + INTERVAL '7 days'","SELECT id, name, status, priority, due_date FROM tasks WHERE status <> 'COMPLETED' AND due_date >= CURRENT_DATE AND due_date <= CURRENT_DATE + 7",
+M01,M,Label each unfinished task as 'Overdue' if its due date has passed and 'On time' otherwise.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,128010.56049996987,164.43400003481656,128508.05139995646,15046,221,0,0,5,"SELECT name,
+       CASE WHEN due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS label
+FROM tasks
+WHERE status <> 'COMPLETED'","SELECT t.id, t.name, CASE WHEN t.due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS label FROM tasks t WHERE t.status <> 'COMPLETED' ORDER BY t.id",
+N05,N,Which users are assigned at least one critical task?,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,101235.4908999987,143.43339996412396,101659.85709999222,11840,236,0,0,5,"SELECT DISTINCT u.full_name
+FROM users u
+WHERE EXISTS (
+  SELECT 1 FROM tasks t
+  WHERE t.assigned_user_id = u.id AND t.priority = 'CRITICAL'
+)","SELECT u.id, u.full_name
+FROM users u
+WHERE EXISTS (
+    SELECT 1 FROM tasks t
+    WHERE t.assigned_user_id = u.id
+      AND t.priority = 'CRITICAL'
+)
+ORDER BY u.id",
+O02,O,"Work out how many unfinished tasks each user has, then list the users with more than 2 of them.",D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,142775.49829997588,156.1431000009179,143198.23140010703,16721,293,0,0,6,"WITH open_counts AS (
+  SELECT assigned_user_id, COUNT(*) AS open_tasks
+  FROM tasks
+  WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
+  GROUP BY assigned_user_id
+)
+SELECT u.full_name, oc.open_tasks
+FROM open_counts oc
+JOIN users u ON u.id = oc.assigned_user_id
+WHERE oc.open_tasks > 2","SELECT u.full_name, COUNT(t.id) AS unfinished_tasks
+FROM users u
+LEFT JOIN tasks t
+       ON t.assigned_user_id = u.id
+      AND t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 2
+ORDER BY unfinished_tasks DESC, u.id",
+P03,P,Show each task alongside the total number of tasks belonging to the same workflow.,D,strict,True,True,True,,json,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__describe_model;mcp__wren__dry_plan,,False,True,87017.88010005839,155.2815999602899,87507.16400006786,10193,178,0,0,4,"SELECT name,
+       COUNT(*) OVER (PARTITION BY workflow_id) AS workflow_task_count
+FROM tasks","SELECT t.id, t.name, COUNT(t.id) OVER (PARTITION BY t.workflow_id) AS workflow_task_count
+FROM tasks t
+ORDER BY t.id",
+Q01,Q,Which active users have more than 2 unfinished tasks?,D,strict,False,False,False,CLI_FAILURE,none,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__describe_model,,False,False,44350.548800081015,0.0,44691.344299935736,5150,117,0,0,5,"SELECT u.full_name
+FROM users u
+JOIN tasks t ON t.assigned_user_id = u.id
+WHERE u.status = 'ACTIVE' AND t.status <> 'COMPLETED'
+GROUP BY u.id, u.full_name
+HAVING COUNT(t.id) > 2",,"Error code: 429 - {'error': {'message': 'Rate limit reached for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 194803, Requested 5576. Please try again in 2m43.728s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+R04,R,"Which workflows are healthy, meaning they have no overdue and no blocked tasks?",D,strict,False,False,False,CLI_FAILURE,none,mcp__wren__recall_queries;mcp__wren__list_models;mcp__wren__get_instructions;mcp__wren__describe_model;mcp__wren__describe_model,,False,False,56595.96790000796,0.0,56886.527900001965,5175,122,0,0,5,"SELECT w.name
+FROM workflows w
+WHERE NOT EXISTS (
+  SELECT 1 FROM tasks t
+  WHERE t.workflow_id = w.id
+    AND (t.status = 'BLOCKED'
+         OR (t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED'))
+)",,"Error code: 429 - {'error': {'message': 'Rate limit reached for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199970, Requested 5679. Please try again in 40m40.368s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+S02,S,How much work is still outstanding in each workflow?,D,strict,False,False,False,CLI_FAILURE,none,,,False,False,2395.5784999998286,0.0,2652.8391001047567,0,0,0,0,0,"SELECT w.name, COUNT(t.id) AS outstanding
+FROM workflows w
+LEFT JOIN tasks t
+       ON t.workflow_id = w.id AND t.status <> 'COMPLETED'
+GROUP BY w.id, w.name",,"Error code: 429 - {'error': {'message': 'Rate limit reached for model `qwen/qwen3.8-27b` in organization `org_01ky4pa3jcfcc909j91mjgvma0` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199964, Requested 1509. Please try again in 10m36.336s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"

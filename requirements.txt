@@ -1,0 +1,22 @@
+# Wren AI: semantic layer, MDL, NL->SQL knowledge and the local MCP server.
+#   postgres -> psycopg connector for the demo database
+#   mcp      -> the `wren serve mcp` server Claude Code talks to
+#   memory   -> lancedb + sentence-transformers, for semantic recall_queries
+wrenai[postgres,mcp,memory]==0.13.4
+
+# MUST be <2. wrenai 0.13.4 declares 'mcp[cli]>=1.19' but its mcp_server.py
+# imports mcp.server.fastmcp.FastMCP, which mcp 2.x renamed to MCPServer.
+# With mcp 2.x installed, `wren serve mcp` dies on import and Claude Code
+# silently runs with NO Wren tools at all. See docs/wren-findings.md.
+mcp<2
+
+psycopg[binary]>=3.1     # benchmark-side SQL execution
+sqlglot>=29              # read-only safety gate + AST diff for failure classification
+pyyaml>=6.0              # metadata and question files
+python-dotenv>=1.0       # .env loading
+pytest>=8.0              # test suite
+
+# Deliberately absent: anthropic. Claude is reached only via the local
+# Claude Code CLI (subprocess), never the Anthropic API.
+openai>=1.0.0
+nest_asyncio

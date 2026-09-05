@@ -1,0 +1,192 @@
+# Confirmed natural-language -> SQL exemplars, loaded into Wren's query memory
+# with `wren memory load`. Retrieved at question time by the recall_queries
+# MCP tool. This file is Wren's native format: version + pairs[{nl, sql}].
+#
+# These stand in for the 50-80 examples the real system already has, and they
+# are the entire difference between knowledge configuration C and D.
+#
+# IMPORTANT: every entry here must be DISJOINT from benchmark/questions.yaml.
+# An exemplar that is also a benchmark question would measure memorisation
+# rather than generalisation. tests/test_metadata.py enforces this.
+#
+# The first nine are the examples named in the brief. The rest teach patterns
+# the benchmark needs but does not ask verbatim: LEFT JOIN for zero counts,
+# DISTINCT counting after a fan-out join, explicit priority ranking, existential
+# filters, and the owner-versus-assignee distinction.
+
+version: 1
+
+pairs:
+
+  - nl: Show all active users.
+    source: poc
+    sql: |
+      SELECT id, full_name, email, department, role
+      FROM users
+      WHERE status = 'ACTIVE'
+      ORDER BY id
+
+  - nl: Show workflows owned by Alice.
+    source: poc
+    sql: |
+      SELECT w.id, w.name, w.category, w.status
+      FROM workflows w
+      JOIN users u ON u.id = w.owner_user_id
+      WHERE u.full_name = 'Alice Anderson'
+      ORDER BY w.id
+
+  - nl: Show overdue tasks.
+    source: poc
+    sql: |
+      SELECT id, name, status, priority, due_date
+      FROM tasks
+      WHERE due_date < CURRENT_DATE
+        AND status <> 'COMPLETED'
+      ORDER BY due_date
+
+  - nl: Which workflow has the most tasks?
+    source: poc
+    sql: |
+      SELECT w.name, COUNT(t.id) AS task_count
+      FROM workflows w
+      JOIN tasks t ON t.workflow_id = w.id
+      GROUP BY w.id, w.name
+      ORDER BY task_count DESC
+      LIMIT 1
+
+  - nl: Which user has the most assigned tasks?
+    source: poc
+    sql: |
+      SELECT u.full_name, COUNT(t.id) AS task_count
+      FROM users u
+      JOIN tasks t ON t.assigned_user_id = u.id
+      GROUP BY u.id, u.full_name
+      ORDER BY task_count DESC
+      LIMIT 1
+
+  - nl: Show each workflow with its owner.
+    source: poc
+    sql: |
+      SELECT w.name AS workflow_name, u.full_name AS owner_name
+      FROM workflows w
+      JOIN users u ON u.id = w.owner_user_id
+      ORDER BY w.id
+
+  - nl: Show each task with its workflow and assignee.
+    source: poc
+    sql: |
+      SELECT t.name AS task_name,
+             w.name AS workflow_name,
+             u.full_name AS assignee_name
+      FROM tasks t
+      JOIN workflows w ON w.id = t.workflow_id
+      LEFT JOIN users u ON u.id = t.assigned_user_id
+      ORDER BY t.id
+
+  - nl: Show workflows with no tasks.
+    source: poc
+    sql: |
+      SELECT w.id, w.name, w.category, w.status
+      FROM workflows w
+      LEFT JOIN tasks t ON t.workflow_id = w.id
+      WHERE t.id IS NULL
+      ORDER BY w.id
+
+  - nl: Show users who have not been assigned any tasks.
+    source: poc
+    sql: |
+      SELECT u.id, u.full_name, u.department
+      FROM users u
+      LEFT JOIN tasks t ON t.assigned_user_id = u.id
+      WHERE t.id IS NULL
+      ORDER BY u.id
+
+  # --- Patterns the benchmark exercises but never asks in these words ---
+
+  - nl: How many tasks does each workflow have, including workflows with none?
+    source: poc
+    sql: |
+      SELECT w.name, COUNT(t.id) AS task_count
+      FROM workflows w
+      LEFT JOIN tasks t ON t.workflow_id = w.id
+      GROUP BY w.id, w.name
+      ORDER BY task_count DESC, w.id
+
+  - nl: How many distinct workflows contain at least one blocked task?
+    source: poc
+    sql: |
+      SELECT COUNT(DISTINCT w.id) AS workflow_count
+      FROM workflows w
+      JOIN tasks t ON t.workflow_id = w.id
+      WHERE t.status = 'BLOCKED'
+
+  - nl: List open tasks ordered from most to least urgent.
+    source: poc
+    sql: |
+      SELECT name, priority, status, due_date
+      FROM tasks
+      WHERE status <> 'COMPLETED'
+      ORDER BY CASE priority
+                 WHEN 'CRITICAL' THEN 4
+                 WHEN 'HIGH'     THEN 3
+                 WHEN 'MEDIUM'   THEN 2
+                 WHEN 'LOW'      THEN 1
+                 ELSE 0
+               END DESC,
+               due_date
+
+  - nl: Which workflows contain at least one overdue task?
+    source: poc
+    sql: |
+      SELECT w.id, w.name
+      FROM workflows w
+      WHERE EXISTS (
+          SELECT 1 FROM tasks t
+          WHERE t.workflow_id = w.id
+            AND t.due_date < CURRENT_DATE
+            AND t.status <> 'COMPLETED'
+      )
+      ORDER BY w.id
+
+  - nl: Show the owners of workflows that contain blocked tasks.
+    source: poc
+    sql: |
+      SELECT DISTINCT owner.full_name
+      FROM workflows w
+      JOIN users owner ON owner.id = w.owner_user_id
+      JOIN tasks t ON t.workflow_id = w.id
+      WHERE t.status = 'BLOCKED'
+      ORDER BY owner.full_name
+
+  - nl: How many open tasks does each active user have?
+    source: poc
+    sql: |
+      SELECT u.full_name, COUNT(t.id) AS open_tasks
+      FROM users u
+      LEFT JOIN tasks t
+             ON t.assigned_user_id = u.id
+            AND t.status <> 'COMPLETED'
+      WHERE u.status = 'ACTIVE'
+      GROUP BY u.id, u.full_name
+      ORDER BY open_tasks DESC, u.id
+
+  - nl: How many tasks were finished in the current calendar month?
+    source: poc
+    sql: |
+      SELECT COUNT(*) AS completed_this_month
+      FROM tasks
+      WHERE completed_at >= date_trunc('month', CURRENT_DATE)
+        AND completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
+
+  - nl: Rank users within their department by how many tasks they are assigned.
+    source: poc
+    sql: |
+      SELECT u.department,
+             u.full_name,
+             COUNT(t.id) AS task_count,
+             RANK() OVER (PARTITION BY u.department
+                          ORDER BY COUNT(t.id) DESC) AS dept_rank
+      FROM users u
+      LEFT JOIN tasks t ON t.assigned_user_id = u.id
+      GROUP BY u.id, u.department, u.full_name
+      ORDER BY u.department, dept_rank, u.id

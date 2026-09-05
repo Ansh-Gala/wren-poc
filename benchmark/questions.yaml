@@ -1,0 +1,993 @@
+# Benchmark questions with hand-written ground-truth SQL.
+#
+# Every expected_sql here was written by a human and verified against the real
+# demo database by scripts/verify_ground_truth.py. Neither Wren nor Claude has
+# any say in what the right answer is.
+#
+# Fields:
+#   id              stable identifier, category letter + number
+#   category        A-S, see the brief
+#   question        exactly what is sent to Claude
+#   expected_sql    the reference answer
+#   ordered         true when the question demands a specific row order; the
+#                   evaluator then compares sequences instead of multisets
+#   tags            'semantic' -> needs descriptions/rules to answer correctly
+#                   'date'     -> depends on CURRENT_DATE
+#   interpretation  required for R and S: the intended reading, recorded so a
+#                   disputed result can be judged rather than argued about
+#
+# No question here may duplicate an exemplar in
+# metadata/question_sql_pairs.yaml; tests/test_metadata.py enforces that.
+
+questions:
+
+# ---------------------------------------------------------------- A: SELECT
+- id: A01
+  category: A
+  question: List every user with their name, email and department.
+  ordered: false
+  expected_sql: SELECT full_name, email, department FROM users
+
+- id: A02
+  category: A
+  question: List all workflows showing the name and category of each.
+  ordered: false
+  expected_sql: SELECT name, category FROM workflows
+
+- id: A03
+  category: A
+  question: Show the name and status of every task.
+  ordered: false
+  expected_sql: SELECT name, status FROM tasks
+
+- id: A04
+  category: A
+  question: Which departments exist in the organisation?
+  ordered: false
+  expected_sql: SELECT DISTINCT department FROM users
+
+# ----------------------------------------------------------------- B: WHERE
+- id: B01
+  category: B
+  question: Which users are currently unavailable for new assignments?
+  ordered: false
+  tags: [semantic]
+  expected_sql: SELECT full_name FROM users WHERE status = 'INACTIVE'
+
+- id: B02
+  category: B
+  question: List the tasks that have not been started yet.
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE status = 'TODO'
+
+- id: B03
+  category: B
+  question: Which tasks are currently blocked?
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE status = 'BLOCKED'
+
+- id: B04
+  category: B
+  question: Show the tasks that have critical priority.
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE priority = 'CRITICAL'
+
+- id: B05
+  category: B
+  question: Which workflows are still in draft?
+  ordered: false
+  expected_sql: SELECT name FROM workflows WHERE status = 'DRAFT'
+
+# -------------------------------------------------------------- C: ORDER BY
+- id: C01
+  category: C
+  question: List the workflows from newest to oldest by creation date.
+  ordered: true
+  expected_sql: SELECT name FROM workflows ORDER BY created_at DESC
+
+- id: C02
+  category: C
+  question: List all users sorted alphabetically by name.
+  ordered: true
+  expected_sql: SELECT full_name FROM users ORDER BY full_name
+
+- id: C03
+  category: C
+  question: Show the unfinished tasks with the earliest due date first.
+  ordered: true
+  expected_sql: |
+    SELECT name, due_date FROM tasks
+    WHERE status <> 'COMPLETED'
+    ORDER BY due_date, name
+
+- id: C04
+  category: C
+  question: List the workflows sorted by category, and within each category by name.
+  ordered: true
+  expected_sql: SELECT category, name FROM workflows ORDER BY category, name
+
+# ----------------------------------------------------------------- D: LIMIT
+- id: D01
+  category: D
+  question: What are the 5 most recently created tasks?
+  ordered: true
+  expected_sql: SELECT name FROM tasks ORDER BY created_at DESC LIMIT 5
+
+- id: D02
+  category: D
+  question: Which three users have the most tasks assigned to them?
+  ordered: true
+  expected_sql: |
+    SELECT u.full_name, COUNT(t.id) AS task_count
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.id, u.full_name
+    ORDER BY task_count DESC
+    LIMIT 3
+
+- id: D03
+  category: D
+  question: What are the three workflows containing the greatest number of tasks?
+  ordered: true
+  expected_sql: |
+    SELECT w.name, COUNT(t.id) AS task_count
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+    ORDER BY task_count DESC
+    LIMIT 3
+
+- id: D04
+  category: D
+  question: Show the 5 unfinished tasks with the earliest deadlines.
+  ordered: true
+  tags: [date]
+  expected_sql: |
+    SELECT name, due_date FROM tasks
+    WHERE status <> 'COMPLETED'
+    ORDER BY due_date
+    LIMIT 5
+
+# ----------------------------------------------------------- E: Aggregation
+- id: E01
+  category: E
+  question: How many users are there in total?
+  ordered: false
+  expected_sql: SELECT COUNT(*) FROM users
+
+- id: E02
+  category: E
+  question: How many workflows exist?
+  ordered: false
+  expected_sql: SELECT COUNT(*) FROM workflows
+
+- id: E03
+  category: E
+  question: How many tasks are there altogether?
+  ordered: false
+  expected_sql: SELECT COUNT(*) FROM tasks
+
+- id: E04
+  category: E
+  question: What is the highest number of tasks belonging to any single workflow?
+  ordered: false
+  expected_sql: |
+    SELECT MAX(c) FROM (
+      SELECT COUNT(*) AS c FROM tasks GROUP BY workflow_id
+    ) s
+
+- id: E05
+  category: E
+  question: >-
+    What is the average number of tasks per workflow, counting workflows that
+    have no tasks?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT AVG(c) FROM (
+      SELECT COUNT(t.id) AS c
+      FROM workflows w
+      LEFT JOIN tasks t ON t.workflow_id = w.id
+      GROUP BY w.id
+    ) s
+
+# -------------------------------------------------------------- F: GROUP BY
+- id: F01
+  category: F
+  question: How many tasks are there in each status?
+  ordered: false
+  expected_sql: SELECT status, COUNT(*) FROM tasks GROUP BY status
+
+- id: F02
+  category: F
+  question: How many tasks fall into each priority level?
+  ordered: false
+  expected_sql: SELECT priority, COUNT(*) FROM tasks GROUP BY priority
+
+- id: F03
+  category: F
+  question: How many workflows are there in each category?
+  ordered: false
+  expected_sql: SELECT category, COUNT(*) FROM workflows GROUP BY category
+
+- id: F04
+  category: F
+  question: How many users are in each department?
+  ordered: false
+  expected_sql: SELECT department, COUNT(*) FROM users GROUP BY department
+
+- id: F05
+  category: F
+  question: >-
+    For each user, how many tasks are they assigned? Include users with none.
+  ordered: false
+  expected_sql: |
+    SELECT u.full_name, COUNT(t.id) AS task_count
+    FROM users u
+    LEFT JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.id, u.full_name
+
+# ---------------------------------------------------------------- G: HAVING
+- id: G01
+  category: G
+  question: Which users are assigned more than 3 tasks?
+  ordered: false
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.id, u.full_name
+    HAVING COUNT(t.id) > 3
+
+- id: G02
+  category: G
+  question: Which workflows have more than 5 tasks?
+  ordered: false
+  expected_sql: |
+    SELECT w.name
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+    HAVING COUNT(t.id) > 5
+
+- id: G03
+  category: G
+  question: Which departments have more than 2 users?
+  ordered: false
+  expected_sql: |
+    SELECT department FROM users
+    GROUP BY department
+    HAVING COUNT(*) > 2
+
+- id: G04
+  category: G
+  question: Which task priority levels are used by more than 10 tasks?
+  ordered: false
+  expected_sql: |
+    SELECT priority FROM tasks
+    GROUP BY priority
+    HAVING COUNT(*) > 10
+
+# ----------------------------------------------------------- H: INNER JOIN
+- id: H01
+  category: H
+  question: For each workflow, show its category and the email address of its owner.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT w.category, u.email
+    FROM workflows w
+    JOIN users u ON u.id = w.owner_user_id
+
+- id: H02
+  category: H
+  question: Show each task's name alongside the name of the workflow it belongs to.
+  ordered: false
+  expected_sql: |
+    SELECT t.name AS task_name, w.name AS workflow_name
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+
+- id: H03
+  category: H
+  question: Show every assigned task together with the name of the person doing it.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT t.name AS task_name, u.full_name AS assignee
+    FROM tasks t
+    JOIN users u ON u.id = t.assigned_user_id
+
+- id: H04
+  category: H
+  question: Show each assigned task with the department of the person assigned to it.
+  ordered: false
+  expected_sql: |
+    SELECT t.name AS task_name, u.department
+    FROM tasks t
+    JOIN users u ON u.id = t.assigned_user_id
+
+# --------------------------------------------------------- I: 3-table JOIN
+- id: I01
+  category: I
+  question: >-
+    For every assigned task, show the task name, its workflow name and the
+    department of the person assigned to it.
+  ordered: false
+  expected_sql: |
+    SELECT t.name AS task_name, w.name AS workflow_name, u.department
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+    JOIN users u ON u.id = t.assigned_user_id
+
+- id: I02
+  category: I
+  question: >-
+    Show each task with the name of its workflow and the name of that
+    workflow's owner.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT t.name AS task_name, w.name AS workflow_name, o.full_name AS owner
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+    JOIN users o ON o.id = w.owner_user_id
+
+- id: I03
+  category: I
+  question: >-
+    For each blocked task, show the task name, the workflow name and the
+    workflow owner's name.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT t.name AS task_name, w.name AS workflow_name, o.full_name AS owner
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+    JOIN users o ON o.id = w.owner_user_id
+    WHERE t.status = 'BLOCKED'
+
+- id: I04
+  category: I
+  question: >-
+    For every assigned task show the task name, the workflow name, the
+    assignee's name and the workflow owner's name.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT t.name AS task_name,
+           w.name AS workflow_name,
+           a.full_name AS assignee,
+           o.full_name AS owner
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+    JOIN users a ON a.id = t.assigned_user_id
+    JOIN users o ON o.id = w.owner_user_id
+
+# ------------------------------------------------------------ J: LEFT JOIN
+- id: J01
+  category: J
+  question: Which users do not own any workflow?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    LEFT JOIN workflows w ON w.owner_user_id = u.id
+    WHERE w.id IS NULL
+
+- id: J02
+  category: J
+  question: >-
+    List every user together with how many workflows they own, including those
+    who own none.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT u.full_name, COUNT(w.id) AS workflow_count
+    FROM users u
+    LEFT JOIN workflows w ON w.owner_user_id = u.id
+    GROUP BY u.id, u.full_name
+
+- id: J03
+  category: J
+  question: >-
+    List every task with its assignee's name, including tasks that nobody is
+    assigned to.
+  ordered: false
+  expected_sql: |
+    SELECT t.name AS task_name, u.full_name AS assignee
+    FROM tasks t
+    LEFT JOIN users u ON u.id = t.assigned_user_id
+
+- id: J04
+  category: J
+  question: Which users neither own a workflow nor have any task assigned to them?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    WHERE NOT EXISTS (SELECT 1 FROM workflows w WHERE w.owner_user_id = u.id)
+      AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.assigned_user_id = u.id)
+
+# ------------------------------------------------------------------ K: NULL
+- id: K01
+  category: K
+  question: Which tasks have no completion date recorded?
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE completed_at IS NULL
+
+- id: K02
+  category: K
+  question: Which tasks have a completion date recorded, and when were they completed?
+  ordered: false
+  expected_sql: SELECT name, completed_at FROM tasks WHERE completed_at IS NOT NULL
+
+- id: K03
+  category: K
+  question: Which tasks have nobody assigned to them?
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE assigned_user_id IS NULL
+
+- id: K04
+  category: K
+  question: Which tasks have no due date set?
+  ordered: false
+  expected_sql: SELECT name FROM tasks WHERE due_date IS NULL
+
+# ----------------------------------------------------------------- L: Dates
+- id: L01
+  category: L
+  question: Which tasks are due today and not yet finished?
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name FROM tasks
+    WHERE due_date = CURRENT_DATE AND status <> 'COMPLETED'
+
+- id: L02
+  category: L
+  question: For each late unfinished task, how many days past its due date is it?
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name, CURRENT_DATE - due_date AS days_overdue
+    FROM tasks
+    WHERE due_date < CURRENT_DATE AND status <> 'COMPLETED'
+
+- id: L03
+  category: L
+  question: Which tasks were completed during the current calendar month?
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name FROM tasks
+    WHERE completed_at >= date_trunc('month', CURRENT_DATE)
+      AND completed_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
+
+- id: L04
+  category: L
+  question: Which workflows were created in the last 30 days?
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name FROM workflows
+    WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+
+- id: L05
+  category: L
+  question: Which unfinished tasks are due within the next 7 days, including today?
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name FROM tasks
+    WHERE status <> 'COMPLETED'
+      AND due_date >= CURRENT_DATE
+      AND due_date <= CURRENT_DATE + INTERVAL '7 days'
+
+# ------------------------------------------------------------------ M: CASE
+- id: M01
+  category: M
+  question: >-
+    Label each unfinished task as 'Overdue' if its due date has passed and
+    'On time' otherwise.
+  ordered: false
+  tags: [date]
+  expected_sql: |
+    SELECT name,
+           CASE WHEN due_date < CURRENT_DATE THEN 'Overdue' ELSE 'On time' END AS label
+    FROM tasks
+    WHERE status <> 'COMPLETED'
+
+- id: M02
+  category: M
+  question: >-
+    Categorise every user's workload as 'None' when they have no assigned
+    tasks, 'Light' for 1 to 3 tasks, and 'Heavy' for 4 or more.
+  ordered: false
+  expected_sql: |
+    SELECT u.full_name,
+           CASE WHEN COUNT(t.id) = 0 THEN 'None'
+                WHEN COUNT(t.id) <= 3 THEN 'Light'
+                ELSE 'Heavy' END AS workload
+    FROM users u
+    LEFT JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.id, u.full_name
+
+- id: M03
+  category: M
+  question: >-
+    Categorise each workflow as 'Empty' when it has no tasks, 'Small' for 1 to
+    8 tasks, and 'Large' for 9 or more.
+  ordered: false
+  expected_sql: |
+    SELECT w.name,
+           CASE WHEN COUNT(t.id) = 0 THEN 'Empty'
+                WHEN COUNT(t.id) <= 8 THEN 'Small'
+                ELSE 'Large' END AS size_band
+    FROM workflows w
+    LEFT JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+
+- id: M04
+  category: M
+  question: >-
+    Show each task with a numeric urgency score: 4 for critical, 3 for high,
+    2 for medium and 1 for low priority.
+  ordered: false
+  expected_sql: |
+    SELECT name,
+           CASE priority
+             WHEN 'CRITICAL' THEN 4
+             WHEN 'HIGH' THEN 3
+             WHEN 'MEDIUM' THEN 2
+             WHEN 'LOW' THEN 1
+           END AS urgency
+    FROM tasks
+
+# ------------------------------------------------------------ N: Subqueries
+- id: N01
+  category: N
+  question: Which user has completed the most tasks?
+  ordered: false
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    WHERE t.status = 'COMPLETED'
+    GROUP BY u.id, u.full_name
+    ORDER BY COUNT(t.id) DESC
+    LIMIT 1
+
+- id: N02
+  category: N
+  question: Among workflows that have tasks, which one has the fewest?
+  ordered: false
+  expected_sql: |
+    SELECT w.name
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+    ORDER BY COUNT(t.id) ASC
+    LIMIT 1
+
+- id: N03
+  category: N
+  question: Which users are assigned more tasks than Carol Chen?
+  ordered: false
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.id, u.full_name
+    HAVING COUNT(t.id) > (
+      SELECT COUNT(*) FROM tasks t2
+      JOIN users u2 ON u2.id = t2.assigned_user_id
+      WHERE u2.full_name = 'Carol Chen'
+    )
+
+- id: N04
+  category: N
+  question: >-
+    Which workflows have more tasks than the average across all workflows,
+    counting workflows with no tasks in that average?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT w.name
+    FROM workflows w
+    LEFT JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+    HAVING COUNT(t.id) > (
+      SELECT AVG(c) FROM (
+        SELECT COUNT(t2.id) AS c
+        FROM workflows w2
+        LEFT JOIN tasks t2 ON t2.workflow_id = w2.id
+        GROUP BY w2.id
+      ) s
+    )
+
+- id: N05
+  category: N
+  question: Which users are assigned at least one critical task?
+  ordered: false
+  expected_sql: |
+    SELECT DISTINCT u.full_name
+    FROM users u
+    WHERE EXISTS (
+      SELECT 1 FROM tasks t
+      WHERE t.assigned_user_id = u.id AND t.priority = 'CRITICAL'
+    )
+
+# ------------------------------------------------------------------ O: CTEs
+- id: O01
+  category: O
+  question: >-
+    Using a common table expression, list each workflow with its task count and
+    the name of its owner.
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    WITH counts AS (
+      SELECT workflow_id, COUNT(*) AS task_count
+      FROM tasks GROUP BY workflow_id
+    )
+    SELECT w.name, COALESCE(c.task_count, 0) AS task_count, o.full_name AS owner
+    FROM workflows w
+    JOIN users o ON o.id = w.owner_user_id
+    LEFT JOIN counts c ON c.workflow_id = w.id
+
+- id: O02
+  category: O
+  question: >-
+    Work out how many unfinished tasks each user has, then list the users with
+    more than 2 of them.
+  ordered: false
+  expected_sql: |
+    WITH open_counts AS (
+      SELECT assigned_user_id, COUNT(*) AS open_tasks
+      FROM tasks
+      WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
+      GROUP BY assigned_user_id
+    )
+    SELECT u.full_name, oc.open_tasks
+    FROM open_counts oc
+    JOIN users u ON u.id = oc.assigned_user_id
+    WHERE oc.open_tasks > 2
+
+- id: O03
+  category: O
+  question: >-
+    Break the tasks down by workflow and status, showing the count for each
+    combination.
+  ordered: false
+  expected_sql: |
+    SELECT w.name AS workflow_name, t.status, COUNT(*) AS task_count
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+    GROUP BY w.name, t.status
+
+- id: O04
+  category: O
+  question: For each department, how many tasks in total are assigned to its members?
+  ordered: false
+  expected_sql: |
+    SELECT u.department, COUNT(t.id) AS task_count
+    FROM users u
+    LEFT JOIN tasks t ON t.assigned_user_id = u.id
+    GROUP BY u.department
+
+# ------------------------------------------------------ P: Window functions
+- id: P01
+  category: P
+  question: >-
+    Rank the workflows by how many tasks they contain, showing the rank next to
+    the count.
+  ordered: true
+  expected_sql: |
+    SELECT w.name,
+           COUNT(t.id) AS task_count,
+           RANK() OVER (ORDER BY COUNT(t.id) DESC) AS rank
+    FROM workflows w
+    LEFT JOIN tasks t ON t.workflow_id = w.id
+    GROUP BY w.id, w.name
+    ORDER BY task_count DESC, w.name
+
+- id: P02
+  category: P
+  question: >-
+    Within each workflow, number the tasks in order of their due date, earliest
+    first.
+  ordered: false
+  expected_sql: |
+    SELECT w.name AS workflow_name,
+           t.name AS task_name,
+           ROW_NUMBER() OVER (PARTITION BY t.workflow_id ORDER BY t.due_date, t.id) AS seq
+    FROM tasks t
+    JOIN workflows w ON w.id = t.workflow_id
+
+- id: P03
+  category: P
+  question: >-
+    Show each task alongside the total number of tasks belonging to the same
+    workflow.
+  ordered: false
+  expected_sql: |
+    SELECT name,
+           COUNT(*) OVER (PARTITION BY workflow_id) AS workflow_task_count
+    FROM tasks
+
+- id: P04
+  category: P
+  question: For each workflow category, which workflow contains the most tasks?
+  ordered: false
+  expected_sql: |
+    WITH counted AS (
+      SELECT w.id, w.name, w.category, COUNT(t.id) AS task_count,
+             ROW_NUMBER() OVER (PARTITION BY w.category
+                                ORDER BY COUNT(t.id) DESC, w.id) AS rn
+      FROM workflows w
+      LEFT JOIN tasks t ON t.workflow_id = w.id
+      GROUP BY w.id, w.name, w.category
+    )
+    SELECT category, name, task_count FROM counted WHERE rn = 1
+
+- id: P05
+  category: P
+  question: >-
+    Show each task with its priority and the number of tasks that share that
+    priority.
+  ordered: false
+  expected_sql: |
+    SELECT name, priority,
+           COUNT(*) OVER (PARTITION BY priority) AS same_priority_count
+    FROM tasks
+
+# -------------------------------------------------- Q: Multi-condition logic
+- id: Q01
+  category: Q
+  question: Which active users have more than 2 unfinished tasks?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    WHERE u.status = 'ACTIVE' AND t.status <> 'COMPLETED'
+    GROUP BY u.id, u.full_name
+    HAVING COUNT(t.id) > 2
+
+- id: Q02
+  category: Q
+  question: Which workflows have at least one overdue task and an active owner?
+  ordered: false
+  tags: [semantic, date]
+  expected_sql: |
+    SELECT DISTINCT w.name
+    FROM workflows w
+    JOIN users o ON o.id = w.owner_user_id
+    JOIN tasks t ON t.workflow_id = w.id
+    WHERE o.status = 'ACTIVE'
+      AND t.due_date < CURRENT_DATE
+      AND t.status <> 'COMPLETED'
+
+- id: Q03
+  category: Q
+  question: >-
+    Which workflows contain more than 3 unfinished tasks of high or critical
+    priority?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT w.name
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    WHERE t.status <> 'COMPLETED'
+      AND t.priority IN ('HIGH', 'CRITICAL')
+    GROUP BY w.id, w.name
+    HAVING COUNT(t.id) > 3
+
+- id: Q04
+  category: Q
+  question: Which inactive users still have unfinished work assigned to them?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT DISTINCT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    WHERE u.status = 'INACTIVE' AND t.status <> 'COMPLETED'
+
+- id: Q05
+  category: Q
+  question: >-
+    Which active workflows contain blocked tasks that are assigned to active
+    users?
+  ordered: false
+  tags: [semantic]
+  expected_sql: |
+    SELECT DISTINCT w.name
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    JOIN users a ON a.id = t.assigned_user_id
+    WHERE w.status = 'ACTIVE'
+      AND t.status = 'BLOCKED'
+      AND a.status = 'ACTIVE'
+
+# ------------------------------------------------------ R: Business semantics
+- id: R01
+  category: R
+  question: Show the active workflows that currently have overdue work.
+  ordered: false
+  tags: [semantic, date]
+  interpretation: >-
+    "Active workflows" means workflows.status = 'ACTIVE', not workflows whose
+    tasks are in progress. "Overdue work" means a task whose due_date has
+    passed and whose status is not COMPLETED. Each workflow appears once.
+  expected_sql: |
+    SELECT DISTINCT w.name
+    FROM workflows w
+    JOIN tasks t ON t.workflow_id = w.id
+    WHERE w.status = 'ACTIVE'
+      AND t.due_date < CURRENT_DATE
+      AND t.status <> 'COMPLETED'
+
+- id: R02
+  category: R
+  question: Which users are overloaded?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    Overloaded means carrying more unfinished tasks than the average unfinished
+    workload across users who have any assigned work. Only open tasks count,
+    and unassigned tasks are excluded from the average.
+  expected_sql: |
+    SELECT u.full_name
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    WHERE t.status <> 'COMPLETED'
+    GROUP BY u.id, u.full_name
+    HAVING COUNT(t.id) > (
+      SELECT AVG(c) FROM (
+        SELECT COUNT(*) AS c FROM tasks
+        WHERE status <> 'COMPLETED' AND assigned_user_id IS NOT NULL
+        GROUP BY assigned_user_id
+      ) s
+    )
+
+- id: R03
+  category: R
+  question: >-
+    Which workflow owners have unfinished high-priority work inside their
+    workflows?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    The filter applies to tasks, but the output identifies the workflow OWNER
+    (workflows.owner_user_id), not the task assignee. "High priority" covers
+    both HIGH and CRITICAL. Each owner appears once.
+  expected_sql: |
+    SELECT DISTINCT o.full_name
+    FROM workflows w
+    JOIN users o ON o.id = w.owner_user_id
+    JOIN tasks t ON t.workflow_id = w.id
+    WHERE t.status <> 'COMPLETED'
+      AND t.priority IN ('HIGH', 'CRITICAL')
+
+- id: R04
+  category: R
+  question: Which workflows are healthy, meaning they have no overdue and no blocked tasks?
+  ordered: false
+  tags: [semantic, date]
+  interpretation: >-
+    Healthy means the absence of both problems. Workflows with no tasks at all
+    trivially qualify and must be included, which requires NOT EXISTS or a LEFT
+    JOIN rather than an inner join.
+  expected_sql: |
+    SELECT w.name
+    FROM workflows w
+    WHERE NOT EXISTS (
+      SELECT 1 FROM tasks t
+      WHERE t.workflow_id = w.id
+        AND (t.status = 'BLOCKED'
+             OR (t.due_date < CURRENT_DATE AND t.status <> 'COMPLETED'))
+    )
+
+- id: R05
+  category: R
+  question: Which departments are carrying the most unfinished work?
+  ordered: true
+  tags: [semantic]
+  interpretation: >-
+    Work is attributed to a department through the ASSIGNEE of a task, not
+    through workflow ownership. Only unfinished tasks count. Departments are
+    ordered by that count, highest first.
+  expected_sql: |
+    SELECT u.department, COUNT(t.id) AS open_tasks
+    FROM users u
+    JOIN tasks t ON t.assigned_user_id = u.id
+    WHERE t.status <> 'COMPLETED'
+    GROUP BY u.department
+    ORDER BY open_tasks DESC, u.department
+
+- id: R06
+  category: R
+  question: Who owns workflows but is not doing any of the task work themselves?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    Directly tests the owner-versus-assignee distinction: the person must
+    appear in workflows.owner_user_id but never in tasks.assigned_user_id.
+  expected_sql: |
+    SELECT DISTINCT o.full_name
+    FROM users o
+    WHERE EXISTS (SELECT 1 FROM workflows w WHERE w.owner_user_id = o.id)
+      AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.assigned_user_id = o.id)
+
+# -------------------------------------------- S: Semantic interpretation
+- id: S01
+  category: S
+  question: Which people can take on new work right now?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    Availability for new assignments is users.status = 'ACTIVE'. It is not a
+    question about current workload, and role is irrelevant. Requires the
+    description of users.status to answer correctly.
+  expected_sql: SELECT full_name FROM users WHERE status = 'ACTIVE'
+
+- id: S02
+  category: S
+  question: How much work is still outstanding in each workflow?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    "Outstanding" means status <> 'COMPLETED', which INCLUDES blocked tasks.
+    Workflows with no tasks must appear with a count of 0, so a LEFT JOIN with
+    the status condition in the join clause is required.
+  expected_sql: |
+    SELECT w.name, COUNT(t.id) AS outstanding
+    FROM workflows w
+    LEFT JOIN tasks t
+           ON t.workflow_id = w.id AND t.status <> 'COMPLETED'
+    GROUP BY w.id, w.name
+
+- id: S03
+  category: S
+  question: Which tasks need urgent attention?
+  ordered: false
+  tags: [semantic, date]
+  interpretation: >-
+    Urgent means high-priority work that is already late: priority in HIGH or
+    CRITICAL, status not COMPLETED, and due_date in the past. "High priority"
+    deliberately covers CRITICAL as well as HIGH.
+  expected_sql: |
+    SELECT name FROM tasks
+    WHERE priority IN ('HIGH', 'CRITICAL')
+      AND status <> 'COMPLETED'
+      AND due_date < CURRENT_DATE
+
+- id: S04
+  category: S
+  question: Which processes are no longer in use?
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    "Process" is the business word for a workflow, and "no longer in use" is
+    workflows.status = 'ARCHIVED'. DRAFT workflows are not yet in use, which is
+    a different thing, and must not be included.
+  expected_sql: SELECT name FROM workflows WHERE status = 'ARCHIVED'
+
+- id: S05
+  category: S
+  question: Show the people accountable for each process, not the people doing the work.
+  ordered: false
+  tags: [semantic]
+  interpretation: >-
+    Accountability is workflow ownership (workflows.owner_user_id). The second
+    clause explicitly rules out tasks.assigned_user_id. One row per workflow.
+  expected_sql: |
+    SELECT w.name AS workflow_name, o.full_name AS accountable
+    FROM workflows w
+    JOIN users o ON o.id = w.owner_user_id
