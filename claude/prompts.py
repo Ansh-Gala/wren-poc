@@ -136,13 +136,89 @@ Rules for your answer:
 """
 
 
+def _render_schema(doc: dict) -> str:
+    """The schema as terse lines rather than YAML.
+
+    Nested YAML spends roughly a third of its tokens on keys and indentation
+    that carry no information the model needs -- "type:" and "description:"
+    before every column, on their own lines. One line per column says the same
+    thing for about a quarter fewer tokens, which matters because the schema
+    is 77% of the prompt and the prompt is paid on every question.
+    """
+    out: list[str] = []
+    for table, spec in (doc.get("tables") or {}).items():
+        desc = " ".join((spec.get("description") or "").split())
+        pk = spec.get("primary_key")
+        head = f"TABLE {table}"
+        if pk:
+            head += f"  (primary key: {pk})"
+        out.append(head)
+        if desc:
+            out.append(f"  {desc}")
+        for column, cspec in (spec.get("columns") or {}).items():
+            if not isinstance(cspec, dict):
+                out.append(f"  - {column}")
+                continue
+            line = f"  - {column} ({cspec.get('type', 'VARCHAR')}): "
+            line += " ".join((cspec.get("description") or "").split())
+            values = cspec.get("values")
+            if values:
+                line += "  values: " + ", ".join(str(v) for v in values)
+            out.append(line)
+        out.append("")
+
+    rels = doc.get("relationships") or []
+    if rels:
+        out.append("RELATIONSHIPS")
+        for r in rels:
+            out.append(f"  - {r['from']} -> {r['to']} ({r.get('join_type', '')})")
+        out.append("")
+
+    terms = doc.get("terminology") or {}
+    if terms:
+        out.append("TERMINOLOGY")
+        for k, v in terms.items():
+            out.append(f"  - {k}: {' '.join(str(v).split())}")
+        out.append("")
+    return chr(10).join(out)
+
+
+def _render_rules(doc: dict) -> str:
+    out = ["BUSINESS RULES"]
+    for rule in (doc.get("rules") or []):
+        out.append(f"  - {rule['name']}: {' '.join((rule.get('definition') or '').split())}")
+        if rule.get("sql_fragment"):
+            out.append(f"      SQL: {rule['sql_fragment']}")
+        if rule.get("scope"):
+            out.append(f"      scope: {' '.join(str(rule['scope']).split())}")
+    out.append("")
+    return chr(10).join(out)
+
+
+def _render_examples(doc: dict) -> str:
+    out = ["EXAMPLES"]
+    for pair in (doc.get("pairs") or []):
+        out.append(f"  Q: {pair['nl']}")
+        out.append(f"  A: {' '.join(pair['sql'].split())}")
+    out.append("")
+    return chr(10).join(out)
+
+
 def build_lean_system_prompt() -> str:
-    """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined."""
+    """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined, rendered compactly."""
     from pathlib import Path
+
+    import yaml
+
     meta_dir = Path(__file__).resolve().parents[1] / "metadata"
-    parts = [
-        (meta_dir / name).read_text(encoding="utf-8")
-        for name in ("schema_description.yaml", "business_rules.yaml",
-                     "question_sql_pairs.yaml")
-    ]
-    return LEAN_SYSTEM_PROMPT + chr(10).join(parts)
+    load = lambda n: yaml.safe_load((meta_dir / n).read_text(encoding="utf-8")) or {}
+    from benchmark.context import CONTEXT_GUIDANCE
+
+    return (
+        LEAN_SYSTEM_PROMPT
+        + CONTEXT_GUIDANCE
+        + chr(10) + "# SCHEMA" + chr(10) + chr(10)
+        + _render_schema(load("schema_description.yaml"))
+        + _render_rules(load("business_rules.yaml"))
+        + _render_examples(load("question_sql_pairs.yaml"))
+    )

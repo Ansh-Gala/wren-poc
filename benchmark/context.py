@@ -270,9 +270,16 @@ def update_state(
 ) -> ConversationState:
     """Fold one completed turn into the state.
 
-    Filters are merged rather than replaced so that a turn which only adds a
-    status keeps the entity filter from the turn before it. On a switch the
-    old filters are dropped first, because they described a different subject.
+    The state is the shape of the last query, not an accumulation over the
+    thread. That distinction matters: an earlier version merged each turn's
+    filters into the previous set, which made a filter impossible to remove.
+    Asked to drop a business-unit filter the model would produce correct SQL
+    without it, the merge would keep it anyway, and the next turn would be told
+    it was still in force and put it back. Filters only ever grew.
+
+    Since the generated SQL always carries every filter still in force,
+    replacing is both simpler and correct: adding, replacing and removing a
+    filter all fall out of it with no special case.
     """
     if decision in ("new_block", "switch"):
         state.reset()
@@ -283,8 +290,7 @@ def update_state(
     parsed = parse_sql_state(sql or "")
     if parsed["tables"]:
         state.active_tables = parsed["tables"]
-    if parsed["filters"]:
-        state.active_filters.update(parsed["filters"])
+    state.active_filters = dict(parsed["filters"])
     state.active_grouping = parsed["grouping"]
     state.active_sorting = parsed["sorting"]
     state.active_limit = parsed["limit"]
@@ -309,36 +315,71 @@ def render_context(state: ConversationState) -> str:
         return ""
 
     lines = ["ACTIVE CONVERSATION CONTEXT", ""]
+
+    # Grouped deliberately: what is selected persists, how it was presented
+    # does not, and the headings are the first place that gets read.
+    lines.append("WHAT IS SELECTED (persists until the user changes it)")
     if state.active_entity:
-        lines.append(f"subject: {state.active_entity}")
+        lines.append(f"  subject: {state.active_entity}")
     if state.active_tables:
-        lines.append(f"tables: {', '.join(state.active_tables)}")
+        lines.append(f"  tables: {', '.join(state.active_tables)}")
     if state.active_filters:
-        lines.append("filters in force:")
-        for col, pred in state.active_filters.items():
-            lines.append(f"  - {pred}")
+        lines.append("  filters in force:")
+        for _, pred in state.active_filters.items():
+            lines.append(f"    - {pred}")
+    else:
+        lines.append("  filters in force: none")
+
+    shape = []
     if state.active_grouping:
-        lines.append(f"grouped by: {', '.join(state.active_grouping)}")
+        shape.append(f"  grouped by: {', '.join(state.active_grouping)}")
     if state.active_sorting:
-        lines.append(f"sorted by: {state.active_sorting}")
+        shape.append(f"  sorted by: {state.active_sorting}")
     if state.active_limit is not None:
-        lines.append(f"limit: {state.active_limit}")
+        shape.append(f"  limit: {state.active_limit}")
     if state.last_intent:
-        lines.append(f"last intent: {state.last_intent}")
+        shape.append(f"  last intent: {state.last_intent}")
+    if shape:
+        lines.append("")
+        lines.append("HOW THE LAST ANSWER WAS PRESENTED (decide this afresh)")
+        lines += shape
+
     if state.previous_result_summary:
+        lines.append("")
         lines.append(f"previous result: {state.previous_result_summary}")
     if state.previous_sql:
-        lines.append("")
-        lines.append("previous query:")
+        lines.append("previous query (for reference, not a template):")
         lines.append(f"  {state.previous_sql}")
 
-    lines += [
-        "",
-        "The next question continues this conversation. Resolve references such as",
-        '"those", "them", "the active ones" or "how many?" against the context above.',
-        "Start from the previous query and change only what the new question asks to",
-        "change: keep the filters still in force, drop one only if the user removes it,",
-        "and replace one if the user names a different value for the same field.",
-        "",
-    ]
+    lines.append("")
     return "\n".join(lines)
+
+
+# The static half of the conversational contract. It never changes, so it
+# belongs in the cached system prompt rather than being re-sent with every
+# turn: about 350 tokens a question, for text identical on turn 1 and turn 20.
+#
+# Splitting it out is also what makes the per-turn block genuinely small --
+# without this, "compact context" would still have been mostly boilerplate.
+CONTEXT_GUIDANCE = """When an ACTIVE CONVERSATION CONTEXT block is present, the question continues
+that conversation. Resolve references such as "those", "them", "the active
+ones" or "how many?" against it.
+
+Two parts of that context behave differently, and confusing them is the usual
+way a thread goes wrong:
+
+  WHAT IS SELECTED -- the subject and the filters in force. These persist.
+    Add one when the user narrows, replace it when they name a different value
+    for the same field, drop it only when they say so.
+
+  HOW IT IS PRESENTED -- grouping, sorting, limit and the chosen columns.
+    These belong to the previous question, not to the conversation. Decide them
+    afresh from the new question. In particular, a grouping does NOT carry
+    over: "list them" or "show them" after a GROUP BY means plain rows again,
+    and "how many?" means a single count, not the previous grouped result.
+    Carry a sort or a limit forward only while the user is still refining the
+    same list.
+
+Write the query the new question asks for. The previous query is context, not
+a template to copy.
+"""
