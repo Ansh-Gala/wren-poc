@@ -55,7 +55,9 @@ def build_command(
         cmd = [
             settings.claude_command,
             "-p",
-            build_user_prompt(question, session),
+            build_user_prompt(question, session,
+                              context=session.context_block if session else None,
+                              lean=True),
             "--output-format",
             "stream-json",
             "--verbose",
@@ -73,7 +75,8 @@ def build_command(
     cmd = [
         settings.claude_command,
         "-p",
-        build_user_prompt(question, session),
+        build_user_prompt(question, session,
+                          context=session.context_block if session else None),
         "--output-format",
         "stream-json",
         "--verbose",

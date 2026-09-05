@@ -66,18 +66,42 @@ def build_system_prompt() -> str:
     return SYSTEM_PROMPT
 
 
-def build_user_prompt(question: str, session: Session | None = None) -> str:
+def build_user_prompt(
+    question: str,
+    session: Session | None = None,
+    context: str | None = None,
+    lean: bool = False,
+) -> str:
+    """The per-question prompt.
+
+    ``context`` is the compact conversational state from benchmark.context and
+    is preferred when present: it holds the subject, the filters still in
+    force and the previous query in a fixed number of fields, so it stays the
+    same size on turn 20 as on turn 2. Replaying ``session`` verbatim is the
+    fallback for callers that have not adopted it, and grows with turn count.
+    """
     prompt = ""
-    if session and session.turns:
-        prompt += "Here is the conversation history so far. Use the SQL from previous turns to understand what entities are being referred to. If you are asked to filter the previous result, nest the previous SQL query into your new query instead of asking for row data.\n\n"
+    if context:
+        prompt += context + "\n"
+    elif session and session.turns:
+        prompt += (
+            "Here is the conversation history so far. Use the SQL from previous "
+            "turns to understand what entities are being referred to.\n\n"
+        )
         for turn in session.turns:
             prompt += f"User asked: {turn.question}\n"
             if turn.generated_sql:
                 prompt += f"You generated: {turn.generated_sql}\n"
             prompt += "\n"
-            
+
     prompt += f"Question: {question}\n\n"
-    prompt += "Consult Wren, then reply with only the JSON object containing the SQL that answers this question."
+    # In lean mode there is no Wren to consult; telling the model to consult it
+    # invites a tool call that cannot succeed.
+    prompt += (
+        "Reply with only the JSON object containing the SQL that answers this question."
+        if lean else
+        "Consult Wren, then reply with only the JSON object containing the SQL that answers this question."
+    )
     return prompt
 
 
