@@ -1,0 +1,184 @@
+version: "1.0"
+domain: "TMS"
+description: >
+  Business vocabulary for the TMS conversational analytics agent.
+  The agent must resolve business language to canonical TMS concepts before generating SQL.
+
+canonical_entities:
+  business_object:
+    canonical_name: "Business Object"
+    synonyms:
+      - "Business Object"
+      - "BO"
+      - "Business Object (BO)"
+      - "Initiative"
+      - "Order"
+      - "TMS Initiative"
+      - "TMS Order"
+    rule: >
+      Initiative, Order, BO, and Business Object refer to the same top-level TMS entity.
+      Do not treat them as separate entities unless the user explicitly asks for a
+      different external business concept.
+    table: "tms_business_object_flat"
+    key: "bo_id"
+    reference_key: "business_object_ref_id"
+
+  task:
+    canonical_name: "Task"
+    synonyms:
+      - "Task"
+      - "TMS Task"
+      - "Work Item"
+      - "Ticket"
+      - "TMS Ticket"
+    rule: >
+      A task is a unit of work within a Business Object / Initiative / Order.
+      A ticket_code is a user-facing task reference and is not necessarily the same
+      as task_id.
+    table: "tms_task_flat"
+    key: "task_id"
+
+  user:
+    canonical_name: "User"
+    synonyms:
+      - "User"
+      - "TMS User"
+      - "Employee"
+      - "Assignee"
+    rule: >
+      Assignee is contextual. When asking who is assigned to a task, use task assignment
+      fields. When asking about a person's roles or departments, use the user entity.
+    table: "tms_user_flat"
+    key: "user_id"
+
+  role:
+    canonical_name: "Role"
+    synonyms:
+      - "Role"
+      - "TMS Role"
+      - "Organizational Role"
+    table: "tms_role_flat"
+    key: "role_dept_id"
+
+business_terms:
+  my_tasks:
+    canonical_name: "My Tasks"
+    definition: >
+      Tasks assigned to the current logged-in user that are eligible for the user's
+      task list. The exact eligibility rule includes user assignment, open/visible/
+      started state, active Business Object, valid process/configuration, and any
+      additional task-list rules defined by TMS.
+    default_table: "tms_task_flat"
+
+  other_tasks:
+    canonical_name: "Other Tasks"
+    definition: >
+      Open tasks available to the user's department or applicable sub-department.
+      Other Tasks are not the same as tasks personally assigned to the current user.
+    default_table: "tms_task_flat"
+
+  current_ticket:
+    canonical_name: "Current Ticket"
+    definition: >
+      A task that represents the current ticket rather than a future follow-up ticket.
+
+  followup_ticket:
+    canonical_name: "Follow-up Ticket"
+    definition: >
+      A task associated with a future follow-up occurrence.
+
+  open_task:
+    canonical_name: "Open Task"
+    definition: >
+      A task whose task status indicates that it is open and available for processing.
+
+  closed_task:
+    canonical_name: "Closed Task"
+    definition: >
+      A task whose task status indicates that processing has been completed or the task
+      has been closed.
+
+  not_started:
+    canonical_name: "Not Started"
+    definition: >
+      A task whose scheduled task start time is in the future.
+
+  delayed_task:
+    canonical_name: "Delayed Task"
+    definition: >
+      A task whose elapsed processing duration exceeds its configured allowed SLA/buffer
+      duration.
+
+  active_business_object:
+    canonical_name: "Active Business Object"
+    definition: >
+      A Business Object / Initiative / Order whose associated process is currently active.
+      The established process status mapping is status 1 = Active.
+
+  closed_business_object:
+    canonical_name: "Closed Business Object"
+    definition: >
+      A Business Object / Initiative / Order whose associated process is closed.
+      The established process status mapping is status 2 = Closed.
+
+  short_closed_business_object:
+    canonical_name: "Short Closed Business Object"
+    definition: >
+      A Business Object / Initiative / Order whose associated process is short closed.
+      The established process status mapping is status 80 = Short Closed.
+
+  overdue_business_object:
+    canonical_name: "Overdue Business Object"
+    definition: >
+      A Business Object / Initiative / Order whose applicable due date has passed and
+      which has not reached its completed/closed state.
+
+  due_date:
+    canonical_name: "Due Date"
+    definition: >
+      The applicable date by which the Business Object / Initiative / Order or task is
+      expected or required to be completed. Use the most relevant date field based on
+      the user's wording and the metric definition.
+
+  client_due_date:
+    canonical_name: "Client Due Date"
+    definition: >
+      Date/time by which the client or customer requires the Business Object / Initiative /
+      Order.
+
+  system_due_date:
+    canonical_name: "System Due Date"
+    definition: >
+      System-calculated due date associated with the Business Object / Initiative / Order.
+
+  sla:
+    canonical_name: "SLA"
+    definition: >
+      The allowed duration for a task according to its configured SLA/buffer.
+
+  buffer:
+    canonical_name: "Buffer"
+    definition: >
+      Additional time allowance used by TMS when evaluating task or Business Object timing.
+
+status_mappings:
+  process_status:
+    "1": "Active"
+    "2": "Closed"
+    "80": "Short Closed"
+
+ambiguity_rules:
+  - rule: >
+      If the user says Initiative, Order, BO, or Business Object without another qualifier,
+      resolve it to tms_business_object_flat.
+  - rule: >
+      If the user asks for a task by a business-facing ticket/reference code, prefer
+      ticket_code over task_id.
+  - rule: >
+      Do not interpret Other Tasks as tasks not assigned to the current user unless the
+      department-based task-pool rule is also satisfied.
+  - rule: >
+      Do not infer a department from a user's name if the user table does not provide it.
+  - rule: >
+      When a business definition is marked needs_validation elsewhere in this package,
+      do not invent a stronger definition.

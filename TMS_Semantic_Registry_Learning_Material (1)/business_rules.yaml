@@ -1,0 +1,119 @@
+version: "1.0"
+domain: "TMS"
+
+rules:
+  entity_alias_rule:
+    priority: "critical"
+    rule: >
+      Initiative, Order, BO, and Business Object are synonyms for the same TMS entity.
+      Always resolve these terms to tms_business_object_flat unless context explicitly
+      indicates an external/non-TMS entity.
+
+  task_to_business_object:
+    priority: "critical"
+    rule: >
+      A task belongs to a Business Object / Initiative / Order through bo_id.
+      Multiple tasks can belong to the same Business Object.
+
+  task_to_user:
+    priority: "critical"
+    rule: >
+      A task's current assignee is represented by assigned_user_id and assigned_user_name.
+
+  delayed_task:
+    priority: "critical"
+    rule: >
+      A task is delayed when elapsed task duration exceeds the allowed SLA/buffer duration.
+    preferred_fields:
+      - "is_delayed"
+      - "sla_status"
+      - "elapsed_hours"
+      - "sla_hours"
+
+  not_started_task:
+    priority: "high"
+    rule: >
+      A task is not started when its scheduled start time is in the future.
+    preferred_field: "is_not_started"
+
+  active_task:
+    priority: "high"
+    rule: >
+      A task is active when it is open and its scheduled start time has been reached.
+    preferred_field: "is_active_task"
+
+  my_tasks:
+    priority: "critical"
+    rule: >
+      My Tasks are tasks assigned to the current logged-in user and meeting the TMS
+      eligibility rules for the user's task list.
+    required_context:
+      - "current_user_id"
+    preferred_field:
+      - "assigned_user_id"
+
+  other_tasks:
+    priority: "critical"
+    rule: >
+      Other Tasks are department/sub-department task-pool tasks available to the user.
+      Do not reduce this definition to simply 'tasks not assigned to me'.
+    required_context:
+      - "current_user_department_or_sub_department"
+
+  process_status:
+    priority: "critical"
+    mapping:
+      1: "Active"
+      2: "Closed"
+      80: "Short Closed"
+
+  overdue_business_object:
+    priority: "high"
+    rule: >
+      Use the relevant due-date field and the completion/closure state to determine
+      whether a Business Object is overdue. Prefer an existing governed boolean if one
+      is later added to the semantic layer.
+
+  due_date_selection:
+    priority: "high"
+    rule: >
+      If the user explicitly says client/customer due date, use client_due_at.
+      If the user says system due date, use system_due_at.
+      If the user only says due date, choose the governed default for the metric and
+      explain the interpretation when ambiguity could materially change the answer.
+
+  task_reference:
+    priority: "medium"
+    rule: >
+      If the user provides a ticket/reference code, search ticket_code before task_id
+      unless the wording explicitly says task ID.
+
+  current_time:
+    priority: "critical"
+    rule: >
+      Time-dependent fields such as is_not_started, is_active_task, is_delayed and
+      follow-up classification must be evaluated relative to the execution time.
+
+  aggregation:
+    priority: "critical"
+    rule: >
+      tms_task_flat is at task grain. Counts of Business Objects must use DISTINCT bo_id
+      or tms_business_object_flat rather than counting task rows.
+
+  security:
+    priority: "critical"
+    rule: >
+      User-specific queries such as My Tasks must use the authenticated current user's
+      identity supplied by the application/session. Never ask the LLM to guess the user ID.
+
+  sql_safety:
+    priority: "critical"
+    rule: >
+      AI-generated SQL must be read-only. No INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE,
+      CREATE, GRANT, REVOKE, or other schema/data mutation statements.
+
+validation_needed:
+  - "Exact eligibility conditions for My Tasks should be validated against the production task-list query."
+  - "Exact eligibility conditions for Other Tasks should be validated against the production task-pool query."
+  - "Exact meaning/unit of the count business attribute should be validated before using it as a metric."
+  - "Exact physical source columns behind milestone and process data should be validated."

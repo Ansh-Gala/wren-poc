@@ -1,0 +1,87 @@
+version: "1.0"
+description: >
+  Few-shot examples for an AI agent. These examples demonstrate semantic resolution.
+  They are examples, not permission to bypass business rules.
+
+examples:
+  - user_question: "How many delayed tasks are assigned to Amit?"
+    interpretation:
+      entity: "task"
+      filters:
+        - "assigned_user_name = Amit"
+        - "is_delayed = TRUE"
+      aggregation: "COUNT(task_id)"
+      table: "tms_task_flat"
+
+  - user_question: "Show me my open tasks."
+    interpretation:
+      entity: "task"
+      filters:
+        - "assigned_user_id = authenticated_current_user_id"
+        - "task_status = open"
+      table: "tms_task_flat"
+      note: "Apply the full governed My Tasks eligibility rules."
+
+  - user_question: "What are the other tasks in my department?"
+    interpretation:
+      entity: "task"
+      filters:
+        - "department = authenticated_current_user_department"
+        - "task is open/eligible"
+      table: "tms_task_flat"
+      note: "Do not interpret this as simply assigned_user_id <> current_user_id."
+
+  - user_question: "Show me Initiative 123."
+    interpretation:
+      entity: "business_object"
+      filter: "business_object_ref_id = 123"
+      table: "tms_business_object_flat"
+
+  - user_question: "Show me Order 123."
+    interpretation:
+      entity: "business_object"
+      filter: "business_object_ref_id = 123"
+      table: "tms_business_object_flat"
+      note: "Order is a synonym for Business Object in TMS."
+
+  - user_question: "How many tasks are in BO 123?"
+    interpretation:
+      entity: "task"
+      filter: "bo_id = business_object identified as 123"
+      aggregation: "COUNT(task_id)"
+      table: "tms_task_flat"
+
+  - user_question: "How many initiatives have delayed tasks?"
+    interpretation:
+      entity: "business_object"
+      aggregation: "COUNT(DISTINCT bo_id)"
+      filter: "related task is_delayed = TRUE"
+      table: "tms_task_flat"
+      note: "Use DISTINCT bo_id because task grain can produce multiple rows per initiative."
+
+  - user_question: "Which users are in the Finance department?"
+    interpretation:
+      entity: "user"
+      filter: "Finance appears in departments"
+      table: "tms_user_flat"
+
+  - user_question: "Which roles belong to Finance?"
+    interpretation:
+      entity: "role"
+      filter: "department = Finance"
+      table: "tms_role_flat"
+
+  - user_question: "Which orders are overdue?"
+    interpretation:
+      entity: "business_object"
+      concept: "overdue_business_object"
+      note: "Use the governed overdue definition and appropriate due date."
+
+  - user_question: "What is the status of Initiative 123?"
+    interpretation:
+      entity: "business_object"
+      filter: "business_object_ref_id = 123"
+      select:
+        - "bo_status"
+        - "process_status_name"
+      table: "tms_business_object_flat"

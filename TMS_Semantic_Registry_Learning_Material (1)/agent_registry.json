@@ -1,0 +1,54 @@
+{
+  "domain": "TMS",
+  "canonical_entities": {
+    "business_object": {
+      "table": "tms_business_object_flat",
+      "synonyms": [
+        "Business Object",
+        "BO",
+        "Initiative",
+        "Order"
+      ],
+      "key": "bo_id",
+      "reference_key": "business_object_ref_id"
+    },
+    "task": {
+      "table": "tms_task_flat",
+      "synonyms": [
+        "Task",
+        "Work Item",
+        "Ticket"
+      ],
+      "key": "task_id"
+    },
+    "user": {
+      "table": "tms_user_flat",
+      "synonyms": [
+        "User",
+        "Employee",
+        "Assignee"
+      ],
+      "key": "user_id"
+    },
+    "role": {
+      "table": "tms_role_flat",
+      "synonyms": [
+        "Role"
+      ],
+      "key": "role_dept_id"
+    }
+  },
+  "process_status": {
+    "1": "Active",
+    "2": "Closed",
+    "80": "Short Closed"
+  },
+  "critical_rules": [
+    "Initiative = Order = BO = Business Object.",
+    "My Tasks requires authenticated current user context and governed task-list eligibility.",
+    "Other Tasks is department/sub-department based and is not simply 'not my tasks'.",
+    "Delayed task means elapsed duration exceeds allowed SLA/buffer.",
+    "Use DISTINCT bo_id when counting Business Objects from task rows.",
+    "AI-generated SQL must be read-only."
+  ]
+}

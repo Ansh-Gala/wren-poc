@@ -1,0 +1,76 @@
+{
+  "version": "2.1",
+  "domain": "TMS",
+  "entities": {
+    "business_object": {
+      "table": "tms_business_object_flat",
+      "synonyms": [
+        "Business Object",
+        "BO",
+        "Initiative",
+        "Order"
+      ],
+      "key": "business_object_id"
+    },
+    "task": {
+      "table": "tms_task_flat",
+      "key": "task_id"
+    },
+    "user": {
+      "table": "tms_user_flat",
+      "key": "user_id"
+    },
+    "role": {
+      "table": "tms_role_flat",
+      "key": "role_dept_id"
+    },
+    "business_object_attributes": {
+      "table": "tms_business_object_attributes_flat",
+      "key": "business_object_id",
+      "note": "Client-specific attributes. Exists in the current database."
+    },
+    "user_department": {
+      "table": "tms_user_department_flat",
+      "key": "user_id"
+    }
+  },
+  "rules": {
+    "my_tasks": [
+      "assigned_user_id = signed-in user (literal integer, not a bind placeholder)",
+      "task_status = 'open'",
+      "display_flag = 1",
+      "task_start_at <= current/reference time",
+      "business object status = 'Active'",
+      "process not short-closed",
+      "task entity configuration active"
+    ],
+    "other_tasks": "department/sub-department task pool via task_department / task_sub_department",
+    "delayed_task": "task_sla_status = 'Delayed' (view has already compared task_elapsed_hours to task_sla_hours)",
+    "client_due_date": "use Business Object client due-date field",
+    "business_object_status": {
+      "note": "already text in the flat view; filter on the text, not on 1/2/80",
+      "values": [
+        "Active",
+        "Closed",
+        "Short Closed"
+      ]
+    },
+    "count_business_objects_from_tasks": "COUNT(DISTINCT bo_id)",
+    "business_object_color": {
+      "note": "already a colour name in the flat view",
+      "values": [
+        "Black",
+        "Green",
+        "White",
+        "Red"
+      ]
+    },
+    "dates": "flat-view date columns are timestamptz, already converted from epoch",
+    "task_status_case": "task_status is lowercase; task_display_status is capitalised"
+  },
+  "sql_mode": "read_only",
+  "verified_against": {
+    "database": "arvind_retail_chatbot_test_1",
+    "date": "2026-09-05"
+  }
+}

@@ -1,0 +1,151 @@
+version: "1.0"
+synonyms:
+  business_object:
+    canonical: "business_object"
+    terms:
+      - "business object"
+      - "bo"
+      - "business object bo"
+      - "initiative"
+      - "order"
+      - "tms initiative"
+      - "tms order"
+      - "business initiative"
+
+  task:
+    canonical: "task"
+    terms:
+      - "task"
+      - "tasks"
+      - "tms task"
+      - "work item"
+      - "work items"
+      - "ticket"
+      - "tickets"
+      - "tms ticket"
+
+  user:
+    canonical: "user"
+    terms:
+      - "user"
+      - "users"
+      - "employee"
+      - "employees"
+      - "assignee"
+      - "assigned user"
+
+  role:
+    canonical: "role"
+    terms:
+      - "role"
+      - "roles"
+      - "tms role"
+
+  status:
+    canonical: "status"
+    terms:
+      - "status"
+      - "state"
+      - "current state"
+
+  delayed:
+    canonical: "delayed_task"
+    terms:
+      - "delayed"
+      - "delay"
+      - "delayed task"
+      - "late task"
+      - "tasks running late"
+      - "tasks beyond sla"
+      - "sla breach"
+
+  overdue:
+    canonical: "overdue_business_object"
+    terms:
+      - "overdue"
+      - "past due"
+      - "late order"
+      - "late initiative"
+      - "overdue bo"
+
+  my_tasks:
+    canonical: "my_tasks"
+    terms:
+      - "my tasks"
+      - "my task"
+      - "tasks assigned to me"
+      - "my tickets"
+      - "tasks I own"
+
+  other_tasks:
+    canonical: "other_tasks"
+    terms:
+      - "other tasks"
+      - "other task"
+      - "department tasks"
+      - "tasks in my department"
+      - "department task pool"
+
+  not_started:
+    canonical: "not_started"
+    terms:
+      - "not started"
+      - "future task"
+      - "tasks that have not started"
+      - "upcoming task"
+
+  open:
+    canonical: "open_task"
+    terms:
+      - "open"
+      - "open task"
+      - "open tasks"
+      - "active task"
+
+  closed:
+    canonical: "closed_task"
+    terms:
+      - "closed"
+      - "closed task"
+      - "completed task"
+
+field_synonyms:
+  business_object_ref_id:
+    - "bo number"
+    - "bo reference"
+    - "initiative number"
+    - "initiative reference"
+    - "order number"
+    - "order reference"
+    - "business object number"
+    - "business object reference"
+
+  assigned_user_name:
+    - "assigned to"
+    - "assignee"
+    - "task owner"
+    - "owner"
+
+  workflow_name:
+    - "workflow"
+    - "workflow name"
+
+  process_status_name:
+    - "process status"
+    - "initiative status"
+    - "order status"
+    - "bo status"
+
+  client_due_at:
+    - "client due date"
+    - "customer due date"
+    - "customer required date"
+
+  system_due_at:
+    - "system due date"
+    - "calculated due date"
+
+  days_to_due_date:
+    - "days remaining"
+    - "days to due date"
+    - "remaining days"

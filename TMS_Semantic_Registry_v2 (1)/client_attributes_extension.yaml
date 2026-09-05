@@ -1,0 +1,33 @@
+version: "2.1"
+name: "Business Object Attributes"
+
+purpose: >
+  Client-specific Business Object attributes.
+
+status: "present_in_current_database"
+
+superseded_note: >
+  v1.0 of this file described the attributes table as a planned future extension that
+  was deliberately not part of the core schema. That is no longer accurate:
+  tms_business_object_attributes_flat exists in arvind_retail_chatbot_test_1 with 307
+  rows and 37 columns, and is documented in table_registry.yaml.
+
+table: "tms_business_object_attributes_flat"
+join: "tms_business_object_attributes_flat.business_object_id = tms_business_object_flat.business_object_id"
+cardinality: "one_to_one"
+
+design_principles:
+  - "Client-specific attributes stay in the attributes view, not in the core Business Object view."
+  - "Attributes may differ between clients."
+  - "The AI must only use attributes registered for the current client."
+  - "An attribute name in Client A must not automatically be assumed to exist in Client B."
+  - "Every attribute column is typed text; cast before date or numeric operations."
+
+data_coverage_in_this_database:
+  category: "307 of 307 populated. Shirting 192, Suiting 94, then a long tail of 13 low-count values."
+  season: "16 of 307 populated, all AR_NPD_YD_SALESPLAN / AR_SALESPLAN_Shirting / AR_SALESPLAN_Suiting. Winter 5, Autumn 4, S6002 3, Summer 2, Dummy01 1, S6010 1."
+  quality: "0 of 307 populated. No filter on quality can return rows."
+
+caution:
+  - "Confirm coverage before filtering; most attributes are sparsely populated."
+  - "The column named 'count' collides with the COUNT function and must be quoted."

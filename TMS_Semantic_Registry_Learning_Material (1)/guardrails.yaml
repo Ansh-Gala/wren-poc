@@ -1,0 +1,46 @@
+version: "1.0"
+domain: "TMS"
+query_guardrails:
+  allowed_operations:
+    - "SELECT"
+    - "WITH"
+
+  forbidden_operations:
+    - "INSERT"
+    - "UPDATE"
+    - "DELETE"
+    - "DROP"
+    - "ALTER"
+    - "TRUNCATE"
+    - "CREATE"
+    - "GRANT"
+    - "REVOKE"
+    - "MERGE"
+
+  required_behavior:
+    - "Prefer semantic flat tables over raw operational tables."
+    - "Use tms_task_flat for task-grain questions."
+    - "Use tms_business_object_flat for Business Object/Initiative/Order-grain questions."
+    - "Use tms_user_flat for user/employee questions."
+    - "Use tms_role_flat for role/department mapping questions."
+    - "Use DISTINCT bo_id when counting Business Objects from task-grain data."
+    - "Use authenticated session context for current-user questions."
+    - "Do not guess missing IDs, departments, roles, or dates."
+    - "Use existing derived fields such as is_delayed instead of recreating business logic unless required."
+    - "For time-dependent questions, evaluate against the current execution time."
+
+  ambiguity_handling:
+    - condition: "User says Initiative, Order, BO, or Business Object"
+      action: "Resolve all to the canonical Business Object entity."
+    - condition: "User asks 'due date' without specifying client or system"
+      action: "Use the governed default and state the interpretation if material."
+    - condition: "User asks 'my tasks'"
+      action: "Use authenticated current_user_id and full My Tasks rule."
+    - condition: "User asks 'other tasks'"
+      action: "Use department/sub-department task-pool rule."
+
+  performance:
+    - "Avoid SELECT * for user-facing responses."
+    - "Push filters into SQL."
+    - "Limit detail rows when the user asks for a list without a requested count."
+    - "Use aggregation when the user asks 'how many', 'count', 'total', or similar."
