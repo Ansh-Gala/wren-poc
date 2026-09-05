@@ -132,6 +132,17 @@ Rules for your answer:
 
    No prose before or after it, no markdown fence.
 
+5. If the question cannot be answered from the schema above -- it names a
+   column, table or value that does not exist, or asks for a measure the data
+   does not hold -- do NOT invent one and do NOT substitute a different column
+   that looks similar. Reply instead with:
+
+   {"clarify": "<what is missing, or what you need the user to specify>"}
+
+   Use this when the question is genuinely ambiguous, too. Prefer answering
+   whenever the schema and the conversation make the intent clear: asking for
+   clarification when the answer was obvious is as unhelpful as guessing.
+
 # SCHEMA AND SEMANTICS
 """
 

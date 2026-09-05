@@ -177,9 +177,10 @@ STANDALONE: list[tuple] = [
      "WHERE b.business_object_type = 'AR_YD_Suiting' AND a.vendor IS NOT NULL", False, False),
 
     # -- tier 6: edge cases, nulls, boundaries ------------------------------
+    # status is NULL for 6 rows and never the empty string, so an OR on '' was
+    # dead weight that made a correct answer look semantically different.
     ("E49", "Null Handling", "How many business objects have no status recorded?",
-     f"SELECT COUNT(*) FROM {BO} WHERE business_object_status IS NULL "
-     "OR business_object_status = ''", False, False),
+     f"SELECT COUNT(*) FROM {BO} WHERE business_object_status IS NULL", False, False),
     ("E50", "Null Handling", "How many business objects have a note?",
      f"SELECT COUNT(*) FROM {BO} WHERE business_object_note IS NOT NULL", False, False),
     ("E51", "Boundary", "How many tasks have been reopened?",

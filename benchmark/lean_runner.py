@@ -29,9 +29,10 @@ from benchmark.evaluator import (
     result_summary,
 )
 from benchmark.lean_suite import Conversation, SuiteTurn
+from benchmark.sql_semantics import compare as compare_semantics
 from benchmark.models import Session, Turn
 from benchmark.safety import UnsafeSQLError, assert_read_only
-from claude.parser import parse_sql
+from claude.parser import parse_clarification, parse_sql
 from config.logging import get_logger
 from config.settings import Settings
 from database.connection import run_readonly
@@ -80,6 +81,21 @@ class TurnResult:
     result_match: bool = False
     match_mode: str = ""
     failure_category: str = ""
+
+    # Result matching alone lets a query pass for the wrong reason -- filtering
+    # workflow_code instead of business_object_type returns the same rows here
+    # and is still wrong. These record the SQL's meaning independently, so the
+    # gap between "right rows" and "right query" stays visible.
+    semantic_match: bool = False
+    semantic_issues: list[str] = field(default_factory=list)
+    projection_verdict: str = ""
+    semantic_components: dict = field(default_factory=dict)
+
+    expected_behavior: str = "sql"
+    clarification: str | None = None
+    behavior_match: bool | None = None
+    schema_grounded: bool = True
+    hallucinated: list[str] = field(default_factory=list)
 
     expected_result: dict = field(default_factory=dict)
     actual_result: dict = field(default_factory=dict)
@@ -160,6 +176,7 @@ def run_turn(
         turn_index=turn.turn_index, category=turn.category,
         question=turn.question, expected_sql=turn.expected_sql,
         expected_decision=turn.expect_decision,
+        expected_behavior=turn.expect_behavior,
     )
 
     # 1. Decide how this turn relates to the block, before asking anything.
@@ -201,6 +218,25 @@ def run_turn(
 
     parsed = parse_sql(run.result_text)
     r.generated_sql = parsed.sql
+    r.clarification = parse_clarification(run.result_text)
+
+    # Did it do the kind of thing the question called for? A confident query
+    # in answer to an unanswerable question is a failure even if it runs, and
+    # a clarifying question in answer to a clear one is a failure even though
+    # it is cautious.
+    if turn.expect_behavior == "clarify":
+        r.behavior_match = r.clarification is not None and parsed.sql is None
+    else:
+        r.behavior_match = parsed.sql is not None
+
+    # Never invent schema. Checked deterministically rather than trusted,
+    # because invented SQL fails at execution in a way that looks like any
+    # other error.
+    if parsed.sql:
+        from benchmark.sql_semantics import check_against_schema
+        sc = check_against_schema(parsed.sql)
+        r.schema_grounded = sc.grounded
+        r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
 
     if parsed.sql:
         try:
@@ -208,6 +244,18 @@ def run_turn(
             r.sql_valid = True
         except UnsafeSQLError as exc:
             r.error = r.error or f"unsafe SQL: {exc}"
+
+    if turn.expect_behavior == "clarify":
+        r.result_match = bool(r.behavior_match)
+        r.semantic_match = bool(r.behavior_match)
+        if not r.behavior_match:
+            r.failure_category = ("HALLUCINATION" if not r.schema_grounded
+                                  else "SHOULD_HAVE_CLARIFIED")
+        update_state(state, turn.question, None, None, entity, decision)
+        session.turns.append(Turn(index=turn.turn_index, question=turn.question,
+                                  generated_sql=None))
+        r.latency_ms = (time.perf_counter() - started) * 1000
+        return r
 
     expected = run_readonly(settings, turn.expected_sql, settings.statement_timeout_ms)
     r.expected_result = result_summary(expected)
@@ -233,10 +281,27 @@ def run_turn(
         r.result_match = False
         r.match_mode = "rows ok, context misread"
 
+    sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered)
+    r.semantic_match = sem.semantically_correct
+    r.semantic_issues = list(sem.issues)
+    r.projection_verdict = sem.projection_verdict
+    r.semantic_components = {
+        "tables": sem.tables_match, "filters": sem.filters_match,
+        "joins": sem.joins_match, "aggregates": sem.aggregates_match,
+        "grouping": sem.grouping_match, "ordering": sem.ordering_match,
+        "limit": sem.limit_match,
+    }
+
     if not r.result_match:
         r.failure_category = _classify_failure(
             r, expected, actual if actual is not None else expected
         )
+    elif not r.schema_grounded:
+        r.failure_category = "HALLUCINATION"
+    elif not r.semantic_match:
+        # Right rows, wrong query. Not counted against result accuracy, but
+        # named so it cannot hide behind a passing row comparison.
+        r.failure_category = "SEMANTIC_MISMATCH"
 
     # 4. Fold the turn into the state for whatever comes next. The state
     #    follows the SQL that was actually produced, so a wrong query is
@@ -288,7 +353,9 @@ def run_suite(
             if on_result is not None:
                 on_result(r)
             else:
-                verdict = "PASS" if r.result_match else (r.failure_category or "FAIL")
+                verdict = ("PASS" if r.result_match and r.semantic_match
+                           else "PASS*" if r.result_match
+                           else (r.failure_category or "FAIL"))
                 dec = r.decision if r.decision_match is not False else f"{r.decision}!"
                 log.info("  %-7s %-10s %-22s ctx=%-4d tok=%-6d %.1fs",
                          r.turn_id, dec, verdict, r.context_chars,
