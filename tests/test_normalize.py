@@ -60,3 +60,33 @@ def test_leaves_every_existing_benchmark_question_untouched():
     assert not unexpected, "repair layer rewrote correct questions:\n" + "\n".join(
         f"  {q!r}: {a!r} -> {b!r}" for q, (a, b) in unexpected[:20]
     )
+
+
+def test_repairs_a_single_transposed_or_dropped_letter():
+    """The commonest typo of all, and a similarity ratio just misses it.
+
+    "itmes" and "items" score 0.80 against a 0.82 threshold, as do "tsaks",
+    "usres" and "colur" -- every one a single adjacent transposition or one
+    dropped letter. Raising the ratio far enough to catch them would also
+    start rewriting genuinely different words, so distance is measured
+    directly instead.
+    """
+    for typed, meant in [
+        ("show the AR_YD_Suiting itmes", "items"),
+        ("show open tsaks", "tasks"),
+        ("how many usres are there", "users"),
+        ("show items by colur", "color"),
+        ("how many objets are active", "objects"),
+    ]:
+        result = normalize(typed)
+        assert meant in result.question, f"{typed!r} -> {result.question!r}"
+
+
+def test_a_typo_is_not_hidden_by_being_one_letter_from_a_plural():
+    """"busines" is not a word, but "busines" + "s" is, and that was enough.
+
+    The morphology check added a trailing "s" as evidence a token was already
+    known, so a typo one letter short of a real plural was passed through
+    untouched while far worse typos were repaired.
+    """
+    assert normalize("filter by busines unit").question == "filter by business unit"

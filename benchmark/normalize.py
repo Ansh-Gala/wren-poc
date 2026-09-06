@@ -110,7 +110,26 @@ def load_vocabulary() -> frozenset[str]:
                 for value in cspec.get("values") or []:
                     add(value)
 
-    return frozenset(words)
+    # Both numbers for every word, so "task" and "tasks", "attribute" and
+    # "attributes" are each known outright rather than one being reachable
+    # from the other by adding a letter. Reachability was the bug: it let
+    # "busines" pass as known because "business" is.
+    both: set[str] = set(words)
+    for word in words:
+        both.add(word + ("es" if word.endswith(("s", "x", "ch", "sh")) else "s"))
+        # "business" -> "busines" and "status" -> "statu" are not words, and
+        # putting them in the vocabulary would readmit exactly the typos this
+        # is meant to catch.
+        if word.endswith(("ss", "us", "is")):
+            continue
+        if word.endswith("ies") and len(word) > 4:
+            both.add(word[:-3] + "y")
+        elif word.endswith("s") and len(word) > 3:
+            # Strip only the "s". Taking "es" off "attributes" gives
+            # "attribut", so the real singular stayed unknown and the correctly
+            # spelled word "attribute" was "repaired" into the plural.
+            both.add(word[:-1])
+    return frozenset(both)
 
 
 def _morphs(token: str) -> list[str]:
@@ -120,8 +139,14 @@ def _morphs(token: str) -> list[str]:
     number -- ``business_object_type`` is singular, ``open_tasks_list`` is
     plural. Without this, "items" is one edit from the known word "item" and
     gets "repaired" into it, silently rewriting half the benchmark.
+
+    Suffixes are only ever stripped, never added. Adding a trailing "s" as
+    evidence of knownness meant "busines" counted as known because
+    "business" is -- so a typo one letter short of a real plural sailed
+    through while far worse ones were repaired. The plural forms are put into
+    the vocabulary instead, where they cannot launder a misspelling.
     """
-    forms = [token, token + "s"]
+    forms = [token]
     for suffix, replacement in (
         ("ies", "y"), ("es", ""), ("s", ""),
         # "reopened" and "reopening" are ordinary inflections of the column
@@ -138,18 +163,57 @@ def _is_known(token: str, vocabulary: frozenset[str]) -> bool:
     return any(form in vocabulary for form in _morphs(token))
 
 
+def _edit_distance(a: str, b: str, limit: int = 2) -> int:
+    """Damerau-Levenshtein distance, giving up once past ``limit``.
+
+    Transposition has to count as one edit rather than two, because swapping
+    two adjacent letters is the commonest typo there is and two edits is far
+    too loose a threshold to allow generally.
+    """
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    previous_previous: list[int] = []
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        current = [i] + [0] * len(b)
+        for j, cb in enumerate(b, start=1):
+            current[j] = min(
+                previous[j] + 1,            # deletion
+                current[j - 1] + 1,         # insertion
+                previous[j - 1] + (ca != cb),  # substitution
+            )
+            if (i > 1 and j > 1 and ca == b[j - 2] and a[i - 2] == cb):
+                current[j] = min(current[j], previous_previous[j - 2] + 1)
+        if min(current) > limit:
+            return limit + 1
+        previous_previous, previous = previous, current
+    return previous[len(b)]
+
+
 def _best_match(token: str, vocabulary: frozenset[str]) -> str | None:
-    """The single closest vocabulary term, or None if there isn't one."""
-    scored = [
-        (SequenceMatcher(None, token, term).ratio(), term)
-        for term in vocabulary
-        if abs(len(term) - len(token)) <= 3
-    ]
-    scored = [(score, term) for score, term in scored if score >= _THRESHOLD]
+    """The single closest vocabulary term, or None if there isn't one.
+
+    Two ways to qualify, because neither alone is enough. The similarity ratio
+    catches misspellings that keep a word's overall shape; a single edit
+    catches the transpositions that ratio scores at exactly 0.80, just under
+    any threshold loose enough to be safe.
+
+    Ranked by edit distance first so that "objets" resolves to "objects" (one
+    dropped letter) rather than "object" (two).
+    """
+    scored = []
+    for term in vocabulary:
+        if abs(len(term) - len(token)) > 3:
+            continue
+        distance = _edit_distance(token, term)
+        ratio = SequenceMatcher(None, token, term).ratio()
+        near = distance <= 1 and len(token) >= 5
+        if near or ratio >= _THRESHOLD:
+            scored.append((distance, -ratio, term))
     if not scored:
         return None
-    scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    return scored[0][1]
+    scored.sort()
+    return scored[0][2]
 
 
 def _match_case(original: str, corrected: str) -> str:

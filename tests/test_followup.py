@@ -135,3 +135,48 @@ def test_suggestions_do_not_spend_every_slot_on_one_column():
 
     fields = [s.action.field for s in followup.suggestions]
     assert len(fields) == len(set(fields)), f"repeated field in {fields}"
+
+
+def test_the_wire_format_carries_everything_a_frontend_needs():
+    """A guard on the contract, not a test of new behaviour.
+
+    The frontend is written against these keys, so a rename here is a broken
+    UI somewhere else. The point of the shape is that nothing has to be read
+    as prose: the label is for a person, the action is for the code, and the
+    two are separate fields.
+    """
+    from benchmark.followup import Action, FollowUp, Suggestion
+
+    payload = FollowUp(
+        type="exploration",
+        reason="useful_next_actions",
+        question="What would you like to explore next?",
+        suggestions=[Suggestion(
+            id="filter_active",
+            label="Only the active ones",
+            action=Action("add_filter", "business_object_status", "=", "Active"),
+        )],
+    ).to_dict()
+
+    assert set(payload) == {
+        "follow_up_required", "type", "reason", "question",
+        "suggestions", "allow_free_text",
+    }
+    assert payload["follow_up_required"] is True
+
+    suggestion = payload["suggestions"][0]
+    assert set(suggestion) == {"id", "label", "action"}
+    assert suggestion["action"] == {
+        "type": "add_filter", "field": "business_object_status",
+        "operator": "=", "value": "Active",
+    }
+
+
+def test_an_unknown_action_type_is_refused_at_construction():
+    """The contract is only stable if it cannot be widened by accident."""
+    import pytest
+
+    from benchmark.followup import Action
+
+    with pytest.raises(ValueError):
+        Action("do_something_clever", "status")

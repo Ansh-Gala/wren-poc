@@ -133,3 +133,33 @@ def test_a_reset_expectation_never_carries_the_previous_filters():
                     )
 
     assert not contradictions, "\n".join(contradictions)
+
+
+def test_the_followup_suite_covers_the_dimensions_it_claims_to():
+    """Coverage is part of the suite's contract, not an accident of writing it.
+
+    A suite that drifts towards whatever was easy to write stops measuring
+    what it was built for, and that is invisible in an accuracy number.
+    """
+    from pathlib import Path
+
+    from benchmark.lean_suite import all_turns, load_suite
+
+    turns = all_turns(load_suite(Path("benchmark/followup_questions.yaml")))
+    assert len(turns) >= 100, f"only {len(turns)} turns"
+
+    categories = " ".join(t.category for t in turns).lower()
+    for dimension in ("repair", "clarify", "explore", "mutation",
+                      "analytical", "multi-step", "new topic"):
+        assert dimension in categories, f"no case covers {dimension}"
+
+    # Every dimension the brief lists as a follow-up move must appear as an
+    # action somewhere, or the suite is asserting a narrower contract than the
+    # one the frontend is being promised.
+    actions = {t.expect_action["type"] for t in turns if t.expect_action}
+    assert {"add_filter", "add_group_by", "set_sort", "set_aggregate",
+            "remove_filter", "drill_down", "set_entity"} <= actions
+
+    assert sum(1 for t in turns if t.expect_normalized) >= 20
+    assert sum(1 for t in turns if t.expect_behavior == "clarify") >= 15
+    assert sum(1 for t in turns if t.expect_followup == "exploration") >= 25
