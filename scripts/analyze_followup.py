@@ -61,7 +61,9 @@ def stage_of(r: dict) -> str | None:
         return "suggestion_ranking"
     if r.get("behavior_match") is False:
         return "clarification_behaviour"
-    if not r["result_match"]:
+    # `is False`, not falsy: a runtime turn has no expected answer, so its
+    # result_match is None, and that is "nothing to compare" rather than "wrong".
+    if r["result_match"] is False:
         if r["failure_category"] in ("SQL_SYNTAX_ERROR", "SCHEMA_ERROR",
                                      "TOOL_PIPELINE_ERROR", "PROMPT_ERROR"):
             return "sql_execution"

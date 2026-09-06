@@ -5,12 +5,36 @@ would, and see what the system decided on every turn.
 
 Plain HTML, CSS and JavaScript. No build step, no dependencies, no framework.
 
-## Run it
+## Run it against the real system
 
-Open `ui/index.html` in a browser. That is the whole setup.
+```bash
+python scripts/serve_api.py
+```
 
-It starts in **mock mode**, so every flow works before a backend exists. The
-mock is not invented: each fixture is a real turn lifted from
+Then open <http://localhost:8000/>. The console is served by the same process
+that answers it, so it is same-origin — there is no CORS to configure — and it
+starts in **live** mode, asking real questions of the real database.
+
+Every request goes through `benchmark.lean_runner.run_turn`, the same function
+the four benchmark suites run, with no expected SQL to compare against. There
+is deliberately no second pipeline: a console running its own copy of the logic
+would drift from the thing being measured, and would then be showing you
+something other than what the benchmark reports.
+
+The server takes the same environment as the suites:
+
+```bash
+LLM_PROVIDER=cli CLI_LEAN=true CLAUDE_MODEL=sonnet python scripts/serve_api.py
+python scripts/serve_api.py --port 9000 --context-mode none   # A/B the context layer
+```
+
+## Run it without a backend
+
+Open `ui/index.html` straight off disk. It starts in **mock mode**, so every
+flow works before anything is running. (Served from the API server, untick
+*use mock responses* to get the same thing.)
+
+The mock is not invented: each fixture is a real turn lifted from
 `results/followup_v2/raw/turns.jsonl`, so the SQL, row counts, suggestion ids
 and token figures are what the system actually produced. A mock with
 plausible-looking made-up fields would hide exactly the mismatches this page
@@ -28,17 +52,20 @@ Flows worth trying:
 | `Show tasks whose SLA status is Breached` | a value the column does not take, with the real values offered |
 | `fail now` | the error state |
 
-## Connect your backend
+## Connect a different backend
 
 One file, one function: `sendMessageToBackend()` in [api.js](api.js).
 
-1. Set `ENDPOINT` at the top of `api.js`.
-2. Untick **use mock responses** in the header.
+`ENDPOINT` resolves to whoever served the page when that is an HTTP server, and
+falls back to `http://localhost:8000/ask` when the file was opened from disk.
+Edit that line to point somewhere else.
 
 The full request and response contract is documented in the comment block at
-the top of that file. Every response field is optional — anything missing
-renders as `-` rather than breaking the page — so you can wire it up
-incrementally and watch fields fill in.
+the top of that file, and [scripts/serve_api.py](../scripts/serve_api.py) is a
+worked implementation of it — 300 lines of standard library, no framework.
+Every response field is optional, and anything missing renders as `-` rather
+than breaking the page, so a new backend can be wired up incrementally with the
+panel filling in as it goes.
 
 Two fields deserve a note:
 

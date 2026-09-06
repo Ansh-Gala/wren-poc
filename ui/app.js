@@ -428,13 +428,22 @@
     renderMutations(null);
   });
 
-  el.useMock.addEventListener("change", () => {
+  function paintSource() {
     const mock = el.useMock.checked;
     el.sourceBadge.textContent = mock ? "mock" : "live";
     el.sourceBadge.className = `badge ${mock ? "badge-mock" : "badge-live"}`;
-    if (!mock) showError(`Live mode: posting to ${API.ENDPOINT}`);
-    else hideError();
+    el.sourceBadge.title = mock ? "recorded fixtures" : API.ENDPOINT;
+  }
+
+  el.useMock.addEventListener("change", () => {
+    paintSource();
+    hideError();
   });
+
+  // Served by scripts/serve_api.py rather than opened off disk? Then a real
+  // backend is demonstrably there, and asking it is what you came for.
+  if (location.protocol.startsWith("http")) el.useMock.checked = false;
+  paintSource();
 
   renderState();
   el.input.focus();
