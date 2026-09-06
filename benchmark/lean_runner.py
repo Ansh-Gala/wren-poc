@@ -22,9 +22,11 @@ from typing import Callable
 import yaml
 
 from benchmark.context import (
-    ConversationState, classify_turn, render_context, update_state,
+    ConversationState, classify_turn, detect_entity, render_context, update_state,
 )
-from benchmark.followup import FollowUp, clarify_entity, decide
+from benchmark.followup import (
+    FollowUp, clarify_entity, decide, resolve_clarification,
+)
 from benchmark.normalize import normalize
 from benchmark.evaluator import (
     compare_projection_agnostic, compare_results, compare_row_subset,
@@ -120,6 +122,9 @@ class TurnResult:
     action_match: bool | None = None
     # True when the clarification was decided without asking the model at all.
     preflight_clarified: bool = False
+    # What the user typed, when this turn was an answer to a question the
+    # system asked and was resolved back into the original wording.
+    resumed_from: str | None = None
 
     prompt_tokens: int = 0
     cache_read_tokens: int = 0
@@ -211,6 +216,10 @@ def _attach_followup(
     followup = decide(state, row_count, r.clarification)
     r.followup_type = followup.type
     r.followup = followup.to_dict()
+    # Set after update_state, which resets the block and would clear it.
+    if followup.type == "clarification" and followup.suggestions:
+        state.pending_clarification = followup
+        state.pending_question = r.normalized_question or r.question
     if turn.expect_followup is not None:
         r.followup_match = followup.type == turn.expect_followup
     r.action_match = _action_matches(followup, turn.expect_action)
@@ -252,8 +261,28 @@ def run_turn(
     if turn.expect_normalized is not None:
         r.normalized_match = question == turn.expect_normalized
 
+    # 0b. If the previous turn asked something, this one may be the answer.
+    #     Resolved into the original question rather than sent on as a bare
+    #     noun: "AR_YD_Suiting" alone reaches the model with empty context and
+    #     it can only ask what to do with it, so the thread deadlocks one turn
+    #     after the clarification meant to unblock it.
+    resumed = None
+    if followup_mode and state.pending_clarification is not None:
+        pending, asked_about = state.pending_clarification, state.pending_question
+        state.pending_clarification, state.pending_question = None, ""
+        resumed = resolve_clarification(question, asked_about, pending)
+        if resumed is not None:
+            r.resumed_from = question
+            question = resumed
+            r.normalized_question = question
+
     # 1. Decide how this turn relates to the block, before asking anything.
     decision, entity = classify_turn(question, state, gazetteer)
+    if resumed is not None:
+        # The resumed text is the original question, so it starts a block in
+        # its own right; naming it separately keeps the resumption visible.
+        decision = "clarification_response"
+        entity = detect_entity(question, gazetteer)
     r.decision, r.resolved_entity = decision, entity
     if turn.expect_decision is not None:
         r.decision_match = decision == turn.expect_decision
@@ -267,7 +296,7 @@ def run_turn(
     else:
         # A rebase keeps its context: the subject changed but the question
         # relies on the shape of the one before it.
-        if decision in ("new_block", "switch"):
+        if decision in ("new_block", "switch", "clarification_response"):
             context = ""
         else:
             if decision == "rebase":
@@ -307,6 +336,9 @@ def run_turn(
             update_state(state, question, None, None, entity, decision)
             session.turns.append(Turn(index=turn.turn_index, question=question,
                                       generated_sql=None))
+            # After update_state, which resets the block and would clear it.
+            state.pending_clarification = preflight
+            state.pending_question = question
             r.latency_ms = (time.perf_counter() - started) * 1000
             return r
 

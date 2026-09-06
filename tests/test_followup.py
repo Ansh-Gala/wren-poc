@@ -180,3 +180,128 @@ def test_an_unknown_action_type_is_refused_at_construction():
 
     with pytest.raises(ValueError):
         Action("do_something_clever", "status")
+
+
+def test_a_single_filter_can_still_be_dropped():
+    """"Show all again" is a next move even when only one thing is narrowing.
+
+    Requiring two filters before offering to remove one left "How many items
+    are active?" with a single suggestion, which is not a choice, so the layer
+    said nothing at all. The subject is still never offered for removal --
+    dropping that is not a refinement, it is a different question.
+    """
+    from benchmark.followup import explore
+
+    state = _state_after(
+        "SELECT COUNT(*) FROM tms_business_object_flat "
+        "WHERE business_object_status = 'Active'",
+        question="How many items are active?", rows=258,
+    )
+    followup = explore(state, row_count=1)
+
+    assert followup is not None, "offered nothing at all"
+    assert any(s.action.type == "remove_filter"
+               and s.action.field == "business_object_status"
+               for s in followup.suggestions)
+
+
+def test_the_subject_itself_is_never_offered_for_removal():
+    """Dropping the subject is not a refinement of the question."""
+    from benchmark.followup import explore
+
+    state = _state_after(
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting'"
+    )
+    followup = explore(state, row_count=22)
+    assert not any(s.action.type == "remove_filter" for s in followup.suggestions)
+
+
+def test_a_word_inside_an_entity_name_is_not_a_partial_entity_name():
+    """"the sales team" is a role. AR_SALESPLAN_Suiting is not what was meant.
+
+    Matching any substring made "sales" a candidate prefix for three business
+    object types, so a perfectly clear question about task assignment was
+    answered with "which sales type did you mean?" and never ran. A partial
+    name has to break on the underscores the names are built from.
+    """
+    from benchmark.followup import clarify_entity
+
+    gazetteer = load_gazetteer()
+    assert clarify_entity("Show the tasks assigned to the sales team", gazetteer) is None
+    # The genuinely truncated names must still be caught.
+    assert clarify_entity("Show the AR_YD items", gazetteer) is not None
+    assert clarify_entity("Show the SALESPLAN items", gazetteer) is not None
+
+
+def test_a_trailing_category_word_is_a_category_not_a_truncated_name():
+    """"suiting items" means all of them, not one of them.
+
+    Suiting is the last component of all five types that carry it, so it names
+    a family rather than an unfinished identifier. AR_YD is the last component
+    of none of its matches, which is what makes it a name the user stopped
+    typing.
+    """
+    from benchmark.followup import clarify_entity
+
+    gazetteer = load_gazetteer()
+    assert clarify_entity("how many suiting items are active?", gazetteer) is None
+    assert clarify_entity("show the shirting items", gazetteer) is None
+    assert clarify_entity("Show AR_PD items", gazetteer) is not None
+
+
+def test_answering_a_clarification_resumes_the_original_question():
+    """Asking "which one?" is only useful if the answer means something.
+
+    The system asked which AR_YD type was meant and the user replied
+    "AR_YD_Suiting". With no memory of the question that prompted it, that
+    reply reached the model as a bare noun with empty context, and the model
+    -- reasonably -- asked what to do with it. The thread deadlocked one turn
+    after the clarification that was supposed to unblock it.
+    """
+    from benchmark.followup import clarify_entity, resolve_clarification
+
+    original = "Show the AR_YD items"
+    pending = clarify_entity(original, load_gazetteer())
+
+    assert resolve_clarification("AR_YD_Suiting", original, pending) == \
+        "Show the AR_YD_Suiting items"
+
+
+def test_a_clarification_can_be_answered_with_the_suggestion_id():
+    """A frontend sends the id it was given, not the label a person read."""
+    from benchmark.followup import clarify_entity, resolve_clarification
+
+    original = "Show the AR_YD items"
+    pending = clarify_entity(original, load_gazetteer())
+    chosen = next(s for s in pending.suggestions
+                  if s.action.value == "AR_YD_Shirting")
+
+    assert resolve_clarification(chosen.id, original, pending) == \
+        "Show the AR_YD_Shirting items"
+
+
+def test_an_unrelated_reply_is_not_treated_as_an_answer():
+    """The user is allowed to ignore the question and ask something else."""
+    from benchmark.followup import clarify_entity, resolve_clarification
+
+    original = "Show the AR_YD items"
+    pending = clarify_entity(original, load_gazetteer())
+
+    assert resolve_clarification("how many tasks are open?", original, pending) is None
+
+
+def test_suggestion_ids_are_unique_within_a_follow_up():
+    """The id is the frontend's handle on a choice. Two choices cannot share one.
+
+    business_object_type contains case-variant near-duplicates that are
+    genuinely distinct values -- AR_YD_Shirting and AR_YD_SHIRTING, 52 rows
+    and 2 rows. Lowercasing the value to build the id collapsed them, so a
+    frontend sending back the id it was given would silently select the other
+    one.
+    """
+    from benchmark.followup import clarify_entity
+
+    followup = clarify_entity("Show the AR_YD items", load_gazetteer())
+    ids = [s.id for s in followup.suggestions]
+    assert len(ids) == len(set(ids)), f"duplicate suggestion id in {ids}"

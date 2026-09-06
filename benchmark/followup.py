@@ -107,6 +107,17 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
 
 
+def _value_id(value: str) -> str:
+    """An id for a data value, keeping the case the database uses.
+
+    business_object_type holds case-variant near-duplicates that are genuinely
+    distinct -- AR_YD_Shirting has 52 rows and AR_YD_SHIRTING has 2. Lowercasing
+    to build the id collapsed them into one, so a frontend sending back the id
+    it was given would silently select the other value.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(value)).strip("_")
+
+
 # Tokens that could name an entity. Underscores are kept because the business
 # object types are underscore-delimited and users type them that way.
 _CANDIDATE_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
@@ -116,6 +127,25 @@ _NOT_AN_ENTITY = frozenset(
     "show the and for with items item all any are how many what which "
     "give me my this that those these them list count total".split()
 )
+
+
+def _is_partial_name(token: str, value: str) -> bool:
+    """Whether ``token`` is a run of whole components of ``value``.
+
+    The names are built out of underscore-delimited parts, so a partial name
+    has to break on those parts. Plain substring matching made "sales" a
+    candidate prefix of AR_SALESPLAN_Suiting, and a clear question about the
+    sales team was answered with "which sales type did you mean?" instead of
+    being answered at all.
+    """
+    parts = [p.lower() for p in value.split("_")]
+    needle = [p.lower() for p in token.split("_")]
+    if not needle:
+        return False
+    return any(
+        parts[i:i + len(needle)] == needle
+        for i in range(len(parts) - len(needle) + 1)
+    )
 
 
 def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
@@ -137,8 +167,15 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
     for token in sorted(_CANDIDATE_TOKEN.findall(question), key=len, reverse=True):
         if token.lower() in _NOT_AN_ENTITY:
             continue
-        matches = [v for v in gazetteer if token.lower() in v.lower()]
+        matches = [v for v in gazetteer if _is_partial_name(token, v)]
         if len(matches) < 2:
+            continue
+        # A word that ends every name it matches is naming a family, not an
+        # unfinished identifier. "Suiting" is the last component of all five
+        # types that carry it and means all of them; "AR_YD" is the last
+        # component of none of its matches, which is what makes it a name the
+        # user stopped typing.
+        if all(v.lower().endswith(token.lower()) for v in matches):
             continue
         return FollowUp(
             type="clarification",
@@ -146,7 +183,7 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
             question=f"Which {token} type did you mean?",
             suggestions=[
                 Suggestion(
-                    id=f"set_entity_{_slug(value)}",
+                    id=f"set_entity_{_value_id(value)}",
                     label=value,
                     action=Action(type="set_entity",
                                   field="business_object_type",
@@ -287,8 +324,13 @@ def explore(state, row_count: int | None) -> FollowUp | None:
                 break
 
     # Letting go of a narrowing the user themselves added.
+    # One narrowing is enough to be worth undoing -- "show all again" is a
+    # next move in its own right. Requiring two left a single-filter count
+    # with one suggestion, which is not a choice, so the layer said nothing.
+    # The subject is still never offered: dropping that is a different
+    # question, not a refinement of this one.
     removable = [c for c in in_force if c not in _NOT_GROUPABLE]
-    if len(in_force) >= 2 and removable:
+    if removable:
         column = sorted(removable)[0]
         suggestions.append(Suggestion(
             id=f"remove_{_slug(column)}",
@@ -417,7 +459,7 @@ def clarification_followup(text: str) -> FollowUp:
             question=" ".join(text.split()),
             suggestions=[
                 Suggestion(
-                    id=f"filter_{_slug(column)}_{_slug(value)}",
+                    id=f"filter_{_slug(column)}_{_value_id(value)}",
                     label=value,
                     action=Action(type="add_filter", field=column,
                                   operator="=", value=value),
@@ -451,3 +493,69 @@ def decide(state, row_count: int | None, clarification: str | None) -> FollowUp:
     if clarification is not None:
         return clarification_followup(clarification)
     return explore(state, row_count) or NO_FOLLOWUP
+
+
+# ------------------------------------------------ answering a clarification --
+
+def resolve_clarification(
+    answer: str,
+    original_question: str,
+    pending: FollowUp | None,
+) -> str | None:
+    """The original question with the user's choice filled in.
+
+    Asking "which one?" is only worth doing if the answer can be understood.
+    Without this, the reply to a clarification arrives as a bare noun with no
+    context, and the model can only ask what to do with it -- so the thread
+    deadlocks one turn after the clarification that was meant to unblock it.
+
+    Resolution is a substitution rather than a new question, which is what
+    makes the result read like something a person would have typed: "Show the
+    AR_YD items" plus "AR_YD_Suiting" is "Show the AR_YD_Suiting items", and
+    that goes through the ordinary path with nothing special about it.
+
+    Returns None when the reply is not an answer. The user is entitled to
+    ignore the question and ask something else, and treating that as a choice
+    would be worse than having asked at all.
+    """
+    if pending is None or pending.type != "clarification" or not pending.suggestions:
+        return None
+
+    reply = " ".join(answer.split()).strip().strip("?.!")
+    if not reply:
+        return None
+
+    # An id is a machine token and is matched exactly. Lowercasing it would
+    # reintroduce the collision between AR_YD_Shirting and AR_YD_SHIRTING that
+    # the id was made case-preserving to avoid.
+    by_id = [s.action.value for s in pending.suggestions if s.id == reply]
+    if len(by_id) == 1:
+        chosen = by_id[0]
+    else:
+        # A person types the value, in whatever case they please -- unless
+        # that is itself ambiguous, in which case the exact spelling decides.
+        candidates = [
+            s.action.value for s in pending.suggestions
+            if s.action.value
+            and reply.lower() in (s.action.value.lower(), s.label.lower())
+        ]
+        if len(candidates) > 1:
+            candidates = [v for v in candidates if v == reply]
+        if len(candidates) != 1:
+            # "the suiting one" -- named, but not on its own.
+            candidates = [s.action.value for s in pending.suggestions
+                          if s.action.value
+                          and s.action.value.lower() in reply.lower()]
+        if len(candidates) != 1:
+            return None
+        chosen = candidates[0]
+
+    # Put the choice where the truncated name was, so the resumed question is
+    # the one the user meant to ask in the first place.
+    for token in sorted(_CANDIDATE_TOKEN.findall(original_question),
+                        key=len, reverse=True):
+        if token.lower() in _NOT_AN_ENTITY or token == chosen:
+            continue
+        if _is_partial_name(token, chosen):
+            return original_question.replace(token, chosen)
+    return f"{original_question} ({chosen})"
