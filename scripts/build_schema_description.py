@@ -62,6 +62,22 @@ PRIMARY_KEYS = {
 # because here PVH is a business_unit. Naming the values settles it.
 MAX_ENUM_VALUES = 12
 
+# Columns that name the *subject* of a question, enumerated however many
+# values they have.
+#
+# The cap above is the right trade for dimensions: not knowing every season
+# makes an answer imprecise. It is the wrong trade for the subject column,
+# where not knowing a value makes the question unanswerable and the model
+# cannot tell "this type does not exist" from "I was not told about it".
+# business_object_type has 17 values, so the cap dropped it, and the model
+# reconstructed the valid set from workflow_code -- which omits four of them,
+# including AR_NPD_YD_SHIRTING, the largest type in the database at 59 rows.
+# Two turns were scored as model failures for that.
+#
+# Raising the cap instead would have cost ~870 tokens and enumerated 24
+# free-text notes and a column of dates-as-strings. This costs ~116.
+ALWAYS_ENUMERATE = frozenset({"business_object_type"})
+
 SQL_TO_MDL = {
     "integer": "INTEGER", "bigint": "BIGINT", "smallint": "INTEGER",
     "character varying": "VARCHAR", "text": "VARCHAR", "boolean": "BOOLEAN",
@@ -108,13 +124,16 @@ def main() -> int:
         """Distinct values, when there are few enough to be an enumeration."""
         if dtype not in ("character varying", "text"):
             return None
+        cap = None if column in ALWAYS_ENUMERATE else MAX_ENUM_VALUES
         q = (
             f'SELECT DISTINCT "{column}" FROM {table} '
             f"""WHERE "{column}" IS NOT NULL AND "{column}" <> '' """
-            f"LIMIT {MAX_ENUM_VALUES + 1}"
+            + (f"LIMIT {cap + 1}" if cap is not None else "")
         )
         r = run_readonly(settings, q, settings.statement_timeout_ms)
-        if r.error or not r.rows or len(r.rows) > MAX_ENUM_VALUES:
+        if r.error or not r.rows:
+            return None
+        if cap is not None and len(r.rows) > cap:
             return None
         return sorted(str(row[0]) for row in r.rows)
 

@@ -52,6 +52,44 @@ _EXPLICIT_RESET = re.compile(
 )
 
 
+# The words that name a subject rather than describe one. Taken from the table
+# names (tms_business_object_flat, tms_task_flat, tms_user_flat, tms_role_flat)
+# and from the entity_alias business rule, which declares Initiative, Order, BO
+# and Business Object to be one entity. "item" is the word the benchmark and
+# the users actually use for a business object.
+_SUBJECT_NOUNS = frozenset("""
+task tasks item items object objects initiative initiatives order orders
+user users role roles workflow workflows department departments
+""".split())
+
+# A request that stands on its own opens with a verb of asking...
+_REQUEST_VERB = re.compile(
+    r"^\s*(show|list|give|get|display|find|tell|fetch|pull)\b", re.IGNORECASE)
+
+# ...or is a wh-question with a clause of its own. The trailing verb is what
+# separates "How many tasks are open?", which is a whole question, from "How
+# many tasks?", which is still leaning on the turn before it.
+_WH_CLAUSE = re.compile(
+    r"^\s*(how many|how much|which|what|who|when|where)\b.*"
+    r"\b(is|are|was|were|have|has|had|do|does|did|can)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_complete_request(question: str) -> bool:
+    """Whether the question names its own subject and asks for it outright.
+
+    Both halves are needed. "Show their status too" opens with a verb of
+    asking but names no subject, so it continues the thread; "How many tasks?"
+    names one but does not ask a whole question. Only when both are present is
+    the turn independent of what came before -- which is what makes it safe to
+    drop the filters that were narrowing the previous subject.
+    """
+    if not any(token in _SUBJECT_NOUNS for token in _tokens(question)):
+        return False
+    return bool(_REQUEST_VERB.match(question) or _WH_CLAUSE.match(question))
+
+
 def _normalise(token: str) -> str:
     return re.sub(r"[^a-z0-9]", "", token.lower())
 
@@ -266,13 +304,12 @@ def classify_turn(
     if _REFERENTIAL.search(question) or _ELLIPTICAL.match(question):
         return "follow_up", state.active_entity
 
-    # No subject and no referential cue. A question that carries its own verb
-    # and object ("How many tasks are there?") reads as standalone; a bare
-    # fragment ("how many?") does not.
-    words = len(question.split())
-    if words <= 6:
-        return "follow_up", state.active_entity
-    return "new_block", None
+    # No subject and no referential cue. What separates "Show my active tasks"
+    # from "Show their status too" is not length -- both are four words -- but
+    # whether the question names a subject of its own.
+    if _is_complete_request(question):
+        return "new_block", None
+    return "follow_up", state.active_entity
 
 
 def update_state(

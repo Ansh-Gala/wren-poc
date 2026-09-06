@@ -413,7 +413,7 @@ questions:
       '
   - id: Y05.3
     question: What about AR_PD_Suiting?
-    expect_decision: switch
+    expect_decision: rebase
     expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE business_object_type = ''AR_PD_Suiting'' AND
       task_sla_status = ''Delayed''
 

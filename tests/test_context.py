@@ -217,3 +217,49 @@ def test_context_size_does_not_grow_with_turn_count():
     # Allow a little jitter, but nothing resembling linear growth.
     assert max(sizes) - min(sizes) < 60, sizes
     assert max(sizes) < 1200, max(sizes)
+
+
+# ------------------------------------------------- new topic mid-conversation
+
+def _thread_about_business_objects():
+    """State after two turns narrowing AR_YD_Suiting by delay and due date."""
+    state = ConversationState()
+    update_state(
+        state, "Show delayed AR_YD_Suiting items",
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
+        14, "AR_YD_Suiting", "new_block")
+    update_state(
+        state, "Only those above 10 days",
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 0 "
+        "AND days_to_due_date > 10",
+        6, "AR_YD_Suiting", "follow_up")
+    return state
+
+
+def test_a_complete_request_about_another_entity_starts_a_new_block():
+    """"Show my active tasks" is a new question, not a refinement.
+
+    It names its own subject and its own verb, so nothing about the business
+    object thread applies to it. Classified as a follow-up it inherited
+    business_object_type, delayed_task_count and days_to_due_date -- three
+    filters from a different entity -- which is the state leakage the brief
+    describes.
+    """
+    state = _thread_about_business_objects()
+    decision, _ = classify_turn("Show my active tasks", state, GAZ)
+    assert decision == "new_block"
+
+
+def test_a_bare_fragment_still_continues_the_block():
+    """The counterpart. "How many?" has no subject of its own and must not reset.
+
+    This is the case the old length heuristic existed to catch, and seventeen
+    turns across the three suites depend on it.
+    """
+    state = _thread_about_business_objects()
+    for fragment in ("How many?", "How many are there?", "Make that 10",
+                     "Show their status too", "How many tasks?"):
+        decision, _ = classify_turn(fragment, state, GAZ)
+        assert decision == "follow_up", f"{fragment!r} should continue the block"
