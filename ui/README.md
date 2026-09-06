@@ -21,11 +21,13 @@ is deliberately no second pipeline: a console running its own copy of the logic
 would drift from the thing being measured, and would then be showing you
 something other than what the benchmark reports.
 
-The server takes the same environment as the suites:
+The provider comes from `.env`, the same as the suites — `LLM_PROVIDER=cli`
+and `CLI_LEAN=true`. Anything else is refused at startup with a message saying
+so, rather than failing three seconds into your first question.
 
 ```bash
-LLM_PROVIDER=cli CLI_LEAN=true CLAUDE_MODEL=sonnet python scripts/serve_api.py
-python scripts/serve_api.py --port 9000 --context-mode none   # A/B the context layer
+python scripts/serve_api.py --port 9000
+python scripts/serve_api.py --context-mode none    # A/B the context layer by hand
 ```
 
 ## Run it without a backend
