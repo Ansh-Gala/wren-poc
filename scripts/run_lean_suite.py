@@ -75,6 +75,34 @@ def summarise(results, out_dir: Path) -> dict:
             1 for r in results if r.projection_verdict == "substituted"),
     }
 
+    # The follow-up layer, scored apart from the SQL. A turn can write a
+    # perfect query and offer a useless continuation; folding the two into one
+    # number would hide both and would make the before/after comparison of SQL
+    # accuracy impossible to read.
+    repaired = [r for r in results if r.normalized_match is not None]
+    typed = [r for r in results if r.followup_match is not None]
+    acted = [r for r in results if r.action_match is not None]
+    s.update({
+        "repair_accuracy": (
+            sum(1 for r in repaired if r.normalized_match) / len(repaired) * 100
+        ) if repaired else None,
+        "repair_n": len(repaired),
+        "followup_type_accuracy": (
+            sum(1 for r in typed if r.followup_match) / len(typed) * 100
+        ) if typed else None,
+        "followup_type_n": len(typed),
+        "action_accuracy": (
+            sum(1 for r in acted if r.action_match) / len(acted) * 100
+        ) if acted else None,
+        "action_n": len(acted),
+        "turns_with_repair": sum(1 for r in results if r.repairs),
+        "turns_offering_suggestions": sum(
+            1 for r in results if r.followup.get("suggestions")),
+        "preflight_clarified": sum(1 for r in results if r.preflight_clarified),
+        # Turns the follow-up layer answered without any model call at all.
+        "llm_calls_avoided": sum(1 for r in results if r.preflight_clarified),
+    })
+
     print("\n" + "=" * 66)
     print("LEAN SUITE")
     print("=" * 66)
@@ -102,6 +130,42 @@ def summarise(results, out_dir: Path) -> dict:
     print(f"  avg tool calls           {s['avg_tool_calls']:>10.1f}")
     print(f"  avg latency (s)          {s['avg_latency_s']:>10.1f}")
     print(f"  avg context chars        {s['avg_context_chars']:>10.0f}")
+
+    if repaired or typed or acted:
+        print()
+        print("  FOLLOW-UP LAYER")
+        if repaired:
+            print(f"    repair                 {s['repair_accuracy']:.1f}%  (n={s['repair_n']})")
+        if typed:
+            print(f"    follow-up type         {s['followup_type_accuracy']:.1f}%  (n={s['followup_type_n']})")
+        if acted:
+            print(f"    suggested action       {s['action_accuracy']:.1f}%  (n={s['action_n']})")
+        print(f"    turns repaired         {s['turns_with_repair']}")
+        print(f"    turns with suggestions {s['turns_offering_suggestions']}")
+        print(f"    clarified without LLM  {s['preflight_clarified']}")
+
+        wrong_repair = [r for r in repaired if not r.normalized_match]
+        if wrong_repair:
+            print(f"\n  repair misses ({len(wrong_repair)}):")
+            for r in wrong_repair:
+                print(f"    {r.turn_id:<7} {r.question!r}")
+                print(f"            got      {r.normalized_question!r}")
+                print(f"            expected {r.expect_normalized!r}")
+
+        wrong_followup = [r for r in typed if not r.followup_match]
+        if wrong_followup:
+            print(f"\n  follow-up type misses ({len(wrong_followup)}):")
+            for r in wrong_followup:
+                print(f"    {r.turn_id:<7} expected {r.expected_followup:<14} "
+                      f"got {r.followup_type:<14} {r.question[:36]!r}")
+
+        wrong_action = [r for r in acted if not r.action_match]
+        if wrong_action:
+            print(f"\n  suggested action misses ({len(wrong_action)}):")
+            for r in wrong_action:
+                offered = [x["action"] for x in r.followup.get("suggestions", [])]
+                print(f"    {r.turn_id:<7} wanted {r.expected_action}")
+                print(f"            offered {offered}")
 
     failures = [r for r in results if not r.result_match]
     if failures:
@@ -153,6 +217,9 @@ def main() -> int:
                     help="path to a suite yaml (default benchmark/lean_questions.yaml)")
     ap.add_argument("--config", default="D")
     ap.add_argument("--privacy", default="strict")
+    ap.add_argument("--no-followup", action="store_true",
+                    help="disable the repair/clarification/exploration layer, "
+                         "to measure what it costs and what it changes")
     ap.add_argument("--context-mode", default="state",
                     choices=["none", "history", "state"],
                     help="none = pre-session baseline, history = replay the "
@@ -180,12 +247,14 @@ def main() -> int:
     mcp_config_path = write_mcp_config(args.config, args.privacy, settings)
     mode = "lean (no MCP)" if settings.cli_lean else f"MCP config {args.config}"
     print(f"provider: {settings.llm_provider} / {settings.claude_model or 'default'}   {mode}")
-    print(f"context mode: {args.context_mode}")
+    print(f"context mode: {args.context_mode}   "
+          f"follow-up layer: {'off' if args.no_followup else 'on'}")
     print(f"conversations: {len(conversations)}   turns: {len(turns)}")
     print(f"output: {out_dir}\n")
 
     results = run_suite(conversations, settings, mcp_config_path, args.privacy,
-                        jsonl_path=jsonl, context_mode=args.context_mode)
+                        jsonl_path=jsonl, context_mode=args.context_mode,
+                        followup_mode=not args.no_followup)
     s = summarise(results, out_dir)
     return 0 if s.get("accuracy", 0) >= 90 else 1
 
