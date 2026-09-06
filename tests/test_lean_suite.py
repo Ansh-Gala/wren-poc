@@ -90,3 +90,46 @@ def test_every_expected_query_runs_and_returns_rows(settings):
             empty.append(t.id)
     assert not broken, broken
     assert not empty, f"vacuous questions: {empty}"
+
+
+def test_a_reset_expectation_never_carries_the_previous_filters():
+    """expect_decision and expected_sql must agree about what survives.
+
+    switch and new_block both mean "drop what was narrowing the old subject".
+    A turn that claims one of them while its own expected SQL still carries
+    the previous turn's filters is asserting two contradictory things, and the
+    runner will fail the turn no matter what the model does -- Y05.3 produced
+    exactly the right 26 rows and was scored a CONTEXT_ERROR because of it.
+
+    rebase is the decision that means "swap the subject, keep the shape", and
+    it is the one such a turn should be asking for.
+    """
+    from pathlib import Path
+
+    from benchmark.context import parse_sql_state
+    from benchmark.lean_suite import load_suite
+
+    # The columns that identify the subject rather than narrow it. These are
+    # expected to change on a switch; everything else is expected to vanish.
+    entity_columns = {"business_object_type", "workflow_code", "workflow_name"}
+
+    contradictions = []
+    for suite in ("lean_questions.yaml", "targeted_questions.yaml",
+                  "expansion_questions.yaml"):
+        for conversation in load_suite(Path("benchmark") / suite):
+            turns = conversation.turns
+            for previous, turn in zip(turns, turns[1:]):
+                if turn.expect_decision not in ("switch", "new_block"):
+                    continue
+                if not (previous.expected_sql and turn.expected_sql):
+                    continue
+                before = set(parse_sql_state(previous.expected_sql)["filters"])
+                after = set(parse_sql_state(turn.expected_sql)["filters"])
+                carried = (before & after) - entity_columns
+                if carried:
+                    contradictions.append(
+                        f"{turn.id} expects {turn.expect_decision} but its SQL "
+                        f"still carries {sorted(carried)}"
+                    )
+
+    assert not contradictions, "\n".join(contradictions)

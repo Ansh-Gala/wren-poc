@@ -31,6 +31,24 @@ tables:
           items", filter on this column. Values are case-sensitive and include near-duplicates that are
           genuinely distinct types (AR_YD_Shirting and AR_YD_SHIRTING). Do not substitute workflow_code
           or workflow_name for it.'
+        values:
+        - AR_NPD_Shirting
+        - AR_NPD_Suiting
+        - AR_NPD_YD_SALESPLAN
+        - AR_NPD_YD_SHIRTING
+        - AR_PD_Shirting
+        - AR_PD_Suiting
+        - AR_PRINT_Shirting
+        - AR_PRINT_Suiting
+        - AR_Print_Shirting
+        - AR_Printing_Shirting
+        - AR_SALESPLAN_Shirting
+        - AR_SALESPLAN_Suiting
+        - AR_YD_SHIRTING
+        - AR_YD_Shirting
+        - AR_YD_Suiting
+        - TESTING_MG
+        - test
       business_object_color:
         type: VARCHAR
         description: Priority/color classification of the Business Object.
@@ -461,6 +479,21 @@ tables:
       business_object_type:
         type: VARCHAR
         description: Type of the associated Business Object.
+        values:
+        - AR_NPD_Shirting
+        - AR_NPD_Suiting
+        - AR_NPD_YD_SALESPLAN
+        - AR_NPD_YD_SHIRTING
+        - AR_PD_Shirting
+        - AR_PD_Suiting
+        - AR_PRINT_Shirting
+        - AR_SALESPLAN_Shirting
+        - AR_SALESPLAN_Suiting
+        - AR_YD_SHIRTING
+        - AR_YD_Shirting
+        - AR_YD_Suiting
+        - TESTING_MG
+        - test
       business_object_color:
         type: VARCHAR
         description: Priority/colour of the parent Business Object.

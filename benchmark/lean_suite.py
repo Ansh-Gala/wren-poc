@@ -38,6 +38,16 @@ DECISIONS = ("new_block", "follow_up", "switch", "rebase")
 #               "no results" silently becomes a confident wrong answer.
 BEHAVIOURS = ("sql", "clarify", "zero_or_clarify")
 
+# What the follow-up layer should offer once the turn is done.
+#   clarification -- the turn could not be answered as asked
+#   exploration   -- it was answered, and there are obvious next moves
+#   none          -- it was answered and stood on its own
+#
+# Asserted separately from the SQL. A turn can produce a perfect query and
+# still offer a useless continuation, and the two failures need different
+# fixes, so scoring them together would hide both.
+FOLLOWUPS = ("clarification", "exploration", "none")
+
 
 @dataclass(frozen=True)
 class SuiteTurn:
@@ -55,6 +65,17 @@ class SuiteTurn:
     # list is a real error rather than a different reasonable choice.
     strict_projection: bool = False
     note: str | None = None
+
+    # -------------------------------------------------- follow-up layer --
+    # What the repair layer should make of the question before anything else
+    # sees it. Set only where a repair is expected; None means "unchanged".
+    expect_normalized: str | None = None
+    # Which kind of follow-up should be offered once the turn is done.
+    expect_followup: str | None = None
+    # The action a suggestion must carry, as a subset of its fields. Checked
+    # as a subset rather than an exact match so that adding a field to the
+    # contract does not invalidate every case.
+    expect_action: dict | None = None
 
     @property
     def is_standalone(self) -> bool:
@@ -79,6 +100,10 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
     behavior = raw.get("expect_behavior", "sql")
     if behavior not in BEHAVIOURS:
         raise ValueError(f"{raw.get('id')}: expect_behavior must be one of {BEHAVIOURS}")
+    followup = raw.get("expect_followup")
+    if followup is not None and followup not in FOLLOWUPS:
+        raise ValueError(f"{raw.get('id')}: expect_followup must be one of {FOLLOWUPS}")
+    normalized = raw.get("expect_normalized")
     sql = raw.get("expected_sql")
     return SuiteTurn(
         id=raw["id"],
@@ -93,6 +118,9 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
         expect_behavior=behavior,
         strict_projection=bool(raw.get("strict_projection", False)),
         note=raw.get("note"),
+        expect_normalized=" ".join(normalized.split()) if normalized else None,
+        expect_followup=followup,
+        expect_action=raw.get("expect_action"),
     )
 
 

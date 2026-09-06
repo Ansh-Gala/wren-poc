@@ -24,6 +24,8 @@ import yaml
 from benchmark.context import (
     ConversationState, classify_turn, render_context, update_state,
 )
+from benchmark.followup import FollowUp, clarify_entity, decide
+from benchmark.normalize import normalize
 from benchmark.evaluator import (
     compare_projection_agnostic, compare_results, compare_row_subset,
     result_summary,
@@ -100,6 +102,25 @@ class TurnResult:
     expected_result: dict = field(default_factory=dict)
     actual_result: dict = field(default_factory=dict)
 
+    # ------------------------------------------------- follow-up layer --
+    # Recorded separately from result_match on purpose. A turn can write a
+    # perfect query and offer a useless continuation, or repair a typo and
+    # then get the SQL wrong; folding them into one number would hide both,
+    # and the before/after comparison of SQL accuracy has to stay clean.
+    normalized_question: str = ""
+    repairs: list[dict] = field(default_factory=list)
+    expect_normalized: str | None = None
+    normalized_match: bool | None = None
+
+    followup_type: str = "none"
+    followup: dict = field(default_factory=dict)
+    expected_followup: str | None = None
+    followup_match: bool | None = None
+    expected_action: dict | None = None
+    action_match: bool | None = None
+    # True when the clarification was decided without asking the model at all.
+    preflight_clarified: bool = False
+
     prompt_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
@@ -160,6 +181,41 @@ def _classify_failure(r: TurnResult, expected, actual) -> str:
 CONTEXT_MODES = ("none", "history", "state")
 
 
+def _action_matches(followup: FollowUp, expected: dict | None) -> bool | None:
+    """Whether some suggestion carries the action the case asked for.
+
+    Compared as a subset of one suggestion's action, not as an exact match on
+    the whole list. A case cares that "group by status" is on offer; it does
+    not care what else is, nor in what order, nor whether the contract later
+    grows a field.
+    """
+    if expected is None:
+        return None
+    for suggestion in followup.suggestions:
+        actual = suggestion.action.to_dict()
+        if all(actual.get(k) == v for k, v in expected.items()):
+            return True
+    return False
+
+
+def _attach_followup(
+    r: TurnResult,
+    turn: SuiteTurn,
+    state: ConversationState,
+    row_count: int | None,
+    followup_mode: bool,
+) -> None:
+    """Decide what to offer next, and score it against the case."""
+    if not followup_mode:
+        return
+    followup = decide(state, row_count, r.clarification)
+    r.followup_type = followup.type
+    r.followup = followup.to_dict()
+    if turn.expect_followup is not None:
+        r.followup_match = followup.type == turn.expect_followup
+    r.action_match = _action_matches(followup, turn.expect_action)
+
+
 def run_turn(
     turn: SuiteTurn,
     state: ConversationState,
@@ -169,6 +225,7 @@ def run_turn(
     privacy_mode: str,
     session: Session,
     context_mode: str = "state",
+    followup_mode: bool = True,
 ) -> TurnResult:
     started = time.perf_counter()
     r = TurnResult(
@@ -177,10 +234,26 @@ def run_turn(
         question=turn.question, expected_sql=turn.expected_sql,
         expected_decision=turn.expect_decision,
         expected_behavior=turn.expect_behavior,
+        expect_normalized=turn.expect_normalized,
+        expected_followup=turn.expect_followup,
+        expected_action=turn.expect_action,
     )
 
+    # 0. Repair the question before anything reads it. A misspelt schema term
+    #    is not a hard question, but it reaches the model as a word the schema
+    #    has never heard of, and the model can then only guess or ask. This
+    #    costs no tokens and no round-trip.
+    question = turn.question
+    if followup_mode:
+        repaired = normalize(turn.question)
+        question = repaired.question
+        r.repairs = [asdict(x) for x in repaired.repairs]
+    r.normalized_question = question
+    if turn.expect_normalized is not None:
+        r.normalized_match = question == turn.expect_normalized
+
     # 1. Decide how this turn relates to the block, before asking anything.
-    decision, entity = classify_turn(turn.question, state, gazetteer)
+    decision, entity = classify_turn(question, state, gazetteer)
     r.decision, r.resolved_entity = decision, entity
     if turn.expect_decision is not None:
         r.decision_match = decision == turn.expect_decision
@@ -213,9 +286,33 @@ def run_turn(
         # defeat the point of the baseline.
         session.turns = []
 
+    # 2b. Some questions can be settled without asking at all. "Show the AR_YD
+    #     items" names no type that exists, but three of them start with
+    #     AR_YD, and the gazetteer knows which three. Asking the model to pick
+    #     invites it to pick one; asking the user costs nothing and is right.
+    if followup_mode:
+        preflight = clarify_entity(question, gazetteer)
+        if preflight is not None:
+            r.preflight_clarified = True
+            r.followup_type, r.followup = preflight.type, preflight.to_dict()
+            r.clarification = preflight.question
+            if turn.expect_followup is not None:
+                r.followup_match = preflight.type == turn.expect_followup
+            r.action_match = _action_matches(preflight, turn.expect_action)
+            if turn.expect_behavior in ("clarify", "zero_or_clarify"):
+                r.behavior_match = r.result_match = r.semantic_match = True
+            else:
+                r.behavior_match = False
+                r.failure_category = "SHOULD_NOT_HAVE_CLARIFIED"
+            update_state(state, question, None, None, entity, decision)
+            session.turns.append(Turn(index=turn.turn_index, question=question,
+                                      generated_sql=None))
+            r.latency_ms = (time.perf_counter() - started) * 1000
+            return r
+
     # 3. Ask.
     provider = get_provider(settings)
-    run = provider.ask(turn.question, mcp_config_path, privacy_mode, settings, session)
+    run = provider.ask(question, mcp_config_path, privacy_mode, settings, session)
     r.llm_ms = run.duration_ms
     r.tools_used = list(run.tools_used)
     r.tool_call_count = len(run.tools_used)
@@ -285,9 +382,10 @@ def run_turn(
         else:
             r.behavior_match = r.result_match = False
             r.failure_category = "PROMPT_ERROR"
-        update_state(state, turn.question, parsed.sql, None, entity, decision)
-        session.turns.append(Turn(index=turn.turn_index, question=turn.question,
+        update_state(state, question, parsed.sql, None, entity, decision)
+        session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=parsed.sql))
+        _attach_followup(r, turn, state, None, followup_mode)
         r.latency_ms = (time.perf_counter() - started) * 1000
         return r
 
@@ -297,9 +395,10 @@ def run_turn(
         if not r.behavior_match:
             r.failure_category = ("HALLUCINATION" if not r.schema_grounded
                                   else "SHOULD_HAVE_CLARIFIED")
-        update_state(state, turn.question, None, None, entity, decision)
-        session.turns.append(Turn(index=turn.turn_index, question=turn.question,
+        update_state(state, question, None, None, entity, decision)
+        session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=None))
+        _attach_followup(r, turn, state, None, followup_mode)
         r.latency_ms = (time.perf_counter() - started) * 1000
         return r
 
@@ -355,15 +454,20 @@ def run_turn(
     #    visible in the next turn's context rather than silently corrected.
     update_state(
         state if decision == "follow_up" else state,
-        turn.question,
+        question,
         parsed.sql or turn.expected_sql,
         len(actual.rows) if actual is not None and actual.ok else None,
         entity,
         decision,
     )
-    session.turns.append(Turn(index=turn.turn_index, question=turn.question,
+    session.turns.append(Turn(index=turn.turn_index, question=question,
                               generated_sql=parsed.sql))
 
+    _attach_followup(
+        r, turn, state,
+        len(actual.rows) if actual is not None and actual.ok else None,
+        followup_mode,
+    )
     r.latency_ms = (time.perf_counter() - started) * 1000
     return r
 
@@ -376,6 +480,7 @@ def run_suite(
     jsonl_path: Path | None = None,
     on_result: Callable[[TurnResult], None] | None = None,
     context_mode: str = "state",
+    followup_mode: bool = True,
 ) -> list[TurnResult]:
     if context_mode not in CONTEXT_MODES:
         raise ValueError(f"context_mode must be one of {CONTEXT_MODES}")
@@ -389,7 +494,8 @@ def run_suite(
         for turn in conv.turns:
             r = run_turn(turn, state, gazetteer, settings,
                          mcp_config_path, privacy_mode, session,
-                         context_mode=context_mode)
+                         context_mode=context_mode,
+                         followup_mode=followup_mode)
             results.append(r)
 
             if jsonl_path is not None:

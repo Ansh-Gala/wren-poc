@@ -228,9 +228,13 @@ CONVERSATIONS = [
         ("Y05.2", "How many?",
          f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_NPD_Suiting' "
          "AND task_sla_status = 'Delayed'", "follow_up", False),
+        # rebase, not switch: the expected SQL keeps the Delayed filter and the
+        # COUNT shape and changes only the subject, which is precisely what
+        # rebase means. Asserting switch here contradicted the SQL beside it and
+        # failed the turn however the model answered.
         ("Y05.3", "What about AR_PD_Suiting?",
          f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_PD_Suiting' "
-         "AND task_sla_status = 'Delayed'", "switch", False),
+         "AND task_sla_status = 'Delayed'", "rebase", False),
     ]),
 ]
 

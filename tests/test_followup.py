@@ -1,0 +1,137 @@
+"""The follow-up layer: what the system says after, or instead of, an answer.
+
+The contract these tests pin down is the one a frontend will render, so they
+assert on structure rather than on phrasing. A label may be reworded; an
+action's field and value may not.
+"""
+
+from __future__ import annotations
+
+from benchmark.followup import clarify_entity
+from benchmark.lean_runner import load_gazetteer
+
+
+def test_partial_entity_name_asks_which_one_and_offers_only_real_values():
+    """"AR_YD" names three business object types, so the system must ask.
+
+    The candidates come from the gazetteer, which is generated from the
+    database. Nothing here may be invented: offering a plausible-looking type
+    that does not exist is worse than asking an open question.
+    """
+    gazetteer = load_gazetteer()
+    followup = clarify_entity("Show the AR_YD items", gazetteer)
+
+    assert followup is not None
+    assert followup.type == "clarification"
+    assert followup.reason == "ambiguous_entity"
+
+    offered = [s.action.value for s in followup.suggestions]
+    assert "AR_YD_Suiting" in offered
+    assert "AR_YD_Shirting" in offered
+    assert set(offered) <= set(gazetteer), "offered a value the database does not have"
+
+
+def _state_after(sql: str, question: str = "Show the AR_YD_Suiting items",
+                 rows: int = 22):
+    from benchmark.context import ConversationState, update_state
+    state = ConversationState()
+    update_state(state, question, sql, rows, "AR_YD_Suiting", "new_block")
+    return state
+
+
+def test_exploration_offers_next_moves_grounded_in_the_schema():
+    from benchmark.followup import explore
+
+    state = _state_after(
+        "SELECT business_object_id, business_object_status "
+        "FROM tms_business_object_flat WHERE business_object_type = 'AR_YD_Suiting'"
+    )
+    followup = explore(state, row_count=22)
+
+    assert followup is not None
+    assert followup.type == "exploration"
+    assert 2 <= len(followup.suggestions) <= 4, "2-4 suggestions, per the brief"
+
+    for suggestion in followup.suggestions:
+        assert suggestion.action.type in {
+            "add_filter", "add_group_by", "set_sort", "set_limit",
+            "remove_filter", "set_aggregate", "drill_down",
+        }
+        assert suggestion.id and suggestion.label
+
+
+def test_applying_a_filter_suggestion_narrows_the_state_and_asks_for_it():
+    """A suggestion becomes a state change plus a question, never SQL.
+
+    Keeping SQL out of the action is the point: the model remains the only
+    thing that writes queries, so a suggestion cannot drift away from what the
+    pipeline would otherwise produce.
+    """
+    from benchmark.followup import Action, apply_action
+
+    state = _state_after(
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting'"
+    )
+    question = apply_action(
+        state, Action("add_filter", "business_object_status", "=", "Active"))
+
+    assert "business_object_status" in state.active_filters
+    assert "Active" in state.active_filters["business_object_status"]
+    assert "Active" in question
+    assert "SELECT" not in question.upper()
+
+
+def test_a_clarification_naming_a_known_column_offers_that_column_real_values():
+    """The model says which column it could not satisfy; we supply the values.
+
+    Splitting it this way is what keeps candidates honest. The model is good
+    at noticing that "Breached" is not a thing and bad at reciting the four
+    values that are; the schema is the reverse. Asked for SLA status
+    "Breached", the useful reply names Delayed and On Time, and neither may be
+    invented.
+    """
+    from benchmark.followup import clarification_followup
+
+    followup = clarification_followup(
+        "There is no 'Breached' value. task_sla_status only takes two values."
+    )
+
+    assert followup.type == "clarification"
+    assert followup.reason == "unknown_value"
+    assert {s.action.value for s in followup.suggestions} == {"Delayed", "On Time"}
+    assert all(s.action.field == "task_sla_status" for s in followup.suggestions)
+
+
+def test_an_open_ended_clarification_offers_nothing_and_invites_free_text():
+    """No column named means no candidates exist. Inventing some would be worse."""
+    from benchmark.followup import clarification_followup
+
+    followup = clarification_followup(
+        "Could you say which items you mean? The question is too broad to answer."
+    )
+
+    assert followup.type == "clarification"
+    assert followup.suggestions == []
+    assert followup.allow_free_text is True
+
+
+def test_suggestions_do_not_spend_every_slot_on_one_column():
+    """Four buttons should offer four choices, not one choice four ways.
+
+    The registry names three status rules -- active, closed, short closed --
+    and taking them all filled three of the four slots with values of the same
+    column, pushing out sorting and counting entirely. A user who wants a
+    different status can say so; what they cannot do is discover an option
+    that was never shown.
+    """
+    from benchmark.followup import explore
+
+    state = _state_after(
+        "SELECT business_object_id FROM tms_business_object_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting'"
+    )
+    followup = explore(state, row_count=22)
+
+    fields = [s.action.field for s in followup.suggestions]
+    assert len(fields) == len(set(fields)), f"repeated field in {fields}"
