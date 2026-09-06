@@ -179,12 +179,48 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
 
 # ------------------------------------------------------------------ asking --
 
+def preflight(settings) -> None:
+    """Fail at startup rather than three seconds into someone's first question.
+
+    A misconfigured provider surfaces as an HTTP 500 carrying whatever the
+    upstream said, which is a poor place to learn that .env still points at a
+    model that was decommissioned. Checked once, here, where the message can
+    say what to do about it.
+    """
+    if settings.llm_provider != "cli":
+        raise SystemExit(
+            f"LLM_PROVIDER is {settings.llm_provider!r}, not 'cli'.\n"
+            "This project is only measured against the local Claude Code CLI; "
+            "every benchmark figure on record was produced with it.\n"
+            "Set LLM_PROVIDER=cli and CLI_LEAN=true in .env, or pass them for "
+            "one run:\n"
+            "  LLM_PROVIDER=cli CLI_LEAN=true python scripts/serve_api.py"
+        )
+
+    from llm_api.cli_provider import detect_claude
+    if not detect_claude(settings.claude_command):
+        raise SystemExit(
+            f"Claude Code CLI not found (looked for {settings.claude_command!r} "
+            "on PATH).\nInstall it from https://claude.com/claude-code, then "
+            "run `claude --version` to confirm."
+        )
+
+    if not settings.cli_lean:
+        # Not fatal -- the MCP path works -- but it is almost never what is
+        # wanted here, and the difference is invisible until the token figures
+        # come back three times larger.
+        log.warning("CLI_LEAN is not set: using the MCP path, which needs "
+                    "`wren serve mcp` running and costs ~3x the context. "
+                    "Set CLI_LEAN=true for the mode the benchmarks used.")
+
+
 class Runtime:
     """Everything a request needs that does not change between requests."""
 
     def __init__(self, args) -> None:
         self.settings = load_settings()
         register_secrets(self.settings.secrets())
+        preflight(self.settings)
         self.gazetteer = load_gazetteer()
         self.mcp_config_path = write_mcp_config(args.config, args.privacy, self.settings)
         self.privacy = args.privacy

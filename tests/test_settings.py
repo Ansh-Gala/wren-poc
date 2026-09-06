@@ -48,3 +48,19 @@ def test_secrets_lists_only_non_empty_values(tmp_path):
     env = tmp_path / ".env"
     env.write_text("DATABASE_PASSWORD=pw1\nDATABASE_READONLY_PASSWORD=\n", encoding="utf-8")
     assert load_settings(env).secrets() == ["pw1"]
+
+
+def test_naming_a_provider_without_its_key_is_a_config_error_not_a_crash(tmp_path):
+    """A missing key must leave an empty string, not None.
+
+    The groq and gemini branches had no fallback, so commenting out a key
+    turned every entry point into an AttributeError raised from inside
+    load_settings -- before any code that could have said what was wrong.
+    """
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=groq\nDATABASE_NAME=x\n", encoding="utf-8")
+
+    settings = load_settings(env)
+
+    assert settings.llm_provider == "groq"
+    assert settings.openai_api_key == ""

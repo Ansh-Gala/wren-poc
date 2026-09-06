@@ -126,9 +126,13 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         debug=_as_bool(g("DEBUG"), False),
         llm_provider=(g("LLM_PROVIDER") or "cli").strip().lower(),
         cli_lean=_as_bool(g("CLI_LEAN"), False),
+        # Each branch falls back to "" -- naming a provider whose key is absent
+        # is a configuration mistake, and it should be reported as one rather
+        # than raising AttributeError from inside the loader, before any code
+        # that could say what was wrong has run.
         openai_api_key=(
-            g("GROQ_API_KEY") if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
-            else g("GEMINI_API_KEY") if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"
+            (g("GROQ_API_KEY") or "") if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
+            else (g("GEMINI_API_KEY") or "") if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"
             else g("OPENAI_API_KEY") or g("GROQ_API_KEY") or g("GEMINI_API_KEY") or ""
         ).strip(),
         openai_base_url=(
