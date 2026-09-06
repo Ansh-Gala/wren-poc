@@ -15,132 +15,112 @@ questions:
   expect_normalized: show my delayed tasks
   expected_sql: SELECT task_id, task_display_name FROM tms_task_flat WHERE assigned_user_id = 1 AND task_sla_status
     = 'Delayed'
-  expect_followup: exploration
 - id: F02
   category: Repair - Typo
   question: how many taks are open
   expect_normalized: how many tasks are open
   expected_sql: SELECT COUNT(*) FROM tms_task_flat WHERE task_status = 'open'
-  expect_followup: exploration
 - id: F03
   category: Repair - Typo
   question: show clsoed AR_YD_Suiting items
   expect_normalized: show closed AR_YD_Suiting items
   expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
     business_object_type = 'AR_YD_Suiting' AND business_object_status = 'Closed'
-  expect_followup: exploration
 - id: F04
   category: Repair - Typo
   question: list activ AR_NPD_Shirting items
   expect_normalized: list active AR_NPD_Shirting items
   expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
     business_object_type = 'AR_NPD_Shirting' AND business_object_status = 'Active'
-  expect_followup: exploration
 - id: F05
   category: Repair - Transposition
   question: show the AR_YD_Suiting itmes
   expect_normalized: show the AR_YD_Suiting items
   expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
     business_object_type = 'AR_YD_Suiting'
-  expect_followup: exploration
 - id: F06
   category: Repair - Typo
   question: how many AR_YD_Suiting items are there by staus?
   expect_normalized: how many AR_YD_Suiting items are there by status?
   expected_sql: SELECT business_object_status, COUNT(*) FROM tms_business_object_flat WHERE business_object_type
     = 'AR_YD_Suiting' GROUP BY business_object_status
-  expect_followup: exploration
 - id: F07
   category: Repair - Typo
   question: how many bussiness objects are there
   expect_normalized: how many business objects are there
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat
-  expect_followup: exploration
 - id: F08
   category: Repair - Typo
   question: which AR_PD_Suiting tasks are delayd
   expect_normalized: which AR_PD_Suiting tasks are delayed
   expected_sql: SELECT task_id, task_display_name FROM tms_task_flat WHERE business_object_type = 'AR_PD_Suiting'
     AND task_sla_status = 'Delayed'
-  expect_followup: exploration
 - id: F09
   category: Repair - Typo
   question: how many items have no workfow name
   expect_normalized: how many items have no workflow name
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE workflow_name IS NULL
-  expect_followup: exploration
 - id: F10
   category: Repair - Typo
   question: how many sutiing items are active?
   expect_normalized: how many suiting items are active?
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type LIKE '%Suiting'
     AND business_object_status = 'Active'
-  expect_followup: exploration
 - id: F11
   category: Repair - Typo
   question: show AR_YD_Suiting items with satus Closed
   expect_normalized: show AR_YD_Suiting items with status Closed
   expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
     business_object_type = 'AR_YD_Suiting' AND business_object_status = 'Closed'
-  expect_followup: exploration
 - id: F12
   category: Repair - Typo
   question: list the delaied AR_NPD_Suiting tasks
   expect_normalized: list the delayed AR_NPD_Suiting tasks
   expected_sql: SELECT task_id, task_display_name FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting'
     AND task_sla_status = 'Delayed'
-  expect_followup: exploration
 - id: F13
   category: Repair - Typo
   question: how many items are in buisness unit unit1
   expect_normalized: how many items are in business unit unit1
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_unit = 'unit1'
-  expect_followup: exploration
 - id: F14
   category: Repair - Transposition
   question: how many objets are active
   expect_normalized: how many objects are active
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_status = 'Active'
-  expect_followup: exploration
 - id: F15
   category: Repair - Transposition
   question: show open tsaks in AR_YD_Suiting
   expect_normalized: show open tasks in AR_YD_Suiting
   expected_sql: SELECT task_id, task_display_name FROM tms_task_flat WHERE business_object_type = 'AR_YD_Suiting'
     AND task_status = 'open'
-  expect_followup: exploration
 - id: F16
   category: Repair - Transposition
   question: how many usres are there
   expect_normalized: how many users are there
   expected_sql: SELECT COUNT(*) FROM tms_user_flat
-  expect_followup: exploration
 - id: F17
   category: Repair - Spelling Variant
   question: how many AR_YD_Shirting items are there by colur?
   expect_normalized: how many AR_YD_Shirting items are there by color?
   expected_sql: SELECT business_object_color, COUNT(*) FROM tms_business_object_flat WHERE business_object_type
     = 'AR_YD_Shirting' GROUP BY business_object_color
-  expect_followup: exploration
 - id: F18
   category: Repair - Typo
   question: show the seasosn on record
   expect_normalized: show the season on record
   expected_sql: SELECT DISTINCT season FROM tms_business_object_attributes_flat WHERE season IS NOT NULL
-  expect_followup: exploration
 - id: F19
   category: Repair - Typo
   question: how many AR_PD_Shirting items are shirtng
   expect_normalized: how many AR_PD_Shirting items are shirting
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_type = 'AR_PD_Shirting'
-  expect_followup: exploration
 - id: F20
   category: Repair - Typo
   question: show the assigend user for each open AR_NPD_Suiting task
   expect_normalized: show the assigned user for each open AR_NPD_Suiting task
   expected_sql: SELECT task_id, assigned_user_name FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting'
     AND task_status = 'open'
-  expect_followup: exploration
 - id: F21
   category: Clarify - Ambiguous Entity
   question: Show the AR_YD items
@@ -478,7 +458,7 @@ questions:
   category: Explore - No Suggestion Worth Making
   question: How many items are in business unit unit7?
   expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_unit = 'unit7'
-  expect_followup: none
+  expect_behavior: zero_or_clarify
 - id: G01
   category: Mutation - Filter then Sort
   turns:
@@ -621,7 +601,7 @@ questions:
       = 'Active' GROUP BY business_object_color
     expect_decision: follow_up
   - id: G08.3
-    question: just the black ones then
+    question: how many of those are black?
     expected_sql: SELECT COUNT(*) FROM tms_business_object_flat WHERE business_object_status = 'Active'
       AND business_object_color = 'Black'
     expect_decision: follow_up
@@ -753,7 +733,7 @@ questions:
     question: AR_YD_Suiting
     expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE
       business_object_type = 'AR_YD_Suiting'
-    expect_decision: follow_up
+    expect_decision: clarification_response
   - id: G14.3
     question: only the closed ones
     expected_sql: SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat WHERE

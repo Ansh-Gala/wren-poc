@@ -114,6 +114,14 @@ class ConversationState:
     previous_result_summary: str = ""
     turns_in_block: int = 0
 
+    # A question the system asked and is waiting on, with the choices it
+    # offered. Held here because it is exactly what the next turn needs in
+    # order to be understood -- "AR_YD_Suiting" means nothing without it. Not
+    # rendered into the prompt: it is resolved before the model is asked, so
+    # what the model sees is the original question with the choice filled in.
+    pending_clarification: object | None = None
+    pending_question: str = ""
+
     def is_empty(self) -> bool:
         return self.previous_sql is None and not self.active_entity
 
@@ -129,6 +137,8 @@ class ConversationState:
         self.previous_sql = None
         self.previous_result_summary = ""
         self.turns_in_block = 0
+        self.pending_clarification = None
+        self.pending_question = ""
 
 
 def parse_sql_state(sql: str) -> dict:

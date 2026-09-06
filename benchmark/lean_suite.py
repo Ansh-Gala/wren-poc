@@ -22,7 +22,11 @@ SUITE_FILE = Path(__file__).resolve().parent / "lean_questions.yaml"
 # What the session layer should decide for a turn. Asserted alongside the SQL,
 # because a thread can produce the right answer while classifying the turn
 # wrongly, and that would break on the next turn instead of this one.
-DECISIONS = ("new_block", "follow_up", "switch", "rebase")
+DECISIONS = ("new_block", "follow_up", "switch", "rebase",
+             # The turn answered a question the system asked. The reply is
+             # resolved back into the original wording before anything else
+             # sees it, so what follows behaves like a fresh block.
+             "clarification_response")
 
 # What the turn should produce.
 #   sql      -- a query (the default)

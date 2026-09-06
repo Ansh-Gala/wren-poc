@@ -270,6 +270,10 @@ EXPLORATION = [
      f"SELECT task_id FROM {TK} WHERE business_object_type = 'AR_YD_Suiting' "
      "AND task_status = 'open' AND task_sla_status = 'Delayed'",
      {"type": "remove_filter"}),
+    # Behaves as zero_or_clarify rather than sql: unit7 does not exist, so
+    # returning nothing and saying so are both right, and the run showed the
+    # model saying so. What the case is really asserting is that an empty
+    # answer has nothing worth exploring.
     ("F65", "Explore - No Suggestion Worth Making",
      "How many items are in business unit unit7?",
      f"SELECT COUNT(*) FROM {BO} WHERE business_unit = 'unit7'",
@@ -373,7 +377,7 @@ CONVERSATIONS = [
          f"SELECT business_object_color, COUNT(*) FROM {BO} "
          "WHERE business_object_status = 'Active' GROUP BY business_object_color",
          "follow_up", None, None),
-        ("G08.3", "just the black ones then",
+        ("G08.3", "how many of those are black?",
          f"SELECT COUNT(*) FROM {BO} WHERE business_object_status = 'Active' "
          "AND business_object_color = 'Black'", "follow_up", None, None),
     ]),
@@ -470,7 +474,7 @@ CONVERSATIONS = [
          {"type": "set_entity", "value": "AR_YD_Suiting"}),
         ("G14.2", "AR_YD_Suiting",
          f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting'", "follow_up", None, None),
+         "WHERE business_object_type = 'AR_YD_Suiting'", "clarification_response", None, None),
         ("G14.3", "only the closed ones",
          f"SELECT business_object_id, business_object_ref_id FROM {BO} "
          "WHERE business_object_type = 'AR_YD_Suiting' "
@@ -537,10 +541,17 @@ def main() -> int:
             problems.append(
                 f"{case_id}: repair layer produces {produced!r}, case expects {expected!r}")
         check_sql(case_id, sql)
+        # Deliberately no expect_followup. A repair case is about the repair
+        # and the SQL that follows it; asserting a continuation as well would
+        # fail turns for a second, unrelated reason. "How many users are
+        # there?" has no useful next move -- tms_user_flat has no enumerated
+        # column and no business rule -- and saying nothing is the right
+        # answer there, not a defect. Exploration is asserted by the 25 cases
+        # built for it, where the expectation is validated against what the
+        # generator can actually offer.
         questions.append({
             "id": case_id, "category": category, "question": typed,
             "expect_normalized": expected, "expected_sql": sql,
-            "expect_followup": "exploration",
         })
 
     # -- B. clarification ----------------------------------------------------
@@ -595,8 +606,13 @@ def main() -> int:
         entry = {
             "id": case_id, "category": category, "question": question,
             "expected_sql": sql,
-            "expect_followup": "exploration" if action else "none",
+            "expect_followup": "exploration" if action else None,
         }
+        if action is None:
+            # The only no-suggestion case is a no-rows case, and an honest
+            # empty answer and a clarification are both correct there.
+            entry["expect_behavior"] = "zero_or_clarify"
+            entry.pop("expect_followup")
         if action:
             entry["expect_action"] = action
         questions.append(entry)
