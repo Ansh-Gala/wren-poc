@@ -99,8 +99,14 @@
 
 const API = (() => {
 
-  const ENDPOINT = "http://localhost:8000/ask";   // <-- your backend
-  const TIMEOUT_MS = 60000;
+  /* Served by scripts/serve_api.py? Then talk to whoever served this page --
+     same origin, so there is no CORS to configure. Opened straight off disk,
+     fall back to the default port. Override either by editing this line. */
+  const ENDPOINT = location.protocol.startsWith("http")
+    ? `${location.origin}/ask`
+    : "http://localhost:8000/ask";
+
+  const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
   async function sendMessageToBackend(payload, { useMock = true } = {}) {

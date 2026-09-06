@@ -34,7 +34,7 @@ from benchmark.evaluator import (
 )
 from benchmark.lean_suite import Conversation, SuiteTurn
 from benchmark.sql_semantics import compare as compare_semantics
-from benchmark.models import ParsedSQL, Session, Turn
+from benchmark.models import ParsedSQL, QueryResult, Session, Turn
 from benchmark.safety import UnsafeSQLError, assert_read_only
 from claude.parser import parse_clarification, parse_sql
 from config.logging import get_logger
@@ -43,6 +43,10 @@ from database.connection import run_readonly
 from llm_api.factory import get_provider
 
 log = get_logger("lean_runner")
+
+# Stands in for a comparison target that does not exist, so the failure
+# classifier can be reused on turns that have no expected answer.
+_NO_RESULT = QueryResult(columns=[], rows=[], duration_ms=0.0)
 
 GAZETTEER_FILE = Path(__file__).resolve().parents[1] / "metadata" / "entity_gazetteer.yaml"
 
@@ -82,7 +86,9 @@ class TurnResult:
     generated_sql: str | None = None
     sql_valid: bool = False
     execution_success: bool = False
-    result_match: bool = False
+    # None when there was no expected answer to compare against, which is the
+    # case for every question a person asks through the console.
+    result_match: bool | None = False
     match_mode: str = ""
     failure_category: str = ""
 
@@ -90,7 +96,7 @@ class TurnResult:
     # workflow_code instead of business_object_type returns the same rows here
     # and is still wrong. These record the SQL's meaning independently, so the
     # gap between "right rows" and "right query" stays visible.
-    semantic_match: bool = False
+    semantic_match: bool | None = False
     semantic_issues: list[str] = field(default_factory=list)
     projection_verdict: str = ""
     semantic_components: dict = field(default_factory=dict)
@@ -184,6 +190,17 @@ def _classify_failure(r: TurnResult, expected, actual) -> str:
 #              the one that grows without bound.
 #   state   -- the compact structured state from benchmark.context.
 CONTEXT_MODES = ("none", "history", "state")
+
+
+def _has_expectations(turn: SuiteTurn) -> bool:
+    """Whether this turn came from a suite rather than from a person.
+
+    A benchmark turn always states something: the SQL it should produce, or --
+    when there is no valid SQL answer -- the behaviour it should choose
+    instead. A question typed into the console states neither, and scoring it
+    against the defaults would report defects nobody observed.
+    """
+    return turn.expected_sql is not None or turn.expect_behavior != "sql"
 
 
 def _action_matches(followup: FollowUp, expected: dict | None) -> bool | None:
@@ -328,7 +345,12 @@ def run_turn(
             if turn.expect_followup is not None:
                 r.followup_match = preflight.type == turn.expect_followup
             r.action_match = _action_matches(preflight, turn.expect_action)
-            if turn.expect_behavior in ("clarify", "zero_or_clarify"):
+            if not _has_expectations(turn):
+                # A real question, asked by a person. Clarifying is the system
+                # working; scoring it against expect_behavior's "sql" default
+                # would paint its best behaviour as a failure.
+                r.result_match = r.semantic_match = None
+            elif turn.expect_behavior in ("clarify", "zero_or_clarify"):
                 r.behavior_match = r.result_match = r.semantic_match = True
             else:
                 r.behavior_match = False
@@ -434,8 +456,18 @@ def run_turn(
         r.latency_ms = (time.perf_counter() - started) * 1000
         return r
 
-    expected = run_readonly(settings, turn.expected_sql, settings.statement_timeout_ms)
-    r.expected_result = result_summary(expected)
+    # A turn asked by a person has no known-correct answer to compare against,
+    # which is how the QA console reaches this code. Everything above is
+    # identical either way; only the scoring is skipped, and the verdicts are
+    # left as None rather than False -- "not applicable" and "wrong" must not
+    # look alike, or every real question would read as a failure and be given a
+    # failure_category naming a defect nobody observed.
+    scoring = turn.expected_sql is not None
+
+    expected = None
+    if scoring:
+        expected = run_readonly(settings, turn.expected_sql, settings.statement_timeout_ms)
+        r.expected_result = result_summary(expected)
 
     actual = None
     if r.sql_valid and parsed.sql:
@@ -444,7 +476,7 @@ def run_turn(
         r.execution_success = actual.ok
         if actual.error:
             r.error = r.error or actual.error
-        if actual.ok:
+        if actual.ok and scoring:
             if compare_results(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "exact"
             elif compare_row_subset(expected, actual, turn.ordered):
@@ -452,34 +484,52 @@ def run_turn(
             elif compare_projection_agnostic(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "projection"
 
-    # A turn that answers correctly but misread the conversation is still a
-    # defect: the next turn inherits the wrong state.
-    if r.result_match and r.decision_match is False:
-        r.result_match = False
-        r.match_mode = "rows ok, context misread"
+    if scoring:
+        # A turn that answers correctly but misread the conversation is still a
+        # defect: the next turn inherits the wrong state.
+        if r.result_match and r.decision_match is False:
+            r.result_match = False
+            r.match_mode = "rows ok, context misread"
 
-    sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered,
-                            strict_projection=turn.strict_projection)
-    r.semantic_match = sem.semantically_correct
-    r.semantic_issues = list(sem.issues)
-    r.projection_verdict = sem.projection_verdict
-    r.semantic_components = {
-        "tables": sem.tables_match, "filters": sem.filters_match,
-        "joins": sem.joins_match, "aggregates": sem.aggregates_match,
-        "grouping": sem.grouping_match, "ordering": sem.ordering_match,
-        "limit": sem.limit_match,
-    }
+        sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered,
+                                strict_projection=turn.strict_projection)
+        r.semantic_match = sem.semantically_correct
+        r.semantic_issues = list(sem.issues)
+        r.projection_verdict = sem.projection_verdict
+        r.semantic_components = {
+            "tables": sem.tables_match, "filters": sem.filters_match,
+            "joins": sem.joins_match, "aggregates": sem.aggregates_match,
+            "grouping": sem.grouping_match, "ordering": sem.ordering_match,
+            "limit": sem.limit_match,
+        }
 
-    if not r.result_match:
-        r.failure_category = _classify_failure(
-            r, expected, actual if actual is not None else expected
-        )
-    elif not r.schema_grounded:
-        r.failure_category = "HALLUCINATION"
-    elif not r.semantic_match:
-        # Right rows, wrong query. Not counted against result accuracy, but
-        # named so it cannot hide behind a passing row comparison.
-        r.failure_category = "SEMANTIC_MISMATCH"
+        if not r.result_match:
+            r.failure_category = _classify_failure(
+                r, expected, actual if actual is not None else expected
+            )
+        elif not r.schema_grounded:
+            r.failure_category = "HALLUCINATION"
+        elif not r.semantic_match:
+            # Right rows, wrong query. Not counted against result accuracy, but
+            # named so it cannot hide behind a passing row comparison.
+            r.failure_category = "SEMANTIC_MISMATCH"
+    else:
+        r.result_match = None
+        r.semantic_match = None
+        # Absent ground truth is not absent error reporting. A query that never
+        # ran is still a failure, and the branches of _classify_failure that
+        # name one do not look at the expected result.
+        #
+        # A clarification is the exception. It has no SQL by design, and "no
+        # SQL" is exactly what PROMPT_ERROR means -- so asked for revenue, the
+        # model correctly answering that no such column exists was being
+        # reported as having failed to answer at all.
+        if r.clarification is not None:
+            pass
+        elif parsed.sql is None or not r.sql_valid or not r.execution_success:
+            r.failure_category = _classify_failure(r, _NO_RESULT, _NO_RESULT)
+        elif not r.schema_grounded:
+            r.failure_category = "HALLUCINATION"
 
     # 4. Fold the turn into the state for whatever comes next. The state
     #    follows the SQL that was actually produced, so a wrong query is
