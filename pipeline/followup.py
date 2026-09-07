@@ -159,7 +159,7 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
     Returns None when the question names an entity outright, or names nothing
     resembling one -- neither is this kind of ambiguity.
     """
-    from benchmark.context import detect_entity
+    from pipeline.context import detect_entity
 
     if detect_entity(question, gazetteer) is not None:
         return None  # unambiguous; nothing to ask

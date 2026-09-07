@@ -8,7 +8,7 @@ tables, columns and enum values and nothing else.
 
 from __future__ import annotations
 
-from benchmark.normalize import normalize
+from pipeline.normalize import normalize
 
 
 def test_corrects_a_typo_against_schema_vocabulary():

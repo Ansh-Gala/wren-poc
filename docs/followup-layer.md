@@ -150,9 +150,9 @@ self-corrects on the next turn rather than compounding.
 
 | File | Role |
 |---|---|
-| `benchmark/normalize.py` | Repair. Vocabulary, edit distance, case preservation. |
-| `benchmark/followup.py` | The contract, candidates, suggestions, action→state. |
-| `benchmark/context.py` | Structured state and turn classification (extended, not replaced). |
-| `benchmark/lean_runner.py` | Wiring: repair before classify, follow-up after answer. |
+| `pipeline/normalize.py` | Repair. Vocabulary, edit distance, case preservation. |
+| `pipeline/followup.py` | The contract, candidates, suggestions, action→state. |
+| `pipeline/context.py` | Structured state and turn classification (extended, not replaced). |
+| `pipeline/lean_runner.py` | Wiring: repair before classify, follow-up after answer. |
 | `benchmark/followup_questions.yaml` | 115 turns. |
 | `scripts/build_followup_suite.py` | Builds and validates it. |

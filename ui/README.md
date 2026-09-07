@@ -15,7 +15,7 @@ Then open <http://localhost:8000/>. The console is served by the same process
 that answers it, so it is same-origin — there is no CORS to configure — and it
 starts in **live** mode, asking real questions of the real database.
 
-Every request goes through `benchmark.lean_runner.run_turn`, the same function
+Every request goes through `pipeline.lean_runner.run_turn`, the same function
 the four benchmark suites run, with no expected SQL to compare against. There
 is deliberately no second pipeline: a console running its own copy of the logic
 would drift from the thing being measured, and would then be showing you

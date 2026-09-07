@@ -21,22 +21,22 @@ from typing import Callable
 
 import yaml
 
-from benchmark.context import (
+from pipeline.context import (
     ConversationState, classify_turn, detect_entity, is_complete_request,
     render_context, update_state,
 )
-from benchmark.followup import (
+from pipeline.followup import (
     FollowUp, clarify_entity, decide, resolve_clarification,
 )
-from benchmark.normalize import normalize
-from benchmark.evaluator import (
+from pipeline.normalize import normalize
+from pipeline.evaluator import (
     compare_projection_agnostic, compare_results, compare_row_subset,
     result_summary,
 )
-from benchmark.lean_suite import Conversation, SuiteTurn
-from benchmark.sql_semantics import compare as compare_semantics
-from benchmark.models import ParsedSQL, QueryResult, Session, Turn
-from benchmark.safety import UnsafeSQLError, assert_read_only
+from pipeline.lean_suite import Conversation, SuiteTurn
+from pipeline.sql_semantics import compare as compare_semantics
+from pipeline.models import ParsedSQL, QueryResult, Session, Turn
+from pipeline.safety import UnsafeSQLError, assert_read_only
 from claude.parser import parse_clarification, parse_sql
 from config.logging import get_logger
 from config.settings import Settings
@@ -189,7 +189,7 @@ def _classify_failure(r: TurnResult, expected, actual) -> str:
 #   none    -- nothing; every turn stands alone. The system before this work.
 #   history -- the whole thread replayed verbatim. The obvious approach, and
 #              the one that grows without bound.
-#   state   -- the compact structured state from benchmark.context.
+#   state   -- the compact structured state from pipeline.context.
 CONTEXT_MODES = ("none", "history", "state")
 
 
@@ -427,7 +427,7 @@ def run_turn(
     # because invented SQL fails at execution in a way that looks like any
     # other error.
     if parsed.sql:
-        from benchmark.sql_semantics import check_against_schema
+        from pipeline.sql_semantics import check_against_schema
         sc = check_against_schema(parsed.sql)
         r.schema_grounded = sc.grounded
         r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)

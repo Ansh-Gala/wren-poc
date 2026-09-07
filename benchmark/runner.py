@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from benchmark.classify import classify_failure
-from benchmark.evaluator import compare_results, result_summary
-from benchmark.models import Question, QuestionResult, Session
+from pipeline.evaluator import compare_results, result_summary
+from pipeline.models import Question, QuestionResult, Session
 from benchmark.questions import load_questions  # noqa: F401  (re-exported)
-from benchmark.safety import UnsafeSQLError, assert_read_only
+from pipeline.safety import UnsafeSQLError, assert_read_only
 from llm_api.factory import get_provider
 from claude.parser import parse_sql
 from config.logging import get_logger
@@ -104,7 +104,7 @@ def run_question(
         if actual.ok:
             result.result_match = compare_results(expected, actual, question.ordered)
             if not result.result_match:
-                from benchmark.evaluator import (
+                from pipeline.evaluator import (
                     compare_projection_agnostic, compare_row_subset,
                 )
                 if compare_row_subset(expected, actual, question.ordered):

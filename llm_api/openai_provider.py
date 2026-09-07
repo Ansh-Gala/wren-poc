@@ -7,7 +7,7 @@ import nest_asyncio
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolMessageParam
 
-from benchmark.models import ClaudeRun, Session
+from pipeline.models import ClaudeRun, Session
 from config.settings import Settings
 from wren_setup.mcp_config import allowed_tools, to_claude_name, to_mcp_name
 from llm_api.provider import LLMProvider

@@ -7,7 +7,7 @@ useless because it hides the failure it was built to find.
 
 import pytest
 
-from benchmark.sql_semantics import (
+from pipeline.sql_semantics import (
     PROJECTION_EXACT, PROJECTION_MISSING, PROJECTION_SUBSTITUTED,
     PROJECTION_SUPERSET, compare, signature,
 )

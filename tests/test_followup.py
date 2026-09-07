@@ -7,8 +7,8 @@ action's field and value may not.
 
 from __future__ import annotations
 
-from benchmark.followup import clarify_entity
-from benchmark.lean_runner import load_gazetteer
+from pipeline.followup import clarify_entity
+from pipeline.lean_runner import load_gazetteer
 
 
 def test_partial_entity_name_asks_which_one_and_offers_only_real_values():
@@ -33,14 +33,14 @@ def test_partial_entity_name_asks_which_one_and_offers_only_real_values():
 
 def _state_after(sql: str, question: str = "Show the AR_YD_Suiting items",
                  rows: int = 22):
-    from benchmark.context import ConversationState, update_state
+    from pipeline.context import ConversationState, update_state
     state = ConversationState()
     update_state(state, question, sql, rows, "AR_YD_Suiting", "new_block")
     return state
 
 
 def test_exploration_offers_next_moves_grounded_in_the_schema():
-    from benchmark.followup import explore
+    from pipeline.followup import explore
 
     state = _state_after(
         "SELECT business_object_id, business_object_status "
@@ -67,7 +67,7 @@ def test_applying_a_filter_suggestion_narrows_the_state_and_asks_for_it():
     thing that writes queries, so a suggestion cannot drift away from what the
     pipeline would otherwise produce.
     """
-    from benchmark.followup import Action, apply_action
+    from pipeline.followup import Action, apply_action
 
     state = _state_after(
         "SELECT business_object_id FROM tms_business_object_flat "
@@ -91,7 +91,7 @@ def test_a_clarification_naming_a_known_column_offers_that_column_real_values():
     "Breached", the useful reply names Delayed and On Time, and neither may be
     invented.
     """
-    from benchmark.followup import clarification_followup
+    from pipeline.followup import clarification_followup
 
     followup = clarification_followup(
         "There is no 'Breached' value. task_sla_status only takes two values."
@@ -105,7 +105,7 @@ def test_a_clarification_naming_a_known_column_offers_that_column_real_values():
 
 def test_an_open_ended_clarification_offers_nothing_and_invites_free_text():
     """No column named means no candidates exist. Inventing some would be worse."""
-    from benchmark.followup import clarification_followup
+    from pipeline.followup import clarification_followup
 
     followup = clarification_followup(
         "Could you say which items you mean? The question is too broad to answer."
@@ -125,7 +125,7 @@ def test_suggestions_do_not_spend_every_slot_on_one_column():
     different status can say so; what they cannot do is discover an option
     that was never shown.
     """
-    from benchmark.followup import explore
+    from pipeline.followup import explore
 
     state = _state_after(
         "SELECT business_object_id FROM tms_business_object_flat "
@@ -145,7 +145,7 @@ def test_the_wire_format_carries_everything_a_frontend_needs():
     as prose: the label is for a person, the action is for the code, and the
     two are separate fields.
     """
-    from benchmark.followup import Action, FollowUp, Suggestion
+    from pipeline.followup import Action, FollowUp, Suggestion
 
     payload = FollowUp(
         type="exploration",
@@ -176,7 +176,7 @@ def test_an_unknown_action_type_is_refused_at_construction():
     """The contract is only stable if it cannot be widened by accident."""
     import pytest
 
-    from benchmark.followup import Action
+    from pipeline.followup import Action
 
     with pytest.raises(ValueError):
         Action("do_something_clever", "status")
@@ -190,7 +190,7 @@ def test_a_single_filter_can_still_be_dropped():
     said nothing at all. The subject is still never offered for removal --
     dropping that is not a refinement, it is a different question.
     """
-    from benchmark.followup import explore
+    from pipeline.followup import explore
 
     state = _state_after(
         "SELECT COUNT(*) FROM tms_business_object_flat "
@@ -207,7 +207,7 @@ def test_a_single_filter_can_still_be_dropped():
 
 def test_the_subject_itself_is_never_offered_for_removal():
     """Dropping the subject is not a refinement of the question."""
-    from benchmark.followup import explore
+    from pipeline.followup import explore
 
     state = _state_after(
         "SELECT business_object_id FROM tms_business_object_flat "
@@ -225,7 +225,7 @@ def test_a_word_inside_an_entity_name_is_not_a_partial_entity_name():
     answered with "which sales type did you mean?" and never ran. A partial
     name has to break on the underscores the names are built from.
     """
-    from benchmark.followup import clarify_entity
+    from pipeline.followup import clarify_entity
 
     gazetteer = load_gazetteer()
     assert clarify_entity("Show the tasks assigned to the sales team", gazetteer) is None
@@ -242,7 +242,7 @@ def test_a_trailing_category_word_is_a_category_not_a_truncated_name():
     of none of its matches, which is what makes it a name the user stopped
     typing.
     """
-    from benchmark.followup import clarify_entity
+    from pipeline.followup import clarify_entity
 
     gazetteer = load_gazetteer()
     assert clarify_entity("how many suiting items are active?", gazetteer) is None
@@ -259,7 +259,7 @@ def test_answering_a_clarification_resumes_the_original_question():
     -- reasonably -- asked what to do with it. The thread deadlocked one turn
     after the clarification that was supposed to unblock it.
     """
-    from benchmark.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import clarify_entity, resolve_clarification
 
     original = "Show the AR_YD items"
     pending = clarify_entity(original, load_gazetteer())
@@ -270,7 +270,7 @@ def test_answering_a_clarification_resumes_the_original_question():
 
 def test_a_clarification_can_be_answered_with_the_suggestion_id():
     """A frontend sends the id it was given, not the label a person read."""
-    from benchmark.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import clarify_entity, resolve_clarification
 
     original = "Show the AR_YD items"
     pending = clarify_entity(original, load_gazetteer())
@@ -283,7 +283,7 @@ def test_a_clarification_can_be_answered_with_the_suggestion_id():
 
 def test_an_unrelated_reply_is_not_treated_as_an_answer():
     """The user is allowed to ignore the question and ask something else."""
-    from benchmark.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import clarify_entity, resolve_clarification
 
     original = "Show the AR_YD items"
     pending = clarify_entity(original, load_gazetteer())
@@ -300,7 +300,7 @@ def test_suggestion_ids_are_unique_within_a_follow_up():
     frontend sending back the id it was given would silently select the other
     one.
     """
-    from benchmark.followup import clarify_entity
+    from pipeline.followup import clarify_entity
 
     followup = clarify_entity("Show the AR_YD items", load_gazetteer())
     ids = [s.id for s in followup.suggestions]

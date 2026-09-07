@@ -109,7 +109,7 @@ which one matched, so parser fragility is itself measurable. Here: `json`.
 
 ## 6. Python gates it
 
-`benchmark/safety.py` parses the statement with sqlglot and rejects anything
+`pipeline/safety.py` parses the statement with sqlglot and rejects anything
 that is not a single read-only query, backed by a keyword screen that ignores
 string literals and comments (so a task named `'Update browser matrix'` does
 not trip it).
@@ -122,7 +122,7 @@ moment, because seed dates are relative to `CURRENT_DATE`.
 
 ## 8. Python compares
 
-`benchmark/evaluator.py`:
+`pipeline/evaluator.py`:
 
 - NULL stays distinct from `''` and `0`; `Decimal`/`int`/`float` compare with
   tolerance; dates normalise to ISO.

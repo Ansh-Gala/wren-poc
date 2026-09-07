@@ -6,7 +6,7 @@
 Then open http://localhost:8000/ -- the console is served from here too, which
 keeps it same-origin and means there is no CORS to think about.
 
-There is no second pipeline. Every request goes through benchmark.lean_runner
+There is no second pipeline. Every request goes through pipeline.lean_runner
 .run_turn, the same function the four benchmark suites run, with no expected
 SQL to compare against. That is the whole design: a console that exercised its
 own copy of the logic would drift from the thing being measured, and would
@@ -30,11 +30,11 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
-from benchmark.context import ConversationState
-from benchmark.followup import ACTION_TYPES, Action, apply_action
-from benchmark.lean_runner import TurnResult, load_gazetteer, run_turn
-from benchmark.lean_suite import SuiteTurn
-from benchmark.models import Session
+from pipeline.context import ConversationState
+from pipeline.followup import ACTION_TYPES, Action, apply_action
+from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
+from pipeline.lean_suite import SuiteTurn
+from pipeline.models import Session
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 from wren_setup.mcp_config import write_mcp_config

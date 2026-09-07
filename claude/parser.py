@@ -15,7 +15,7 @@ import re
 import sqlglot
 from sqlglot import exp
 
-from benchmark.models import ParsedSQL
+from pipeline.models import ParsedSQL
 
 _SQL_START = re.compile(r"\b(SELECT|WITH)\b", re.IGNORECASE)
 _FENCE = re.compile(r"```([A-Za-z0-9_+-]*)[ \t]*\r?\n(.*?)```", re.DOTALL)

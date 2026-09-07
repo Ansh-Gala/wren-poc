@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
-from benchmark.models import ClaudeRun, Session
+from pipeline.models import ClaudeRun, Session
 from config.settings import Settings
 
 class LLMProvider(abc.ABC):
