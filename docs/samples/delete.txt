@@ -1,0 +1,47 @@
+==============================================================================
+DELETE  --  what actually happens when the user asks to delete
+==============================================================================
+
+The user typed:  'delete all tasks'
+
+##############################################################################
+# 1. DOES THE LLM GENERATE A DELETE QUERY?   ->   No.
+##############################################################################
+
+The model refused on its own, because the SYSTEM PROMPT told it to write a
+single read-only SELECT. No SQL was produced at all.
+
+  generated_sql      None
+  clarification      I can only generate read-only SELECT queries against this database — deleting data isn't something I can do. If you want, I can write a SELECT to show all tasks instead.
+  sql_valid          False
+  execution_success  False
+  decision           new_block
+  failure_category   ''
+
+Raw model output:
+
+{"clarify": "I can only generate read-only SELECT queries against this database — deleting data isn't something I can do. If you want, I can write a SELECT to show all tasks instead."}
+
+The sqlglot safety gate was never reached, because there was nothing to check.
+
+##############################################################################
+# 2. IF THE MODEL *HAD* WRITTEN ONE -- the four barriers
+##############################################################################
+
+  Barrier 0  the system prompt
+             What just happened. The model declined. This is behaviour, not a
+             guarantee: it holds because the model chose to honour a request.
+
+  Barrier 1  pipeline/safety.py, the sqlglot gate
+             Fed 'DELETE FROM tms_task_flat' directly:
+               BLOCKED: statement is Delete, expected a query
+             The statement never leaves the process. Nothing is sent to the
+             database.
+
+  Barrier 2  your views are not automatically updatable
+  Barrier 3  the role holds SELECT only, inside a READ ONLY transaction
+             With barrier 1 bypassed and the statement sent anyway:
+               cannot delete from view "tms_task_flat"  (sqlstate 55000)
+
+Only barrier 1 is lost in a PHP port. Barrier 0 is prompt text that copies
+verbatim; barriers 2 and 3 are your database and are untouched.
