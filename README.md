@@ -128,8 +128,8 @@ scripts/      serve_api.py, and the bootstrap it imports
 tests/        The tests for the above
 ```
 
-53 files. Everything here is reachable from `scripts/serve_api.py`; nothing
-is kept for reference.
+Everything here is reachable from `scripts/serve_api.py`. Nothing is kept
+for reference.
 
 `metadata/` is generated on `develop` from the semantic registry and promoted
 here as output. Change it there, not on this branch.

@@ -16,10 +16,17 @@ import pytest
 from claude.prompts import build_system_prompt, build_user_prompt
 
 # Tool budgets belong to the MCP path, which a lean-only deployment does not
-# ship. The prompt-size assertions below do not depend on it.
-mcp_config = pytest.importorskip("wren_setup.mcp_config")
-allowed_tools = mcp_config.allowed_tools
-all_disallowed_tools = mcp_config.all_disallowed_tools
+# ship. The prompt-size assertions in this file do not depend on it and must
+# keep running there.
+try:
+    from wren_setup.mcp_config import allowed_tools, all_disallowed_tools
+except ModuleNotFoundError:
+    allowed_tools = all_disallowed_tools = None
+
+needs_mcp = pytest.mark.skipif(
+    allowed_tools is None,
+    reason="wren_setup is not shipped in a lean-only deployment",
+)
 
 tiktoken = pytest.importorskip("tiktoken")
 
@@ -62,6 +69,7 @@ def test_system_prompt_is_constant():
     assert build_system_prompt() == build_system_prompt()
 
 
+@needs_mcp
 def test_oversized_tools_stay_denied():
     """list_functions alone returns ~19638 tokens -- 46x the whole prompt."""
     denied = set(all_disallowed_tools())
@@ -70,11 +78,13 @@ def test_oversized_tools_stay_denied():
         assert tool in denied
 
 
+@needs_mcp
 def test_allowed_and_denied_never_overlap():
     for mode in ("strict", "validated"):
         assert not set(allowed_tools(mode)) & set(all_disallowed_tools())
 
 
+@needs_mcp
 def test_row_returning_tools_are_denied_in_every_mode():
     denied = set(all_disallowed_tools())
     assert "mcp__wren__run_sql" in denied
