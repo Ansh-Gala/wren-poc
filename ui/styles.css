@@ -170,7 +170,15 @@ body {
 }
 .sql-none { background: #f0f1f3; color: var(--muted); font-style: italic; }
 
-.rows { margin-bottom: 10px; overflow-x: auto; }
+/* Debug off hides the state rail, so the chat takes the whole grid rather
+   than leaving a 340px gutter. Set from app.js instead of :has(), so it does
+   not depend on selector support. */
+.layout.no-rail { grid-template-columns: minmax(0, 1fr); }
+
+/* Only the table scrolls sideways. The bar above it holds the copy button,
+   which has to stay put -- it was scrolling out of reach on a wide result. */
+.rows { margin-bottom: 10px; }
+.rows-scroll { overflow-x: auto; }
 .rows-bar {
   display: flex;
   align-items: center;

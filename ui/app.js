@@ -112,6 +112,8 @@
 
   function addResponse(r) {
     const msg = text("div", "msg msg-bot");
+    // Which turn this was, so turning debug on later can fill in its SQL.
+    msg.dataset.turn = String(session.turns);
 
     // ---- head ------------------------------------------------------------
     // Most of this is diagnostic and the server does not send it with debug
@@ -239,6 +241,9 @@
     bar.append(copyButton(headers, rows));
     wrap.append(bar);
 
+    // The table scrolls inside its own box so the bar above, and the copy
+    // button on it, stay where they were put.
+    const scroller = text("div", "rows-scroll");
     const table = document.createElement("table");
 
     const thead = document.createElement("thead");
@@ -254,7 +259,8 @@
       tbody.append(tr);
     }
     table.append(tbody);
-    wrap.append(table);
+    scroller.append(table);
+    wrap.append(scroller);
     return wrap;
   }
 
@@ -516,19 +522,66 @@
     });
   }
 
+  /* Debug detail for answers already on screen.
+   *
+   * The SQL for those never left the server -- that is the point of the
+   * switch -- so it cannot be un-hidden in the page. It is still held per
+   * conversation on the server, though, so turning debug on fetches it and
+   * fills in the messages that are already there. Nothing is re-executed.
+   */
+  async function revealEarlierDebug() {
+    let turns;
+    try {
+      const res = await fetch(API.DEBUG_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: session.id }),
+      });
+      if (!res.ok) return;
+      turns = (await res.json()).turns || [];
+    } catch {
+      return;   // the mock has no history to offer, and that is not an error
+    }
+
+    for (const r of turns) {
+      const msg = el.messages.querySelector(`[data-turn="${r.turn_index}"]`);
+      if (!msg || msg.dataset.debugFilled) continue;
+      msg.dataset.debugFilled = "1";
+
+      if (r.generated_sql) {
+        const sql = text("pre", "sql", r.generated_sql);
+        const rows = msg.querySelector(".rows");
+        if (rows) msg.insertBefore(sql, rows);
+        else msg.append(sql);
+      }
+      msg.append(debugPane(r));
+    }
+  }
+
+  function hideEarlierDebug() {
+    for (const msg of el.messages.querySelectorAll("[data-turn]")) {
+      for (const node of msg.querySelectorAll(".sql, .debug")) node.remove();
+      delete msg.dataset.debugFilled;
+    }
+  }
+
   if (el.debugMode) {
     el.debugMode.addEventListener("change", () => {
-      // The rail reports tables and filters, which is database metadata, so
-      // it is only populated at all when debug is on. Turns already on screen
-      // keep whatever they were rendered with: the SQL for those never left
-      // the server, so there is nothing to reveal without asking again.
       paintDebug();
       hideError();
+      if (debugEnabled()) revealEarlierDebug();
+      else hideEarlierDebug();
     });
   }
 
   function paintDebug() {
-    if (el.stateRail) el.stateRail.hidden = !debugEnabled();
+    const on = debugEnabled();
+    if (el.stateRail) el.stateRail.hidden = !on;
+    // The rail reports tables and filters, which is database metadata, so it
+    // is only populated when debug is on; with it hidden the chat takes the
+    // whole width rather than leaving its column empty.
+    const layout = document.querySelector(".layout");
+    if (layout) layout.classList.toggle("no-rail", !on);
   }
 
   paintDebug();

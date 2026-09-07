@@ -123,6 +123,12 @@ const API = (() => {
     ? `${location.origin}/ask`
     : "http://localhost:8000/ask";
 
+  // Debug detail for turns already answered. Same origin, same shape of
+  // call; it reads what the server kept and executes nothing.
+  const DEBUG_ENDPOINT = location.protocol.startsWith("http")
+    ? `${location.origin}/debug`
+    : "http://localhost:8000/debug";
+
   const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
@@ -193,5 +199,5 @@ const API = (() => {
     };
   }
 
-  return { sendMessageToBackend, normalize, ENDPOINT };
+  return { sendMessageToBackend, normalize, ENDPOINT, DEBUG_ENDPOINT };
 })();
