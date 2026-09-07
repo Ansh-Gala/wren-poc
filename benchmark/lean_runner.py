@@ -22,7 +22,8 @@ from typing import Callable
 import yaml
 
 from benchmark.context import (
-    ConversationState, classify_turn, detect_entity, render_context, update_state,
+    ConversationState, classify_turn, detect_entity, is_complete_request,
+    render_context, update_state,
 )
 from benchmark.followup import (
     FollowUp, clarify_entity, decide, resolve_clarification,
@@ -234,9 +235,16 @@ def _attach_followup(
     r.followup_type = followup.type
     r.followup = followup.to_dict()
     # Set after update_state, which resets the block and would clear it.
-    if followup.type == "clarification" and followup.suggestions:
-        state.pending_clarification = followup
-        state.pending_question = r.normalized_question or r.question
+    if followup.type == "clarification":
+        # Candidates let the next turn resolve by matching the reply against
+        # what was offered. Without them there is nothing to match, so the
+        # question itself is carried instead -- otherwise the system asks
+        # things it structurally cannot hear the answer to.
+        if followup.suggestions:
+            state.pending_clarification = followup
+            state.pending_question = r.normalized_question or r.question
+        else:
+            state.awaiting_answer_to = followup.question
     if turn.expect_followup is not None:
         r.followup_match = followup.type == turn.expect_followup
     r.action_match = _action_matches(followup, turn.expect_action)
@@ -300,6 +308,13 @@ def run_turn(
         # its own right; naming it separately keeps the resumption visible.
         decision = "clarification_response"
         entity = detect_entity(question, gazetteer)
+    # A reply to a question the system asked is an answer, not a new topic --
+    # unless the user ignored the question and asked something whole instead,
+    # which they are entitled to do.
+    if (followup_mode and resumed is None and state.awaiting_answer_to
+            and not is_complete_request(question)):
+        decision = "clarification_response"
+
     r.decision, r.resolved_entity = decision, entity
     if turn.expect_decision is not None:
         r.decision_match = decision == turn.expect_decision
@@ -314,7 +329,11 @@ def run_turn(
         # A rebase keeps its context: the subject changed but the question
         # relies on the shape of the one before it.
         if decision in ("new_block", "switch", "clarification_response"):
-            context = ""
+            # Normally a fresh block sees nothing. The exception is a turn
+            # answering a question the system asked in prose: the state is
+            # empty after a clarification, so without this the reply arrives
+            # with no trace of what it is replying to.
+            context = render_context(state) if state.awaiting_answer_to else ""
         else:
             if decision == "rebase":
                 state.active_filters = {
@@ -324,6 +343,7 @@ def run_turn(
                 state.active_entity = entity
             context = render_context(state)
     r.context_chars = len(context)
+    state.awaiting_answer_to = None
 
     session.context_block = context or None
     if context_mode != "history":

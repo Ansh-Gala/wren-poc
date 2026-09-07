@@ -157,3 +157,35 @@ def test_the_model_asking_a_question_is_not_a_failed_turn(monkeypatch, settings)
     assert result.clarification.startswith("The schema has no revenue column")
     assert result.failure_category == ""
     assert result.followup_type == "clarification"
+
+
+def test_a_prose_clarification_is_answerable_on_the_next_turn(monkeypatch, settings):
+    """End to end: ask an open question, then see the reply understood.
+
+    Recovered from a real session -- the system asked which of two things was
+    meant, the user said "both", and that turn reached the model carrying only
+    "filters in force: none, last intent: list, previous result: 63 row(s)".
+    The question was gone, so the model asked again.
+    """
+    state = ConversationState()
+    session = Session(session_id="rt", turns=[])
+
+    asking = FakeProvider(
+        '{"clarify": "Do you want the user with the most tasks, or the '
+        'department with the most tasks?"}')
+    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: asking)
+    run_turn(_turn("which user had most tasks, or which department?"),
+             state, [], settings, None, "strict", session)
+
+    assert state.awaiting_answer_to.startswith("Do you want the user")
+
+    answering = FakeProvider(
+        '{"sql": "SELECT assigned_user_name, COUNT(*) FROM tms_task_flat '
+        'GROUP BY assigned_user_name"}')
+    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: answering)
+    run_turn(_turn("both"), state, [], settings, None, "strict", session)
+
+    prompt = session.context_block or ""
+    assert "Do you want the user with the most tasks" in prompt, (
+        "the reply reached the model without the question that prompted it")
+    assert state.awaiting_answer_to is None, "it must not persist past its turn"

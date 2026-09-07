@@ -76,7 +76,7 @@ _WH_CLAUSE = re.compile(
 )
 
 
-def _is_complete_request(question: str) -> bool:
+def is_complete_request(question: str) -> bool:
     """Whether the question names its own subject and asks for it outright.
 
     Both halves are needed. "Show their status too" opens with a verb of
@@ -121,6 +121,11 @@ class ConversationState:
     # what the model sees is the original question with the choice filled in.
     pending_clarification: object | None = None
     pending_question: str = ""
+    # A clarifying question the system asked in prose, with no candidates to
+    # choose from. Entity clarifications resolve by matching the reply against
+    # what was offered; these have nothing to match, so the question itself has
+    # to reach the next turn or the reply is meaningless.
+    awaiting_answer_to: str | None = None
 
     def is_empty(self) -> bool:
         return self.previous_sql is None and not self.active_entity
@@ -139,6 +144,7 @@ class ConversationState:
         self.turns_in_block = 0
         self.pending_clarification = None
         self.pending_question = ""
+        self.awaiting_answer_to = None
 
 
 def parse_sql_state(sql: str) -> dict:
@@ -317,7 +323,7 @@ def classify_turn(
     # No subject and no referential cue. What separates "Show my active tasks"
     # from "Show their status too" is not length -- both are four words -- but
     # whether the question names a subject of its own.
-    if _is_complete_request(question):
+    if is_complete_request(question):
         return "new_block", None
     return "follow_up", state.active_entity
 
@@ -380,10 +386,18 @@ def render_context(state: ConversationState) -> str:
     Compact by construction: the fields are a fixed set, so this stays roughly
     the same size on turn 20 as on turn 2.
     """
-    if state.is_empty():
+    if state.is_empty() and not state.awaiting_answer_to:
         return ""
 
     lines = ["ACTIVE CONVERSATION CONTEXT", ""]
+
+    # First, because it changes what the whole turn means: the user is
+    # replying to something, and "both" or "mail" is only interpretable
+    # against the question that prompted it.
+    if state.awaiting_answer_to:
+        lines.append("YOU ASKED THE USER THIS, AND THE QUESTION BELOW IS THEIR ANSWER")
+        lines.append(f"  {' '.join(state.awaiting_answer_to.split())}")
+        lines.append("")
 
     # Grouped deliberately: what is selected persists, how it was presented
     # does not, and the headings are the first place that gets read.
