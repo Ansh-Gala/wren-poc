@@ -66,6 +66,9 @@ EXCLUDE = [
     "tests/test_lean_suite.py",
     "tests/test_metadata.py",
     "tests/test_report.py",
+    # Tests pipeline/normalize.py, but against the question corpus rather than
+    # against the module's rules, so it needs the suites to exist.
+    "tests/test_normalize_corpus.py",
 
     # -- Source datasets. metadata/*.yaml is generated from these and promoted
     #    as output; the sources themselves are not deployed.
