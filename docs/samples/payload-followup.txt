@@ -1,0 +1,55 @@
+==============================================================================
+PAYLOAD  --  TURN 2  (a follow-up, carrying context)
+==============================================================================
+
+The user typed:  'how many?'
+Context block:   YES (580 chars)
+
+The SYSTEM PROMPT is byte-for-byte identical to turn 1 and is omitted here.
+Only the USER PROMPT changes -- and the only difference from turn 1 is the
+ACTIVE CONVERSATION CONTEXT block prepended to it.
+
+That block was not written by the user and was not remembered from the
+question. It was read back out of the SQL that turn 1 actually executed.
+
+
+##############################################################################
+# USER PROMPT -- TURN 2  (this is the whole of it)
+##############################################################################
+
+ACTIVE CONVERSATION CONTEXT
+
+WHAT IS SELECTED (persists until the user changes it)
+  subject: AR_YD_Suiting
+  tables: tms_business_object_flat
+  filters in force:
+    - business_object_type = 'AR_YD_Suiting'
+
+HOW THE LAST ANSWER WAS PRESENTED (decide this afresh)
+  last intent: list
+
+previous result: 22 row(s)
+previous query (for reference, not a template):
+  SELECT business_object_id, business_object_ref_id, business_unit, business_object_status, business_object_color, business_object_client_due_at FROM tms_business_object_flat WHERE business_object_type = 'AR_YD_Suiting'
+
+Question: how many?
+
+Reply with only the JSON object containing the SQL that answers this question.
+
+##############################################################################
+# FOR COMPARISON -- USER PROMPT WITHOUT THE CONTEXT BLOCK
+#   This is what the model would have received with memory turned off.
+#   It produced no SQL at all: 'Please specify what you would like counted.'
+##############################################################################
+
+Question: how many?
+
+Reply with only the JSON object containing the SQL that answers this question.
+
+##############################################################################
+# WHAT CAME BACK FOR TURN 2
+##############################################################################
+
+generated_sql      SELECT COUNT(*) AS count FROM tms_business_object_flat WHERE business_object_type = 'AR_YD_Suiting'
+decision           follow_up
+rows               [[22]]
