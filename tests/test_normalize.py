@@ -44,3 +44,69 @@ def test_a_typo_is_not_hidden_by_being_one_letter_from_a_plural():
     untouched while far worse typos were repaired.
     """
     assert normalize("filter by busines unit").question == "filter by business unit"
+
+
+def test_a_capitalised_name_is_not_repaired_into_a_schema_word():
+    """A word the user capitalised is a name, not a misspelling.
+
+    Recovered from a real session. "UID Generation" is a task_display_name on
+    58 rows; "penetration" is a schema word, from buff_penetration_days. The
+    two score 0.857 on the similarity ratio and 2 on edit distance -- exactly
+    what "delyaed"/"delayed" scores -- so neither threshold can separate them.
+    What separates them is that the user wrote a capital G mid-sentence, which
+    people do for names and not for typos.
+
+    Left unfixed, the query went out as ILIKE '%UID Penetration%' and returned
+    nothing, with the console reporting a confident zero rows.
+    """
+    for question in (
+        "give me task closed just before UID Generation",
+        # The user's complaint about the rewrite must survive it too: this one
+        # contains "Penetration" because they typed it, so the check is that
+        # "Generation" is still there afterwards, not that the other word is
+        # absent.
+        "why are you searching for Penetration i said UID Generation",
+        "show me the UID Generation tasks",
+    ):
+        n = normalize(question)
+        assert "Generation" in n.question, f"{question!r} -> {n.question!r}"
+        assert not any(r.original == "Generation" for r in n.repairs)
+
+
+def test_a_quoted_phrase_is_left_alone():
+    """Quoting is how a user says "this is a literal value"."""
+    for question in (
+        'give me task closed just before "UID Generation"',
+        "give me task closed just before 'UID Generation'",
+    ):
+        n = normalize(question)
+        assert "Penetration" not in n.question, f"{question!r} -> {n.question!r}"
+
+
+def test_a_quoted_typo_is_also_left_alone():
+    """The same rule, applied where it costs something.
+
+    Inside quotes the user is naming a value, so a repair there is a guess
+    about their data rather than about their spelling. Not repairing is the
+    conservative choice: an empty result is visible, a silently rewritten
+    filter is not.
+    """
+    n = normalize('show me the "actie" ones')
+    assert n.question == 'show me the "actie" ones'
+    assert n.repairs == []
+
+
+def test_a_sentence_initial_capital_is_still_repaired():
+    """The capital rule must not swallow the first word of a question.
+
+    "Actie" opening a sentence is capitalised only because sentences are, so
+    it carries no signal about being a name.
+    """
+    n = normalize("Actie tasks please")
+    assert n.question.startswith("Active")
+
+
+def test_lowercase_typos_are_still_repaired_after_the_capital_rule():
+    """Regression guard: the fix must only ever remove repairs, never add."""
+    assert normalize("give me my actie task").question == "give me my active task"
+    assert normalize("show the AR_YD_Suiting itmes").question.endswith("items")

@@ -230,16 +230,60 @@ def _match_case(original: str, corrected: str) -> str:
     return corrected
 
 
+# A single quote only opens a quotation when it does not follow a letter --
+# otherwise the apostrophes in "don't" and "user's" would open spans and
+# silently disable repair for the rest of the question.
+_QUOTED = re.compile(r'"[^"]*"' + r"|(?<![A-Za-z])'[^']*'")
+
+
+def _quoted_spans(question: str) -> list[tuple[int, int]]:
+    """Character ranges the user put in quotes.
+
+    Quoting is how someone says "this is a literal value, not my spelling".
+    """
+    return [m.span() for m in _QUOTED.finditer(question)]
+
+
+def _starts_a_sentence(question: str, start: int) -> bool:
+    """Whether the token at ``start`` opens the question or a new sentence.
+
+    Sentences are capitalised regardless of what their first word is, so a
+    capital there says nothing about the word. A capital anywhere else does.
+    """
+    i = start - 1
+    while i >= 0 and question[i].isspace():
+        i -= 1
+    return i < 0 or question[i] in ".?!"
+
+
 def normalize(question: str) -> Normalized:
     """Rewrite obvious misspellings of schema terms, leaving everything else."""
     vocabulary = load_vocabulary()
     repairs: list[Repair] = []
+    quoted = _quoted_spans(question)
 
     def repair_token(match: re.Match) -> str:
         token = match.group(0)
         lowered = token.lower()
         if len(lowered) < _MIN_LENGTH or lowered in _QUERY_WORDS:
             return token
+
+        # Inside quotes the user is naming a value. Repairing there is a guess
+        # about their data rather than about their spelling, and an empty
+        # result is at least visible where a rewritten filter is not.
+        start = match.start()
+        if any(lo < start < hi for lo, hi in quoted):
+            return token
+
+        # A capital mid-sentence marks a name. This is the only thing that
+        # separates a name from a typo here: "Generation" and "penetration"
+        # score 0.857 on ratio and 2 on edit distance, which is exactly what
+        # the genuine typo "delyaed"/"delayed" scores, so no threshold can
+        # tell them apart. Real session: "UID Generation" is a task name on 58
+        # rows and became ILIKE '%UID Penetration%', which matches nothing.
+        if token[:1].isupper() and not _starts_a_sentence(question, start):
+            return token
+
         if _is_known(lowered, vocabulary):
             return token
         corrected = _best_match(lowered, vocabulary)
