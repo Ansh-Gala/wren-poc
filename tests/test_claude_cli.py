@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -22,6 +23,7 @@ needs_mcp = pytest.mark.skipif(
 )
 
 
+@needs_mcp
 def test_command_is_headless_and_strict(tmp_settings, tmp_path):
     cmd = build_command("Show all users", tmp_path / "mcp.json", "strict", tmp_settings)
     assert "-p" in cmd
@@ -39,15 +41,28 @@ def test_command_always_disallows_row_returning_tools(tmp_settings, tmp_path):
             assert tool in tail, f"{tool} not denied in {mode}"
 
 
-def test_command_carries_no_api_key(tmp_settings, tmp_path):
-    joined = " ".join(build_command("q", tmp_path / "m.json", "strict", tmp_settings))
+# Both paths, because a secret leaking into argv is not less bad on the one
+# this deployment happens not to use. The lean case is the one production runs,
+# so it is the case that must never be the skipped one.
+LEAN_MODES = [
+    pytest.param(True, id="lean"),
+    pytest.param(False, id="mcp", marks=needs_mcp),
+]
+
+
+@pytest.mark.parametrize("lean", LEAN_MODES)
+def test_command_carries_no_api_key(tmp_settings, tmp_path, lean):
+    settings = replace(tmp_settings, cli_lean=lean)
+    joined = " ".join(build_command("q", tmp_path / "m.json", "strict", settings))
     assert "ANTHROPIC" not in joined.upper()
 
 
-def test_command_never_contains_database_password(tmp_settings, tmp_path):
-    joined = " ".join(build_command("q", tmp_path / "m.json", "validated", tmp_settings))
-    assert tmp_settings.pg_password not in joined
-    assert tmp_settings.pg_readonly_password not in joined
+@pytest.mark.parametrize("lean", LEAN_MODES)
+def test_command_never_contains_database_password(tmp_settings, tmp_path, lean):
+    settings = replace(tmp_settings, cli_lean=lean)
+    joined = " ".join(build_command("q", tmp_path / "m.json", "validated", settings))
+    assert settings.pg_password not in joined
+    assert settings.pg_readonly_password not in joined
 
 
 @needs_mcp
