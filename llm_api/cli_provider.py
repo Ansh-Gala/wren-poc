@@ -20,7 +20,6 @@ import subprocess
 from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
 from config.settings import Settings
-from wren_setup.mcp_config import all_disallowed_tools, allowed_tools
 from llm_api.provider import LLMProvider
 
 
@@ -71,6 +70,10 @@ def build_command(
         if settings.claude_model:
             cmd += ["--model", settings.claude_model]
         return cmd
+
+    # Imported here rather than at module scope: a lean-only deployment ships
+    # no wren_setup, and this is the only branch that needs it.
+    from wren_setup.mcp_config import all_disallowed_tools, allowed_tools
 
     cmd = [
         settings.claude_command,
