@@ -263,3 +263,25 @@ def test_a_bare_fragment_still_continues_the_block():
                      "Show their status too", "How many tasks?"):
         decision, _ = classify_turn(fragment, state, GAZ)
         assert decision == "follow_up", f"{fragment!r} should continue the block"
+
+
+def test_a_question_the_system_asked_is_carried_into_the_next_turn():
+    """A clarification with no candidates still has to be answerable.
+
+    Asked "which user had most tasks, or which department?", the user replied
+    "both" -- and that turn was rendered with only the state: filters none,
+    last intent list, previous result 63 rows. The question that prompted the
+    reply was nowhere in it, so the model asked again and the user had to
+    restate the whole thing. Entity clarifications resolved fine because they
+    carry candidates to match against; prose ones had nothing.
+    """
+    state = ConversationState()
+    update_state(state, "which user had most tasks, or which department?",
+                 None, None, None, "new_block")
+    state.awaiting_answer_to = ("Do you want the user with the most tasks, "
+                                "or the department with the most tasks?")
+
+    context = render_context(state)
+
+    assert "Do you want the user with the most tasks" in context
+    assert "answer" in context.lower(), "the block must say what the reply is for"
