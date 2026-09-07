@@ -395,8 +395,17 @@ def render_context(state: ConversationState) -> str:
     # replying to something, and "both" or "mail" is only interpretable
     # against the question that prompted it.
     if state.awaiting_answer_to:
-        lines.append("YOU ASKED THE USER THIS, AND THE QUESTION BELOW IS THEIR ANSWER")
+        lines.append("YOU ASKED THE USER THIS, AND THE QUESTION BELOW MAY BE THEIR ANSWER")
         lines.append(f"  {' '.join(state.awaiting_answer_to.split())}")
+        # "IS their answer" was too strong. Asked to choose between listing
+        # and grouping, a user replied "3", and the turn came back as LIMIT 3
+        # -- valid SQL and an invention. The block asserted the reply was an
+        # answer, and the system prompt separately warns against clarifying
+        # when the answer is obvious, so nothing gave the model licence to say
+        # the reply did not fit.
+        lines.append("  If it does not answer that, ask again instead of choosing an")
+        lines.append("  interpretation. A reply matching none of what you asked is not")
+        lines.append("  an answer to it.")
         lines.append("")
 
     # Grouped deliberately: what is selected persists, how it was presented

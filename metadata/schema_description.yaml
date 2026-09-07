@@ -152,13 +152,19 @@ tables:
         description: Timestamp when the Business Object was short-closed.
       current_active_milestone:
         type: VARCHAR
-        description: Current active milestone.
+        description: 'Current active milestone. Empty in this database: NULL in every row, so a filter
+          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       current_milestone_delay_days:
         type: INTEGER
-        description: Days the current active milestone is delayed.
+        description: 'Days the current active milestone is delayed. Empty in this database: NULL in every
+          row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it
+          to answer a question; say the data is not held instead.'
       current_milestone_expected_completion:
         type: VARCHAR
-        description: Expected completion of the current active milestone.
+        description: 'Expected completion of the current active milestone. Empty in this database: NULL
+          in every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not
+          use it to answer a question; say the data is not held instead.'
       total_task_count:
         type: BIGINT
         description: 'Total number of tasks on this Business Object, pre-aggregated. Prefer it over counting
@@ -193,7 +199,9 @@ tables:
         description: Category attribute for the Business Object.
       initiative_type:
         type: VARCHAR
-        description: Initiative type attribute.
+        description: 'Initiative type attribute. Empty in this database: NULL in every row, so a filter
+          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       end_date:
         type: VARCHAR
         description: End date attribute, stored as text.
@@ -211,31 +219,47 @@ tables:
         - Winter
       program:
         type: VARCHAR
-        description: Program attribute.
+        description: 'Program attribute. Empty in this database: NULL in every row, so a filter on it
+          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
+          the data is not held instead.'
       request_receipt_date:
         type: VARCHAR
-        description: Request receipt date attribute, stored as text.
+        description: 'Request receipt date attribute, stored as text. Empty in this database: NULL in
+          every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not use
+          it to answer a question; say the data is not held instead.'
       pi_date:
         type: VARCHAR
         description: PI date attribute, stored as text.
       stage:
         type: VARCHAR
-        description: Stage attribute.
+        description: 'Stage attribute. Empty in this database: NULL in every row, so a filter on it returns
+          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
+          is not held instead.'
       data_color:
         type: VARCHAR
-        description: Colour attribute recorded on the Business Object data.
+        description: 'Colour attribute recorded on the Business Object data. Empty in this database: NULL
+          in every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not
+          use it to answer a question; say the data is not held instead.'
       brandix_t_a:
         type: VARCHAR
-        description: Brandix T&A attribute.
+        description: 'Brandix T&A attribute. Empty in this database: NULL in every row, so a filter on
+          it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       csbd_date:
         type: VARCHAR
-        description: CSBD date attribute, stored as text.
+        description: 'CSBD date attribute, stored as text. Empty in this database: NULL in every row,
+          so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
+          a question; say the data is not held instead.'
       batch_no:
         type: VARCHAR
-        description: Batch number attribute.
+        description: 'Batch number attribute. Empty in this database: NULL in every row, so a filter on
+          it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       item_code:
         type: VARCHAR
-        description: Item code attribute.
+        description: 'Item code attribute. Empty in this database: NULL in every row, so a filter on it
+          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
+          the data is not held instead.'
       volume:
         type: VARCHAR
         description: Volume attribute.
@@ -290,37 +314,59 @@ tables:
           row in this database, so no filter on it can return results.
       buyer:
         type: VARCHAR
-        description: Buyer attribute.
+        description: 'Buyer attribute. Empty in this database: NULL in every row, so a filter on it returns
+          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
+          is not held instead.'
       mcode_won_number:
         type: VARCHAR
-        description: MCode/WON number attribute.
+        description: 'MCode/WON number attribute. Empty in this database: NULL in every row, so a filter
+          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       ex_mill_date:
         type: VARCHAR
-        description: Ex-mill date attribute, stored as text.
+        description: 'Ex-mill date attribute, stored as text. Empty in this database: NULL in every row,
+          so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
+          a question; say the data is not held instead.'
       garment_desc:
         type: VARCHAR
-        description: Garment description attribute.
+        description: 'Garment description attribute. Empty in this database: NULL in every row, so a filter
+          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       matching_instruction:
         type: VARCHAR
-        description: Matching instruction attribute.
+        description: 'Matching instruction attribute. Empty in this database: NULL in every row, so a
+          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
+          a question; say the data is not held instead.'
       fabric_description:
         type: VARCHAR
-        description: Fabric description attribute.
+        description: 'Fabric description attribute. Empty in this database: NULL in every row, so a filter
+          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
+          say the data is not held instead.'
       dye_part:
         type: VARCHAR
-        description: Dye part attribute.
+        description: 'Dye part attribute. Empty in this database: NULL in every row, so a filter on it
+          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
+          the data is not held instead.'
       shade:
         type: VARCHAR
-        description: Shade attribute.
+        description: 'Shade attribute. Empty in this database: NULL in every row, so a filter on it returns
+          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
+          is not held instead.'
       internal_or_confirmed:
         type: VARCHAR
-        description: Internal-or-confirmed attribute.
+        description: 'Internal-or-confirmed attribute. Empty in this database: NULL in every row, so a
+          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
+          a question; say the data is not held instead.'
       division:
         type: VARCHAR
-        description: Division attribute.
+        description: 'Division attribute. Empty in this database: NULL in every row, so a filter on it
+          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
+          the data is not held instead.'
       style_or_garment_code:
         type: VARCHAR
-        description: Style or garment code attribute.
+        description: 'Style or garment code attribute. Empty in this database: NULL in every row, so a
+          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
+          a question; say the data is not held instead.'
   tms_task_flat:
     description: Flat TMS task table containing task identity, assignment, status, dates, SLA/buffer,
       workflow/process context, Business Object context, and task-related business fields.

@@ -16,6 +16,8 @@
     input: $("input"),
     send: $("send"),
     useMock: $("use-mock"),
+    debugMode: $("debug-mode"),
+    stateRail: $("state-rail"),
     sourceBadge: $("source-badge"),
     errorBanner: $("error-banner"),
     resetContext: $("reset-context"),
@@ -36,6 +38,13 @@
     repairs: 0,
     busy: false,
   };
+
+  // Debug is a request parameter, not a stylesheet. The server omits SQL,
+  // schema names and diagnostics when this is off, so there is nothing in the
+  // page to hide -- and nothing in the network tab either.
+  function debugEnabled() {
+    return Boolean(el.debugMode && el.debugMode.checked);
+  }
 
   /* ------------------------------------------------------------ helpers */
 
@@ -104,24 +113,35 @@
   function addResponse(r) {
     const msg = text("div", "msg msg-bot");
 
-    // ---- head: the detected mode, and the shape of what came back --------
+    // ---- head ------------------------------------------------------------
+    // Most of this is diagnostic and the server does not send it with debug
+    // off, so the whole block is conditional rather than each field guarded.
+    const followup = r.followup || { type: "none", suggestions: [] };
     const head = text("div", "head");
-    const mode = r.decision || (r.followup.type === "clarification" ? "clarification" : "answer");
-    head.append(text("span", `mode mode-${mode}`, mode));
 
-    if (r.preflight_clarified) head.append(text("span", "tag", "no model call"));
-    if (r.repairs.length) head.append(text("span", "tag", `${r.repairs.length} repair(s)`));
-    if (r.resumed_from) head.append(text("span", "tag", `resumed from "${r.resumed_from}"`));
-    if (r.failure_category) head.append(text("span", "tag tag-bad", r.failure_category));
-    if (r.execution_success === true) {
-      head.append(text("span", "tag tag-ok", `${show(r.result.row_count, "?")} row(s)`));
-    } else if (r.sql_valid === false && r.generated_sql) {
-      head.append(text("span", "tag tag-bad", "sql invalid"));
+    if (debugEnabled()) {
+      const mode = r.decision || (followup.type === "clarification" ? "clarification" : "answer");
+      head.append(text("span", `mode mode-${mode}`, mode));
+
+      if (r.preflight_clarified) head.append(text("span", "tag", "no model call"));
+      const repairs = r.repairs || [];
+      if (repairs.length) head.append(text("span", "tag", `${repairs.length} repair(s)`));
+      if (r.resumed_from) head.append(text("span", "tag", `resumed from "${r.resumed_from}"`));
+      if (r.failure_category) head.append(text("span", "tag tag-bad", r.failure_category));
+      if (r.execution_success === true) {
+        head.append(text("span", "tag tag-ok", `${show((r.result || {}).row_count, "?")} row(s)`));
+      } else if (r.sql_valid === false && r.generated_sql) {
+        head.append(text("span", "tag tag-bad", "sql invalid"));
+      }
+      if (r.latency_ms !== null && r.latency_ms !== undefined) {
+        head.append(text("span", "tag", `${(r.latency_ms / 1000).toFixed(1)}s`));
+      }
+    } else if (r.result && (r.result.row_count !== undefined || r.result.rows)) {
+      // A row count is an answer, not a diagnostic.
+      head.append(text("span", "tag tag-ok",
+        `${show(r.result.row_count, (r.result.rows || []).length)} row(s)`));
     }
-    if (r.latency_ms !== null) {
-      head.append(text("span", "tag", `${(r.latency_ms / 1000).toFixed(1)}s`));
-    }
-    msg.append(head);
+    if (head.childNodes.length) msg.append(head);
 
     // ---- what it said ----------------------------------------------------
     if (r.clarification) {
@@ -132,18 +152,22 @@
     }
 
     // ---- the SQL, always in the same place -------------------------------
-    if (r.generated_sql) {
-      msg.append(text("pre", "sql", r.generated_sql));
-    } else if (!r.clarification && !r.error) {
-      msg.append(text("pre", "sql sql-none", "no SQL generated"));
+    if (debugEnabled()) {
+      if (r.generated_sql) {
+        msg.append(text("pre", "sql", r.generated_sql));
+      } else if (!r.clarification && !r.error) {
+        msg.append(text("pre", "sql sql-none", "no SQL generated"));
+      }
     }
 
-    if (r.result && r.result.columns && r.result.columns.length) {
+    const columnsPresent = r.result
+      && ((r.result.column_labels || []).length || (r.result.columns || []).length);
+    if (columnsPresent) {
       msg.append(resultTable(r.result));
     }
 
     // ---- suggestions as chips -------------------------------------------
-    const suggestions = r.followup.suggestions || [];
+    const suggestions = followup.suggestions || [];
     if (suggestions.length) {
       const chips = text("div", "chips");
       for (const s of suggestions) {
@@ -161,27 +185,70 @@
       msg.append(chips);
     }
 
-    msg.append(debugPane(r));
+    if (debugEnabled()) msg.append(debugPane(r));
     el.messages.append(msg);
     scroll();
   }
 
+  /* Copies the whole result, not the eight rows on screen. */
+  function copyButton(headers, rows) {
+    const button = text("button", "copy-btn", "Copy");
+    button.type = "button";
+    button.title = "Copy this table (tab-separated)";
+    button.addEventListener("click", async () => {
+      const payload = TableCopy.tableToText(headers, rows);
+      try {
+        await navigator.clipboard.writeText(payload);
+      } catch {
+        // The Clipboard API needs a secure context. 127.0.0.1 counts; a bare
+        // LAN address does not, and this console is reached both ways.
+        const scratch = document.createElement("textarea");
+        scratch.value = payload;
+        scratch.setAttribute("readonly", "");
+        scratch.style.position = "fixed";
+        scratch.style.opacity = "0";
+        document.body.append(scratch);
+        scratch.select();
+        document.execCommand("copy");
+        scratch.remove();
+      }
+      // Per button, so copying one table leaves every other one alone.
+      button.textContent = "Copied";
+      button.classList.add("copied");
+      clearTimeout(button._reset);
+      button._reset = setTimeout(() => {
+        button.textContent = "Copy";
+        button.classList.remove("copied");
+      }, 1600);
+    });
+    return button;
+  }
+
   function resultTable(result) {
     const wrap = text("div", "rows");
+
+    // Labels are what the server sends for display; the raw column names only
+    // arrive under debug, so they are the fallback rather than the source.
+    const headers = result.column_labels || result.columns || [];
+    const rows = result.rows || [];
+
+    const bar = text("div", "rows-bar");
+    bar.append(text("span", "rows-count",
+      `${result.row_count ?? rows.length} row(s)` +
+      (result.truncated ? " — preview truncated" : "")));
+    bar.append(copyButton(headers, rows));
+    wrap.append(bar);
+
     const table = document.createElement("table");
-    const caption = text("caption", null,
-      `${result.row_count ?? (result.rows || []).length} row(s)` +
-      (result.truncated ? " — preview truncated" : ""));
-    table.append(caption);
 
     const thead = document.createElement("thead");
     const hrow = document.createElement("tr");
-    for (const c of result.columns) hrow.append(text("th", null, c));
+    for (const c of headers) hrow.append(text("th", null, c));
     thead.append(hrow);
     table.append(thead);
 
     const tbody = document.createElement("tbody");
-    for (const row of (result.rows || []).slice(0, 8)) {
+    for (const row of rows.slice(0, 8)) {
       const tr = document.createElement("tr");
       for (const cell of row) tr.append(text("td", null, cell === null ? "NULL" : cell));
       tbody.append(tr);
@@ -334,6 +401,7 @@
       session_id: session.id,
       reset_context: session.resetPending,
       action,
+      debug: debugEnabled(),
       // Only the mock needs this; a real backend keeps its own session state.
       _state: session.state,
     };
@@ -447,6 +515,23 @@
       hideError();
     });
   }
+
+  if (el.debugMode) {
+    el.debugMode.addEventListener("change", () => {
+      // The rail reports tables and filters, which is database metadata, so
+      // it is only populated at all when debug is on. Turns already on screen
+      // keep whatever they were rendered with: the SQL for those never left
+      // the server, so there is nothing to reveal without asking again.
+      paintDebug();
+      hideError();
+    });
+  }
+
+  function paintDebug() {
+    if (el.stateRail) el.stateRail.hidden = !debugEnabled();
+  }
+
+  paintDebug();
 
   // Served by scripts/serve_api.py rather than opened off disk? Then a real
   // backend is demonstrably there, and asking it is what you came for.
