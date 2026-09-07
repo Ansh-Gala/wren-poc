@@ -34,8 +34,8 @@ Use the whole prefix, including the slash. `feature/qa-console`, not
 Ask what breaks if the file is absent.
 
 If the chatbot stops answering questions, it belongs on both branches: put it
-in `pipeline/`, `claude/`, `config/`, `database/`, `llm_api/`,
-`wren_setup/mcp_config.py`, `metadata/`, `ui/`, or `scripts/serve_api.py`.
+in `pipeline/`, `claude/`, `config/`, `database/`, `llm_api/`, `metadata/`,
+`ui/`, or `scripts/serve_api.py`.
 
 If only a benchmark, an analysis or a regeneration step stops working, it is
 development-only: add its path to `EXCLUDE` in
@@ -57,6 +57,18 @@ guessed wrong at least once:
   to production; a test for `benchmark/` does not.
 - **`database/schema.sql` and `seed.sql` are retired**, superseded by the real
   `tms_*` views. They stay on `develop` as history, not as setup.
+- **`wren_setup/` and the MCP path are develop-only.** Production runs lean
+  (`CLI_LEAN=true`), where `build_command` returns before it touches an MCP
+  config or a tool allowlist. `llm_api/cli_provider.py` and
+  `scripts/serve_api.py` therefore import `wren_setup` *lazily*, inside the
+  non-lean branch. Do not hoist either import to module scope -- that alone
+  would put Wren back on production. `llm_api/mcp_bridge.py` and
+  `openai_provider.py` go with it.
+- **`docs/` is develop-only.** Production carries what a deployer needs in its
+  README; everything else is written and reviewed here.
+- **`results/` is benchmark output, `logs/` is console turns.** Both are
+  gitignored. `scripts/serve_api.py --log` defaults to `logs/console`, so a
+  production deployment never creates a `results/` directory.
 
 ## Working on a feature
 
@@ -100,6 +112,7 @@ Two files are not the same on both branches, and those live in
 |---|---|
 | `README.md` | `develop`'s documents the benchmark; production's documents running the app. |
 | `ui/index.html` | Production drops the mock-response toggle along with `ui/mock.js`. |
+| `.env.example` | Production has no Wren, no benchmark and no demo database, so it asks for none of their settings. |
 
 Keep that set small. An overlaid file has to be changed in two places forever,
 and the second place is easy to forget. Prefer making the shared file tolerate

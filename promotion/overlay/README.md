@@ -5,9 +5,10 @@ CLI writes the SQL, a read-only role runs it, and a small web console shows
 both the answer and what the system understood.
 
 This is the production branch: the application and nothing else. The
-benchmark, the question sets, the evaluation harness and the semantic-registry
-sources live on `develop`. See [docs/branching.md](docs/branching.md) for
-where to work on what.
+benchmark, the question sets, the evaluation harness, the semantic-registry
+sources, the Wren/MCP integration and the project documentation all live on
+`develop`. Work there and promote; a change committed here is lost at the next
+promotion.
 
 ## What it does
 
@@ -21,8 +22,10 @@ examples, and is asked for SQL. What comes back is parsed, checked against the
 schema, and rejected outright if it is anything other than a read. Only then
 is it executed.
 
-Rows never reach the model. Metadata does. `docs/privacy.md` states exactly
-what crosses each boundary.
+Rows never reach the model -- only metadata does: the schema descriptions,
+the business rules and the worked examples under `metadata/`. Generated SQL is
+parsed and rejected unless it is a single read, and it executes as a role that
+holds SELECT and nothing else.
 
 If the question cannot be answered as asked, the system says so instead of
 guessing -- and if it asks you something back, your reply is understood as an
@@ -62,9 +65,10 @@ Then set, at a minimum:
 | `LLM_PROVIDER` | `cli` |
 | `CLI_LEAN` | `true` |
 
-`LLM_PROVIDER=cli` and `CLI_LEAN=true` are the configuration this system is
-measured in. Anything else either will not start or will warn and cost roughly
-three times the context.
+Both values are required, not defaults. This branch ships only the lean
+path: `LLM_PROVIDER` anything but `cli`, or `CLI_LEAN=false`, and the server
+exits at startup saying so. The MCP path it would otherwise select needs
+`wren_setup`, which is not part of a deployment.
 
 The query role should hold `SELECT` and nothing more. `pipeline/safety.py`
 rejects writes before they are sent, but a read-only grant is what makes that
@@ -85,9 +89,9 @@ python scripts/serve_api.py --context-mode none     # no conversation memory
 python scripts/serve_api.py --log ''                # stop recording turns
 ```
 
-By default every turn is appended as JSONL under `results/console/raw/`.
-Questions people actually type are the best source of cases nobody thought to
-write; `--log ''` turns that off.
+By default every turn is appended as JSONL under `logs/console/raw/`, which
+is gitignored. Questions people actually type are the best source of cases
+nobody thought to write; `--log ''` turns that off.
 
 ## Endpoint
 
@@ -117,13 +121,21 @@ claude/       Prompt construction and response parsing
 config/       Settings and logging
 database/     Read-only connection handling
 llm_api/      Provider abstraction over the Claude CLI
-wren_setup/   MCP configuration
 metadata/     Schema descriptions, business rules, worked examples,
               entity vocabulary -- what the model is told
 ui/           The console: one page, no build step, no dependencies
 scripts/      serve_api.py, and the bootstrap it imports
-docs/         Architecture, privacy, the follow-up layer, branching
+tests/        The tests for the above
 ```
+
+53 files. Everything here is reachable from `scripts/serve_api.py`; nothing
+is kept for reference.
 
 `metadata/` is generated on `develop` from the semantic registry and promoted
 here as output. Change it there, not on this branch.
+
+## Architecture, privacy and the follow-up layer
+
+Documented on `develop`, under `docs/`: `architecture.md`, `privacy.md` (what
+crosses each boundary, connection by connection), `followup-layer.md` (repair,
+clarification and suggestions) and `branching.md` (this workflow).

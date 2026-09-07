@@ -86,17 +86,21 @@ EXCLUDE = [
     "scripts/build_targeted_suite.py",
     "scripts/build_wren.py",
     "scripts/check_environment.py",
-    "wren_setup/build.py",
-    "wren_setup/helpers.py",
-    "wren_setup/preflight.py",
 
-    # -- Documentation of work rather than of the system.
-    "docs/followup-layer-report.md",
-    "docs/scalable_text_to_sql_architecture.md",
-    "docs/v2-chat-context.md",
-    "docs/wren-findings.md",
-    "docs/data-flow.md",          # a captured trace; cites scripts/run_single.py
-    "docs/superpowers",
+    # -- Wren and the MCP path. Production runs lean (CLI_LEAN=true), where
+    #    build_command returns before it touches an MCP config or a tool
+    #    allowlist, so none of this is reachable. cli_provider.py and
+    #    serve_api.py import wren_setup lazily inside the non-lean branch,
+    #    which is what makes dropping the package possible at all. Setting
+    #    CLI_LEAN=false on production now fails loudly instead of silently
+    #    costing three times the context.
+    "wren_setup",
+    "llm_api/mcp_bridge.py",
+    "llm_api/openai_provider.py",
+
+    # -- Documentation. Written and reviewed on develop; the production README
+    #    carries what someone deploying the thing actually needs.
+    "docs",
 
     # -- Fixtures, editor droppings, other agents' instruction files.
     "ui/mock.js",

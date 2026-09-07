@@ -1,7 +1,17 @@
 import json
 
+import pytest
+
 from llm_api.cli_provider import build_command, parse_stream_json
-from wren_setup.mcp_config import DISALLOWED_TOOLS, allowed_tools, write_mcp_config
+
+# The MCP path is optional: a lean-only deployment ships no wren_setup, so the
+# tests below that exercise MCP configuration and tool allowlists skip there
+# rather than failing. Everything else in this file tests the CLI stream
+# parser and the command builder, which are always present.
+mcp_config = pytest.importorskip("wren_setup.mcp_config")
+DISALLOWED_TOOLS = mcp_config.DISALLOWED_TOOLS
+allowed_tools = mcp_config.allowed_tools
+write_mcp_config = mcp_config.write_mcp_config
 
 
 def test_command_is_headless_and_strict(tmp_settings, tmp_path):
