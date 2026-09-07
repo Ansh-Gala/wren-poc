@@ -4,14 +4,22 @@ import pytest
 
 from llm_api.cli_provider import build_command, parse_stream_json
 
-# The MCP path is optional: a lean-only deployment ships no wren_setup, so the
-# tests below that exercise MCP configuration and tool allowlists skip there
-# rather than failing. Everything else in this file tests the CLI stream
-# parser and the command builder, which are always present.
-mcp_config = pytest.importorskip("wren_setup.mcp_config")
-DISALLOWED_TOOLS = mcp_config.DISALLOWED_TOOLS
-allowed_tools = mcp_config.allowed_tools
-write_mcp_config = mcp_config.write_mcp_config
+# The MCP path is optional: a lean-only deployment ships no wren_setup. Only
+# the cases that exercise MCP configuration and tool allowlists depend on it,
+# so they carry @needs_mcp and skip there. The stream-parser and
+# command-builder cases in this file run everywhere, which is the point --
+# they cover code that answers every question.
+try:
+    from wren_setup.mcp_config import (
+        DISALLOWED_TOOLS, allowed_tools, write_mcp_config,
+    )
+except ModuleNotFoundError:
+    DISALLOWED_TOOLS = allowed_tools = write_mcp_config = None
+
+needs_mcp = pytest.mark.skipif(
+    write_mcp_config is None,
+    reason="wren_setup is not shipped in a lean-only deployment",
+)
 
 
 def test_command_is_headless_and_strict(tmp_settings, tmp_path):
@@ -22,6 +30,7 @@ def test_command_is_headless_and_strict(tmp_settings, tmp_path):
     assert "--verbose" in cmd
 
 
+@needs_mcp
 def test_command_always_disallows_row_returning_tools(tmp_settings, tmp_path):
     for mode in ("strict", "validated"):
         cmd = build_command("q", tmp_path / "mcp.json", mode, tmp_settings)
@@ -41,16 +50,19 @@ def test_command_never_contains_database_password(tmp_settings, tmp_path):
     assert tmp_settings.pg_readonly_password not in joined
 
 
+@needs_mcp
 def test_allowlist_and_denylist_do_not_overlap():
     for mode in ("strict", "validated"):
         assert not set(allowed_tools(mode)) & set(DISALLOWED_TOOLS)
 
 
+@needs_mcp
 def test_dry_run_only_offered_when_wren_is_connected():
     assert "mcp__wren__dry_run" not in allowed_tools("strict")
     assert "mcp__wren__dry_run" in allowed_tools("validated")
 
 
+@needs_mcp
 def test_strict_mode_passes_no_connect(tmp_settings):
     cfg = json.loads(write_mcp_config("D", "strict", tmp_settings).read_text())
     args = cfg["mcpServers"]["wren"]["args"]
@@ -58,11 +70,13 @@ def test_strict_mode_passes_no_connect(tmp_settings):
     assert "--no-connect" in args
 
 
+@needs_mcp
 def test_validated_mode_omits_no_connect(tmp_settings):
     cfg = json.loads(write_mcp_config("D", "validated", tmp_settings).read_text())
     assert "--no-connect" not in cfg["mcpServers"]["wren"]["args"]
 
 
+@needs_mcp
 def test_config_env_isolates_project_and_memory(tmp_settings):
     a = json.loads(write_mcp_config("A", "strict", tmp_settings).read_text())
     d = json.loads(write_mcp_config("D", "strict", tmp_settings).read_text())
@@ -72,6 +86,7 @@ def test_config_env_isolates_project_and_memory(tmp_settings):
     assert ea["WREN_MEMORY_DIR"] != ed["WREN_MEMORY_DIR"]
 
 
+@needs_mcp
 def test_mcp_config_sets_utf8_for_windows(tmp_settings):
     cfg = json.loads(write_mcp_config("D", "strict", tmp_settings).read_text())
     assert cfg["mcpServers"]["wren"]["env"]["PYTHONUTF8"] == "1"
