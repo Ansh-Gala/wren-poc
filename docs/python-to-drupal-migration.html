@@ -397,7 +397,8 @@
           <b>Possible on Drupal 10?</b> Yes. Nothing in the chatbot needs a language feature
           PHP lacks. The frontend is vanilla JS with no build step and moves across untouched;
           the metadata and prompts are data and copy verbatim. One dependency has no PHP
-          equivalent &mdash; <code>sqlglot</code> &mdash; and PostgreSQL itself replaces it.
+          equivalent &mdash; <code>sqlglot</code> &mdash; and it is read for three different
+          purposes that turn out to have three different answers.
         </dd>
       </div>
       <div>
@@ -517,8 +518,8 @@
             <td class="path">pipeline/context.py</td>
             <td class="num">468</td>
             <td class="path">src/Conversation/ &times;3</td>
-            <td><span class="pill rework">rework</span></td>
-            <td>Classifier and renderer port directly; the state reader needs <code>EXPLAIN</code>.</td>
+            <td><span class="pill risk">the work</span></td>
+            <td>Classifier and renderer port directly. The state reader has no substitute and is the port&rsquo;s real risk.</td>
           </tr>
           <tr>
             <td class="path">pipeline/sql_semantics.py</td>
@@ -545,8 +546,8 @@
             <td class="path">pipeline/safety.py</td>
             <td class="num">102</td>
             <td class="path">src/Sql/SafetyGate.php</td>
-            <td><span class="pill risk">weaker</span></td>
-            <td>The read-only gate. This is the one place the port loses something real.</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>The read-only gate. Loses one barrier of four; the other three are prompt text and your database.</td>
           </tr>
         </tbody>
       </table>
@@ -555,75 +556,160 @@
 
   <section>
     <p class="sec-label">The one genuine blocker</p>
-    <h2>PHP has no SQL parser, so PostgreSQL becomes one</h2>
+    <h2>What <code>sqlglot</code> is actually for</h2>
     <p>
-      Three modules parse SQL into a typed tree. <code>sql_semantics.py</code> alone touches
-      about 50 node types &mdash; <code>exp.Column</code> eighteen times, plus
-      <code>Star</code>, <code>Table</code>, <code>AggFunc</code>, <code>Like</code>,
-      <code>In</code>, every comparison operator. PHP has nothing equivalent:
-      <code>phpmyadmin/sql-parser</code> is MySQL-oriented and gives no Postgres expression tree.
+      It turns SQL text into a tree the code can interrogate, and three modules do that for
+      three unrelated reasons. Lumping them together is what made the first version of this
+      assessment wrong &mdash; separated and measured against the live system, they have
+      three different answers and only one of them is expensive.
     </p>
-    <p>
-      The answer is to stop parsing and start asking the database.
-      <code>EXPLAIN (VERBOSE, FORMAT JSON)</code> inside a <code>READ ONLY</code> transaction
-      plans a statement without running it, and returns everything the tree was being read for.
-    </p>
-    <div class="two">
-      <div>
-        <h3>Reading conversation state</h3>
-        <p>
-          <code>parse_sql_state</code> walked the tree for tables, filters, group keys, sort
-          keys and limit. The plan carries all five: <code>Relation Name</code>,
-          <code>Filter</code>, <code>Group Key</code>, <code>Sort Key</code>, and a
-          <code>Limit</code> node.
-        </p>
-        <p>
-          One catch: the planner rewrites predicates. Where Python stored
-          <code>x = 'AR_YD_Suiting'</code>, <code>EXPLAIN</code> reports
-          <code>(x = 'AR_YD_Suiting'::text)</code>, so casts and parentheses need stripping.
-        </p>
-      </div>
-      <div>
-        <h3>Catching an invented column</h3>
-        <p>
-          Asked for <code>profit_margin</code>, a model may write confident SQL for a column
-          that does not exist, and the query then fails with an error that looks like any other.
-          PostgreSQL names the culprit precisely:
-        </p>
-        <dl>
-          <div><dt>Unknown table</dt><dd>42P01</dd></div>
-          <div><dt>Unknown column</dt><dd>42703</dd></div>
-          <div><dt>Syntax error</dt><dd>42601</dd></div>
-          <div><dt>Timed out</dt><dd>57014</dd></div>
-        </dl>
-        <p>
-          This is <em>better</em> than the original, which diffed against a name index built
-          from a YAML file. The database cannot disagree with itself about its own columns.
-        </p>
-      </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Job</th><th>Python</th><th>In PHP</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Spot an invented column</td>
+            <td class="path">sql_semantics.py</td>
+            <td><code>EXPLAIN</code> returns <code>42703</code> / <code>42P01</code> naming the culprit</td>
+            <td><span class="pill copy">better</span></td>
+          </tr>
+          <tr>
+            <td>Block a write</td>
+            <td class="path">safety.py</td>
+            <td>Static checks plus a plan inspection, behind three layers the port never touches</td>
+            <td><span class="pill port">cheap</span></td>
+          </tr>
+          <tr>
+            <td>Remember what you are looking at</td>
+            <td class="path">context.py</td>
+            <td>No substitute. A purpose-built extractor, ~300&ndash;400 lines</td>
+            <td><span class="pill rework">the work</span></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+    <h3>Why the database cannot supply conversation memory</h3>
+    <p>
+      The obvious idea is to stop parsing and ask PostgreSQL:
+      <code>EXPLAIN (VERBOSE, FORMAT JSON)</code> plans a statement without running it. That
+      works for catching invented names. It cannot read the query back, because
+      <b>the <code>tms_*</code> objects are views.</b> <code>EXPLAIN</code> describes how the
+      statement will <em>execute</em>, and through a view that is a different statement:
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Wanted</th><th>What the database returned</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="path">Relation Name: tms_task_flat</td>
+            <td class="path">vf_task, vf_user__field_full_name, vf_bo_wf_mapping, vf_process, vf_role_department_list</td>
+          </tr>
+          <tr>
+            <td class="path">Filter: task_sla_status = 'Delayed'</td>
+            <td>a ~400-character <code>CASE WHEN lower(task.status) = 'closed' THEN&hellip;</code> &mdash; the expression <em>defining</em> that column inside the view</td>
+          </tr>
+          <tr>
+            <td class="path">Group Key: assigned_user_name</td>
+            <td class="path">assigned_user.field_full_name_value</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>What that memory is worth, measured</h3>
+    <p>
+      The same two-turn conversation, run twice on the live system. Only the state layer
+      differs &mdash; same model, same prompt, same database.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th></th><th>&ldquo;show AR_YD_Suiting items&rdquo;</th><th>then just &ldquo;how many?&rdquo;</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>With memory</b></td>
+            <td>22 rows listed</td>
+            <td class="path">SELECT COUNT(*) &hellip; WHERE business_object_type = 'AR_YD_Suiting' &rarr; 22</td>
+          </tr>
+          <tr>
+            <td><b>Without memory</b></td>
+            <td>22 rows listed</td>
+            <td><em>no SQL at all</em> &mdash; &ldquo;Please specify what you&rsquo;d like counted&rdquo;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Without it the product stops being a chatbot: every question has to be self-contained.
+      No &ldquo;how many?&rdquo;, no &ldquo;only the active ones&rdquo;, no &ldquo;sort by due
+      date&rdquo;.
+    </p>
+    <h3>Why the extractor is tractable anyway</h3>
+    <p>
+      It reads five shallow things &mdash; FROM tables, top-level <code>AND</code>-ed
+      comparisons, GROUP BY columns, the ORDER BY term, LIMIT. The input is not arbitrary SQL:
+      it is model-generated, always a single <code>SELECT</code> against a known handful of
+      views, with clauses in a fixed order. And it is <b>already allowed to fail</b> &mdash;
+      <code>parse_sql_state</code> returns empty rather than raising, because a query it cannot
+      read &ldquo;should degrade the context, not abort the conversation&rdquo;. A miss costs one
+      turn&rsquo;s follow-up memory.
+    </p>
     <div class="callout warn">
-      <h3>Prove this before writing any module code</h3>
+      <h3>Measure it before building on it</h3>
       <p>
-        It is a 60-line standalone PHP script and an afternoon against the real database, with
-        eight cases and explicit pass criteria. If filters turn out to be unrecoverable for
-        joined queries, the fallbacks are a <code>libpg_query</code> FFI binding or keeping
-        Python for SQL analysis alone &mdash; and both change the estimate enough to need
-        re-approving. Do not skip it and hope.
+        Harvest 100+ real generated statements from the Python turn logs, run the extractor over
+        them, and compare against <code>parse_sql_state</code> field by field. The bar is 95% on
+        filter keys and tables, since those drive the next turn. Below that, the fallbacks are a
+        <code>libpg_query</code> FFI binding or keeping Python for state reading alone. Never
+        ship a reader that guesses: a wrong remembered filter is worse than none, because every
+        following turn inherits it invisibly and the user sees a confidently wrong answer.
       </p>
     </div>
   </section>
 
   <section>
     <p class="sec-label">Where the port is worse</p>
-    <h2>The read-only gate loses a layer</h2>
+    <h2>The read-only gate loses one layer of four</h2>
     <p>
-      Generated SQL passes three independent barriers: an AST gate, a <code>SELECT</code>-only
-      database role, and a <code>READ ONLY</code> transaction with a statement timeout. The AST
-      gate was <em>primary</em> &mdash; it parsed the statement, rejected mutating node types,
-      and kept a keyword regex behind it so that even a mis-parse could not smuggle a write through.
+      Asked <em>&ldquo;delete all tasks&rdquo;</em>, the running system produced <b>no SQL at
+      all.</b> The model refused by itself &mdash; <em>&ldquo;This system only supports read-only
+      SELECT queries. I can't delete data.&rdquo;</em> &mdash; so the <code>sqlglot</code> gate
+      was never reached. There are four barriers, not three, and they fire in order:
     </p>
-    <p>PHP cannot reproduce it. The replacement is four cheaper checks plus a plan inspection:</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th class="num">#</th><th>Layer</th><th>Survives the port?</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">0</td>
+            <td>The system prompt instructs a single read-only <code>SELECT</code></td>
+            <td><span class="pill copy">yes</span> copied verbatim as a string</td>
+          </tr>
+          <tr>
+            <td class="num">1</td>
+            <td>The <code>sqlglot</code> AST gate</td>
+            <td><span class="pill risk">no</span> rebuilt from cheaper checks</td>
+          </tr>
+          <tr>
+            <td class="num">2</td>
+            <td>The <code>tms_*</code> views are not automatically updatable</td>
+            <td><span class="pill copy">yes</span> <code>55000</code>, your schema, untouched</td>
+          </tr>
+          <tr>
+            <td class="num">3</td>
+            <td>A <code>SELECT</code>-only role in a <code>READ ONLY</code> transaction</td>
+            <td><span class="pill copy">yes</span> verified: <code>wren_ro</code> holds <code>['SELECT']</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The replacement for layer 1 is four cheaper checks plus a plan inspection:</p>
     <ul>
       <li>Strip comments and string literals into a scratch copy, so <code>WHERE name = 'DROP'</code> passes while <code>/* SELECT */ DELETE&hellip;</code> does not.</li>
       <li>Reject stacked statements &mdash; any <code>;</code> with content after it.</li>
@@ -631,12 +717,14 @@
       <li>Reject the eighteen forbidden keywords as whole words, then reject any plan containing a <code>ModifyTable</code> node.</li>
     </ul>
     <div class="callout">
-      <h3>Consequence, stated plainly</h3>
+      <h3>Cheaper than it first looked &mdash; but not free</h3>
       <p>
-        The <code>SELECT</code>-only role and the read-only transaction stop being
-        belt-and-braces and become the primary control. Untested, &ldquo;the role is read-only&rdquo;
-        is a belief rather than a control &mdash; so the plan verifies both independently and
-        treats a failure there as a release blocker, not a bug to triage.
+        The port loses one barrier of four, and it is the one that never fires in normal use
+        because the prompt already refused. That is not a licence to be casual here: layer 0 is
+        a request a model chooses to honour, not a boundary, and it holds only until a model
+        version, an odd phrasing or a value in your own data reads as an instruction. Layers 2
+        and 3 are the actual guarantees now, which is why the plan verifies both independently
+        and treats a failure there as a release blocker rather than a bug to triage.
       </p>
     </div>
   </section>
@@ -688,35 +776,35 @@
       a build step, which is why it is marked differently.
     </p>
     <div class="effort">
-      <div class="axis"><span>0 days</span><span>6</span><span>12 days</span></div>
+      <div class="axis"><span>0 days</span><span>7</span><span>14 days</span></div>
       <div class="effort-row">
-        <div class="name"><span class="ph">P0</span>Parser spike</div>
-        <div class="track"><div class="fill gate" style="width: 8.3%"></div></div>
-        <div class="val">0.5&ndash;1 d</div>
+        <div class="name"><span class="ph">P0</span>Spike and extractor probe</div>
+        <div class="track"><div class="fill gate" style="width: 16.7%"></div></div>
+        <div class="val">1&ndash;2 d</div>
       </div>
       <div class="effort-row">
         <div class="name"><span class="ph">P1</span>Working shell</div>
-        <div class="track"><div class="fill" style="width: 25%"></div></div>
+        <div class="track"><div class="fill" style="width: 21.4%"></div></div>
         <div class="val">2&ndash;3 d</div>
       </div>
       <div class="effort-row">
         <div class="name"><span class="ph">P2</span>Postgres, both providers</div>
-        <div class="track"><div class="fill" style="width: 33.3%"></div></div>
+        <div class="track"><div class="fill" style="width: 28.6%"></div></div>
         <div class="val">3&ndash;4 d</div>
       </div>
       <div class="effort-row">
-        <div class="name"><span class="ph">P3</span>Replacing sqlglot</div>
-        <div class="track"><div class="fill" style="width: 33.3%"></div></div>
-        <div class="val">3&ndash;4 d</div>
+        <div class="name"><span class="ph">P3</span>Safety and schema check</div>
+        <div class="track"><div class="fill" style="width: 25%"></div></div>
+        <div class="val">2&ndash;3 d</div>
       </div>
       <div class="effort-row">
-        <div class="name"><span class="ph">P4</span>Logic ports</div>
+        <div class="name"><span class="ph">P4</span>Logic ports, incl. the extractor</div>
         <div class="track"><div class="fill" style="width: 100%"></div></div>
-        <div class="val">8&ndash;12 d</div>
+        <div class="val">10&ndash;14 d</div>
       </div>
       <div class="effort-row">
         <div class="name"><span class="ph">P5</span>Parity and hardening</div>
-        <div class="track"><div class="fill" style="width: 41.7%"></div></div>
+        <div class="track"><div class="fill" style="width: 35.7%"></div></div>
         <div class="val">3&ndash;5 d</div>
       </div>
     </div>
@@ -724,10 +812,10 @@
       <div>
         <h3>If Claude writes it</h3>
         <dl>
-          <div><dt>Sessions</dt><dd>11&ndash;17</dd></div>
+          <div><dt>Sessions</dt><dd>12&ndash;18</dd></div>
           <div><dt>Writing time</dt><dd>15&ndash;25 h</dd></div>
           <div><dt>Tasks</dt><dd>18</dd></div>
-          <div><dt>Tracked steps</dt><dd>92</dd></div>
+          <div><dt>Tracked steps</dt><dd>94</dd></div>
         </dl>
         <p>
           The constraint is verification, not writing. PHP for Drupal cannot be checked without a
@@ -739,8 +827,8 @@
       <div>
         <h3>If a developer writes it</h3>
         <dl>
-          <div><dt>Working days</dt><dd>20&ndash;30</dd></div>
-          <div><dt>Calendar</dt><dd>4&ndash;6 weeks</dd></div>
+          <div><dt>Working days</dt><dd>22&ndash;32</dd></div>
+          <div><dt>Calendar</dt><dd>5&ndash;6 weeks</dd></div>
           <div><dt>If spike fails</dt><dd>+1 week</dd></div>
           <div><dt>Team size</dt><dd>1</dd></div>
         </dl>
