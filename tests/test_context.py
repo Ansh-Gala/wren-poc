@@ -285,3 +285,33 @@ def test_a_question_the_system_asked_is_carried_into_the_next_turn():
 
     assert "Do you want the user with the most tasks" in context
     assert "answer" in context.lower(), "the block must say what the reply is for"
+
+
+def test_an_outstanding_question_allows_asking_again():
+    """A reply that answers nothing must not be forced into an answer.
+
+    Recovered from a real session. The system asked whether to "list the
+    business objects with open_task_count > 4, or group them by some field",
+    and the user replied "3" -- which answers neither. The turn came back as
+    SELECT ... LIMIT 3: valid SQL, and an invention.
+
+    The context block was part of the cause. It asserted outright that the
+    next question *is* the answer, and the system prompt separately warns that
+    asking for clarification when the answer is obvious is as unhelpful as
+    guessing. Between them the model had no licence to say "that is not an
+    answer to what I asked".
+    """
+    state = ConversationState()
+    state.awaiting_answer_to = (
+        "Do you want the business objects with open_task_count > 4, "
+        "or grouped by some field?"
+    )
+
+    context = render_context(state)
+
+    assert "open_task_count > 4" in context, "the question itself must travel"
+    lowered = context.lower()
+    assert "ask again" in lowered, (
+        "the block must permit re-asking; without it a reply that answers "
+        "nothing gets forced into an interpretation"
+    )
