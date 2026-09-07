@@ -1,7 +1,7 @@
 import csv
 import json
 
-from benchmark.models import QuestionResult
+from pipeline.models import QuestionResult
 from benchmark.report import summarize, write_reports
 
 

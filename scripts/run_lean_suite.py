@@ -16,8 +16,8 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
-from benchmark.lean_runner import run_suite
-from benchmark.lean_suite import all_turns, load_suite, select
+from pipeline.lean_runner import run_suite
+from benchmark.suite import all_turns, load_suite, select
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 from wren_setup.mcp_config import write_mcp_config

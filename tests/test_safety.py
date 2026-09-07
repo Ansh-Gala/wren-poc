@@ -1,6 +1,6 @@
 import pytest
 
-from benchmark.safety import UnsafeSQLError, assert_read_only
+from pipeline.safety import UnsafeSQLError, assert_read_only
 
 
 @pytest.mark.parametrize(

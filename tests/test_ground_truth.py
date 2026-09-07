@@ -1,7 +1,7 @@
 import pytest
 
 from benchmark.questions import load_questions, select, stratified_subset
-from benchmark.safety import assert_read_only
+from pipeline.safety import assert_read_only
 from database.connection import run_readonly
 
 QS = load_questions()

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
-from benchmark.sql_semantics import (
+from pipeline.sql_semantics import (
     PROJECTION_EXACT, PROJECTION_MISSING, PROJECTION_SUBSTITUTED,
     PROJECTION_SUPERSET, compare,
 )
@@ -128,7 +128,7 @@ def main() -> int:
 
 def _ordered_lookup() -> dict[str, bool]:
     """Which turns actually demanded an order, across every suite."""
-    from benchmark.lean_suite import all_turns, load_suite
+    from benchmark.suite import all_turns, load_suite
     out: dict[str, bool] = {}
     for name in ("lean_questions.yaml", "lean_stress.yaml", "expansion_questions.yaml",
                  "targeted_questions.yaml"):

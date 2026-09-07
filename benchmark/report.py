@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from benchmark.classify import is_heuristic
-from benchmark.models import QuestionResult
+from pipeline.models import QuestionResult
 
 CSV_FIELDS = [
     "question_id", "category", "question", "config_name", "privacy_mode",

@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from benchmark.context import ConversationState
-from benchmark.lean_suite import SuiteTurn
-from benchmark.models import ClaudeRun, Session
-from benchmark.lean_runner import run_turn
+from pipeline.context import ConversationState
+from pipeline.lean_suite import SuiteTurn
+from pipeline.models import ClaudeRun, Session
+from pipeline.lean_runner import run_turn
 
 pytestmark = pytest.mark.integration
 
@@ -44,7 +44,7 @@ def _turn(question, **kw):
 def _run(monkeypatch, settings, reply, question="How many business objects are there?",
          state=None):
     provider = FakeProvider(reply)
-    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: provider)
+    monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
     return run_turn(
         _turn(question), state or ConversationState(), [], settings,
         mcp_config_path=None, privacy_mode="strict",
@@ -118,10 +118,10 @@ def test_a_clarification_at_runtime_is_not_a_failure(monkeypatch, settings):
     result_match False -- the console would have painted its own best
     behaviour red.
     """
-    from benchmark.lean_runner import load_gazetteer
+    from pipeline.lean_runner import load_gazetteer
 
     provider = FakeProvider("unused: preflight answers before the model is asked")
-    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: provider)
+    monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
 
     result = run_turn(
         _turn("Show the AR_YD items"), ConversationState(), load_gazetteer(),
@@ -173,7 +173,7 @@ def test_a_prose_clarification_is_answerable_on_the_next_turn(monkeypatch, setti
     asking = FakeProvider(
         '{"clarify": "Do you want the user with the most tasks, or the '
         'department with the most tasks?"}')
-    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: asking)
+    monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: asking)
     run_turn(_turn("which user had most tasks, or which department?"),
              state, [], settings, None, "strict", session)
 
@@ -182,7 +182,7 @@ def test_a_prose_clarification_is_answerable_on_the_next_turn(monkeypatch, setti
     answering = FakeProvider(
         '{"sql": "SELECT assigned_user_name, COUNT(*) FROM tms_task_flat '
         'GROUP BY assigned_user_name"}')
-    monkeypatch.setattr("benchmark.lean_runner.get_provider", lambda s: answering)
+    monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: answering)
     run_turn(_turn("both"), state, [], settings, None, "strict", session)
 
     prompt = session.context_block or ""

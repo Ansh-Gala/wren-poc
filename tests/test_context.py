@@ -2,7 +2,7 @@
 
 import pytest
 
-from benchmark.context import (
+from pipeline.context import (
     ConversationState, classify_turn, detect_entity, parse_sql_state,
     render_context, update_state,
 )

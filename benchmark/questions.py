@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from benchmark.models import Question
+from pipeline.models import Question
 
 QUESTIONS_FILE = Path(__file__).resolve().parent / "questions.yaml"
 

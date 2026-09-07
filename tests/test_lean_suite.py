@@ -2,7 +2,8 @@
 
 import pytest
 
-from benchmark.lean_suite import DECISIONS, all_turns, load_suite, select
+from benchmark.suite import all_turns, load_suite, select
+from pipeline.lean_suite import DECISIONS
 
 CONVS = load_suite()
 TURNS = all_turns(CONVS)
@@ -106,8 +107,8 @@ def test_a_reset_expectation_never_carries_the_previous_filters():
     """
     from pathlib import Path
 
-    from benchmark.context import parse_sql_state
-    from benchmark.lean_suite import load_suite
+    from pipeline.context import parse_sql_state
+    from benchmark.suite import load_suite
 
     # The columns that identify the subject rather than narrow it. These are
     # expected to change on a switch; everything else is expected to vanish.
@@ -143,7 +144,7 @@ def test_the_followup_suite_covers_the_dimensions_it_claims_to():
     """
     from pathlib import Path
 
-    from benchmark.lean_suite import all_turns, load_suite
+    from benchmark.suite import all_turns, load_suite
 
     turns = all_turns(load_suite(Path("benchmark/followup_questions.yaml")))
     assert len(turns) >= 100, f"only {len(turns)} turns"

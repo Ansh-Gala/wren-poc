@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from benchmark.evaluator import compare_results, normalize_value
-from benchmark.models import QueryResult
+from pipeline.evaluator import compare_results, normalize_value
+from pipeline.models import QueryResult
 
 
 def R(cols, rows, error=None):

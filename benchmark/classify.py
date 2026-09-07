@@ -23,7 +23,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
-from benchmark.models import QuestionResult
+from pipeline.models import QuestionResult
 
 KNOWN_TABLES = {"users", "workflows", "tasks"}
 

@@ -12,7 +12,7 @@ tolerates a tool being absent -- in `strict` mode dry_run is not registered.
 
 from __future__ import annotations
 
-from benchmark.models import Session
+from pipeline.models import Session
 
 SYSTEM_PROMPT = """You are generating SQL for a local, synthetic PostgreSQL database used in a
 benchmark. The data is fake; there is no production or personal information.
@@ -74,7 +74,7 @@ def build_user_prompt(
 ) -> str:
     """The per-question prompt.
 
-    ``context`` is the compact conversational state from benchmark.context and
+    ``context`` is the compact conversational state from pipeline.context and
     is preferred when present: it holds the subject, the filters still in
     force and the previous query in a fixed number of fields, so it stays the
     same size on turn 20 as on turn 2. Replaying ``session`` verbatim is the
@@ -223,7 +223,7 @@ def build_lean_system_prompt() -> str:
 
     meta_dir = Path(__file__).resolve().parents[1] / "metadata"
     load = lambda n: yaml.safe_load((meta_dir / n).read_text(encoding="utf-8")) or {}
-    from benchmark.context import CONTEXT_GUIDANCE
+    from pipeline.context import CONTEXT_GUIDANCE
 
     return (
         LEAN_SYSTEM_PROMPT

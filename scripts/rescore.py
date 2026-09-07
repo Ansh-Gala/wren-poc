@@ -27,7 +27,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
-from benchmark.evaluator import compare_results, compare_row_subset
+from pipeline.evaluator import compare_results, compare_row_subset
 from benchmark.questions import load_questions
 from config.logging import register_secrets
 from config.settings import load_settings

@@ -1,5 +1,5 @@
 from benchmark.classify import classify_failure, is_heuristic
-from benchmark.models import QuestionResult
+from pipeline.models import QuestionResult
 
 
 def make(**kw):

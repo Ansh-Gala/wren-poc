@@ -17,7 +17,7 @@ import json
 import os
 import shutil
 import subprocess
-from benchmark.models import ClaudeRun, Session
+from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
 from config.settings import Settings
 from wren_setup.mcp_config import all_disallowed_tools, allowed_tools

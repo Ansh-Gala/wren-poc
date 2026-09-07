@@ -33,9 +33,9 @@ from pathlib import Path
 import _bootstrap  # noqa: F401
 import yaml
 
-from benchmark.context import ConversationState, update_state
-from benchmark.followup import clarify_entity, explore
-from benchmark.normalize import normalize
+from pipeline.context import ConversationState, update_state
+from pipeline.followup import clarify_entity, explore
+from pipeline.normalize import normalize
 from config.logging import register_secrets
 from config.settings import load_settings
 from database.connection import run_readonly
@@ -517,7 +517,7 @@ def main() -> int:
     settings = load_settings()
     register_secrets(settings.secrets())
 
-    from benchmark.lean_runner import load_gazetteer
+    from pipeline.lean_runner import load_gazetteer
     gazetteer = load_gazetteer()
 
     problems: list[str] = []

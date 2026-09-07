@@ -15,7 +15,7 @@ import time
 
 import psycopg
 
-from benchmark.models import QueryResult
+from pipeline.models import QueryResult
 from config.settings import Settings
 
 
@@ -45,7 +45,7 @@ def run_readonly(
 ) -> QueryResult:
     """Execute one statement under a READ ONLY transaction and a hard timeout.
 
-    Defence in depth alongside benchmark.safety: even if the safety gate were
+    Defence in depth alongside pipeline.safety: even if the safety gate were
     bypassed, the role lacks write grants and the transaction refuses writes.
     """
     timeout = timeout_ms or settings.statement_timeout_ms

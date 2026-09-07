@@ -17,7 +17,7 @@ import textwrap
 
 import _bootstrap  # noqa: F401
 
-from benchmark.models import Question
+from pipeline.models import Question
 from benchmark.questions import load_questions
 from benchmark.runner import run_question
 from llm_api.cli_provider import claude_version

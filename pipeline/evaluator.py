@@ -25,7 +25,7 @@ from decimal import Decimal
 from itertools import permutations
 from typing import Any
 
-from benchmark.models import QueryResult
+from pipeline.models import QueryResult
 
 # Beyond this, permutation search is skipped and columns compare positionally.
 # 8! = 40320 is still cheap; 9! would not be, and no benchmark question needs it.

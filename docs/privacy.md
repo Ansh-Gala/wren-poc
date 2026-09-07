@@ -107,14 +107,14 @@ write access.
 
 ### (4) Python → PostgreSQL
 
-Generated SQL, after passing `benchmark/safety.py`, and the ground-truth SQL.
+Generated SQL, after passing `pipeline/safety.py`, and the ground-truth SQL.
 Both execute as `wren_ro` inside a `READ ONLY` transaction with a statement
 timeout.
 
 ### (5) PostgreSQL → Python
 
 Result rows. **This is where row data enters the system, and it stops here.**
-Rows are compared in `benchmark/evaluator.py` and written to
+Rows are compared in `pipeline/evaluator.py` and written to
 `results/latest.json`. They are never placed in a prompt, a tool result, or any
 message to Claude.
 
