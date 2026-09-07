@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL chatbot</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-left">
+    <strong>SQL chatbot</strong>
+    <span id="source-badge" class="badge badge-live">live</span>
+  </div>
+  <div class="bar-right">
+    <button id="reset-context" type="button" class="btn">Reset context</button>
+    <button id="clear-chat" type="button" class="btn">Clear chat</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ------------------------------------------------------- chat -->
+  <section class="chat" aria-label="Conversation">
+    <div id="messages" class="messages">
+      <div class="empty" id="empty-hint">
+        <p>Ask anything. Every turn shows what the backend decided.</p>
+        <p class="muted">Try a thread:</p>
+        <div class="starters">
+          <button class="chip" data-send="Show AR_YD_Suiting items">Show AR_YD_Suiting items</button>
+          <button class="chip" data-send="only active">only active</button>
+          <button class="chip" data-send="how many?">how many?</button>
+        </div>
+        <p class="muted">Or a clarification flow:</p>
+        <div class="starters">
+          <button class="chip" data-send="Show the AR_YD items">Show the AR_YD items</button>
+          <button class="chip" data-send="show the AR_YD_Suiting itmes">show the AR_YD_Suiting itmes <span class="muted">(typo)</span></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="error-banner" class="error-banner" hidden></div>
+
+    <form id="composer" class="composer">
+      <textarea id="input" rows="1" placeholder="Ask a question…  (Enter to send, Shift+Enter for a newline)"
+                autocomplete="off"></textarea>
+      <button id="send" type="submit" class="btn btn-primary">Send</button>
+    </form>
+  </section>
+
+  <!-- ------------------------------------------ conversation state -->
+  <aside class="rail" aria-label="Conversation state">
+    <h2>Conversation state</h2>
+    <p class="muted rail-note">
+      What the next turn will be understood against. Survives between turns
+      until something resets it.
+    </p>
+
+    <dl id="state-fields" class="kv"></dl>
+
+    <h3>Pending question</h3>
+    <div id="state-pending" class="pending muted">none</div>
+
+    <h3>Last mutations</h3>
+    <ul id="state-mutations" class="mutations"><li class="muted">none yet</li></ul>
+
+    <h3>Session totals</h3>
+    <dl id="totals" class="kv"></dl>
+  </aside>
+
+</main>
+
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

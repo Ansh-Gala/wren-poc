@@ -110,7 +110,9 @@ const API = (() => {
 
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
   async function sendMessageToBackend(payload, { useMock = true } = {}) {
-    if (useMock) return MOCK.respond(payload);
+    // window.MOCK is absent in a production build, which drops mock.js. Asking
+    // the real backend is the right fallback; throwing would be a blank page.
+    if (useMock && window.MOCK) return MOCK.respond(payload);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

@@ -339,7 +339,7 @@
     };
 
     try {
-      const r = await API.sendMessageToBackend(payload, { useMock: el.useMock.checked });
+      const r = await API.sendMessageToBackend(payload, { useMock: mockEnabled() });
       placeholder.remove();
       session.resetPending = false;
       session.turns += 1;
@@ -428,21 +428,29 @@
     renderMutations(null);
   });
 
+  // The mock is optional: production builds ship no mock.js and no toggle,
+  // so every read of it goes through here rather than touching el.useMock.
+  function mockEnabled() {
+    return Boolean(window.MOCK && el.useMock && el.useMock.checked);
+  }
+
   function paintSource() {
-    const mock = el.useMock.checked;
+    const mock = mockEnabled();
     el.sourceBadge.textContent = mock ? "mock" : "live";
     el.sourceBadge.className = `badge ${mock ? "badge-mock" : "badge-live"}`;
     el.sourceBadge.title = mock ? "recorded fixtures" : API.ENDPOINT;
   }
 
-  el.useMock.addEventListener("change", () => {
-    paintSource();
-    hideError();
-  });
+  if (el.useMock) {
+    el.useMock.addEventListener("change", () => {
+      paintSource();
+      hideError();
+    });
+  }
 
   // Served by scripts/serve_api.py rather than opened off disk? Then a real
   // backend is demonstrably there, and asking it is what you came for.
-  if (location.protocol.startsWith("http")) el.useMock.checked = false;
+  if (location.protocol.startsWith("http") && el.useMock) el.useMock.checked = false;
   paintSource();
 
   renderState();
