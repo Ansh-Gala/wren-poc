@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SQL chatbot — QA console</title>
+<title>SQL chatbot</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,14 +11,9 @@
 <header class="bar">
   <div class="bar-left">
     <strong>SQL chatbot</strong>
-    <span class="muted">QA console</span>
-    <span id="source-badge" class="badge badge-mock">mock</span>
+    <span id="source-badge" class="badge badge-live">live</span>
   </div>
   <div class="bar-right">
-    <label class="toggle">
-      <input type="checkbox" id="use-mock" checked>
-      use mock responses
-    </label>
     <button id="reset-context" type="button" class="btn">Reset context</button>
     <button id="clear-chat" type="button" class="btn">Clear chat</button>
   </div>
@@ -76,7 +71,6 @@
 
 </main>
 
-<script src="mock.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 </body>

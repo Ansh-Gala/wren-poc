@@ -1,0 +1,16 @@
+# Production dependencies. Verified against every import on this branch: the
+# only third-party names it uses are the five below.
+#
+# Notably absent is wrenai[postgres,mcp,memory], which develop needs and which
+# pulls in a large dependency tree. Production runs the lean path -- the model
+# is given the schema in its system prompt and makes no MCP calls -- so Wren
+# and the MCP client are not installed here at all. Neither is openai: the
+# only provider this branch supports is the local Claude Code CLI, which is
+# not a pip package and is installed separately.
+
+psycopg[binary]>=3.1     # PostgreSQL, read-only execution of generated SQL
+sqlglot>=29              # read-only safety gate, and the AST the state layer reads
+pyyaml>=6.0              # metadata/*.yaml
+python-dotenv>=1.0       # .env loading
+
+pytest>=8.0              # test suite
