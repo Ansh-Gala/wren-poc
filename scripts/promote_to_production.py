@@ -164,6 +164,36 @@ def build_tree(dest: Path) -> tuple[list[str], list[str]]:
     return kept, overlaid
 
 
+def prune_emptied_dirs() -> list[str]:
+    """Remove directories the promotion emptied.
+
+    Switching branches in place leaves the husks behind -- git does not track
+    directories, so `benchmark/` and the registry folders survive as empty
+    shells and a production checkout still looks like it contains them.
+
+    A directory holding only __pycache__ counts as empty: those are compiled
+    copies of modules that no longer exist on this branch, and a stale one can
+    shadow a real import. Anything else is left alone, which is what keeps
+    results/ and wren_projects/ -- gitignored, but real data -- intact.
+    """
+    removed = []
+    protected = {".git", ".venv"}
+
+    for path in sorted((p for p in ROOT.rglob("*") if p.is_dir()),
+                       key=lambda p: len(p.parts), reverse=True):
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] in protected:
+            continue
+        if path.name == "__pycache__":
+            shutil.rmtree(path, ignore_errors=True)
+            continue
+        if not any(path.iterdir()):
+            path.rmdir()
+            removed.append(rel.as_posix())
+
+    return removed
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -211,6 +241,11 @@ def main() -> int:
                 rel = src.relative_to(staging)
                 (ROOT / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(src, ROOT / rel)
+
+        pruned = prune_emptied_dirs()
+        if pruned:
+            print(f"  {len(pruned)} emptied dir(s) removed: "
+                  + ", ".join(pruned[:6]) + ("..." if len(pruned) > 6 else ""))
 
         git("add", "-A")
         if not git("status", "--porcelain"):
