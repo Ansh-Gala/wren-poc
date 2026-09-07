@@ -6,7 +6,7 @@
 
 **Architecture:** The Python pipeline's shape carries over one service per module: repair, classify, prompt, provider, parse, safety, execute, follow-up, orchestrate. The one part that cannot carry over is `sqlglot`: PHP has no Postgres-dialect SQL AST. Everywhere the Python reads a parsed tree, the PHP asks PostgreSQL instead — `EXPLAIN (VERBOSE, FORMAT JSON)` inside a `READ ONLY` transaction, which yields relations, filters, group keys and sort keys, and which fails with `42P01`/`42703` when the model invents a name. Conversation state moves from an in-process dict to Drupal's expirable key-value store, keyed by user.
 
-**Tech Stack:** Drupal 10.2+, PHP 8.1+, PDO PostgreSQL, `symfony/yaml` (already in core), the `claude` CLI invoked with `proc_open`, PHPUnit via `core/scripts/run-tests.sh`, vanilla JS/CSS reused verbatim from `ui/`.
+**Tech Stack:** Drupal 10.2+, PHP 8.1+, PDO PostgreSQL, `symfony/yaml` (already in core), the `claude` CLI via `proc_open`, the Anthropic Messages API via core's Guzzle `http_client`, PHPUnit via `core/scripts/run-tests.sh`, vanilla JS/CSS reused verbatim from `ui/`.
 
 ## Global Constraints
 
@@ -14,6 +14,7 @@
 - **Drupal 10.2 or later, PHP 8.1 or later.** Do not use Drupal 11-only APIs.
 - **No new Composer dependencies.** `symfony/yaml` ships with core; everything else is core or PHP stdlib.
 - **No Python at runtime.** The Python repo is the reference specification, never a dependency.
+- **Two provider modes, both required:** `cli` (local Claude Code CLI subprocess) and `api` (Anthropic Messages API over HTTPS). Selected by `llm_provider` in config. Both must produce byte-identical prompts, so they share `PromptBuilder` and differ only in transport.
 - **Permission:** `use ai sql chat`. Anonymous users get 403. Conversation state is keyed by `uid` and is private per user.
 - **Synchronous requests.** `max_execution_time`, PHP-FPM `request_terminate_timeout` and the CLI timeout must all be at least `180`.
 - **The database role used for generated SQL holds `SELECT` and nothing else.** This is not optional; see Task 6 for why it carries more weight here than in the Python version.
@@ -890,9 +891,11 @@ Expected: PASS, 4 tests.
 git commit -am "feat(ai_sql_chat): read-only query runner with EXPLAIN support"
 ```
 
-### Task 5: Claude CLI provider
+### Task 5: Provider interface, factory, and CLI mode
 
 **Files:**
+- Create: `src/Llm/LlmProviderInterface.php`
+- Create: `src/Llm/ProviderFactory.php`
 - Create: `src/Llm/ClaudeCliProvider.php`
 - Create: `src/Llm/ClaudeRun.php`
 - Create: `src/Llm/StreamJsonParser.php`
@@ -902,9 +905,11 @@ git commit -am "feat(ai_sql_chat): read-only query runner with EXPLAIN support"
 
 **Interfaces:**
 - Consumes: `ai_sql_chat.settings`.
-- Produces: service `ai_sql_chat.llm`, method `ask(string $systemPrompt, string $userPrompt): ClaudeRun`. `ClaudeRun` has `string $text`, `int $promptTokens`, `int $cacheReadTokens`, `int $cacheWriteTokens`, `int $completionTokens`, `int $toolCallCount`, `float $latencyMs`, `?string $error`, `string $rawOutput`, plus `static failed(string $message): self` returning a run with empty text and `$error` set. `StreamJsonParser::parse(string $stdout): ClaudeRun` is separately testable with no subprocess.
+- Produces: `LlmProviderInterface` with the single method `ask(string $systemPrompt, string $userPrompt): ClaudeRun` — the whole surface, deliberately, so a second transport cannot drift from the first. Service `ai_sql_chat.llm` is `ProviderFactory::get()`, returning the implementation named by `llm_provider` config (`cli` or `api`) and throwing on an unknown value. `ClaudeRun` has `string $text`, `int $promptTokens`, `int $cacheReadTokens`, `int $cacheWriteTokens`, `int $completionTokens`, `int $toolCallCount`, `float $latencyMs`, `?string $error`, `string $rawOutput`, plus `static failed(string $message): self` returning a run with empty text and `$error` set. `StreamJsonParser::parse(string $stdout): ClaudeRun` is separately testable with no subprocess.
 
 Ports the lean branch of `llm_api/cli_provider.py:45-72` and `parse_stream_json` at `:111`. **Port only the lean branch.** There is no MCP path in this module.
+
+The interface takes a finished system prompt and a finished user prompt and nothing else. The Python signature carried `mcp_config_path` and `privacy_mode` because it had to serve the MCP path too; neither exists here, and leaving them in would invite a second prompt-building route.
 
 - [ ] **Step 1: Write the failing unit test for the parser**
 
@@ -1071,6 +1076,88 @@ Expected: unit tests PASS. The kernel test asserts that `ask()` returns a `Claud
 
 ```bash
 git commit -am "feat(ai_sql_chat): Claude CLI provider and stream-json parser"
+```
+
+### Task 5A: API mode
+
+**Files:**
+- Create: `src/Llm/ClaudeApiProvider.php`
+- Modify: `src/Llm/ProviderFactory.php`
+- Modify: `config/schema/ai_sql_chat.schema.yml`, `config/install/ai_sql_chat.settings.yml`, `src/Form/SettingsForm.php`
+- Test: `tests/src/Unit/ClaudeApiProviderTest.php`
+- Test: `tests/src/Kernel/ProviderFactoryTest.php`
+
+**Interfaces:**
+- Consumes: `LlmProviderInterface` and `ClaudeRun` from Task 5; core's `http_client`.
+- Produces: `ClaudeApiProvider implements LlmProviderInterface`. New config keys: `api_key` (string), `api_model` (string, default `claude-sonnet-5`), `api_base_url` (string, default `https://api.anthropic.com`), `api_version` (string, default `2023-06-01`).
+
+Simpler than Task 5, not harder: one HTTPS POST, no subprocess, no stream-json framing, and none of the `HOME` trouble that makes the CLI awkward under PHP-FPM. If CLI mode proves painful to operate, this is the mode to deploy.
+
+**Prompt caching is not optional here.** The lean design inlines a ~600-line schema into every system prompt; the CLI gets caching for free, and without it API mode pays full input price on every question. Mark the system block `cache_control: {"type": "ephemeral"}`, which is why `PromptBuilder::systemPrompt()` had to be stable (Task 8) — a prompt that varies never hits the cache.
+
+- [ ] **Step 1: Write the failing unit test**
+
+Inject a mocked Guzzle client so no network is touched:
+
+```php
+public function testASuccessfulReplyBecomesAClaudeRun(): void {
+  $body = json_encode([
+    'content' => [['type' => 'text', 'text' => '{"sql": "SELECT 1"}']],
+    'usage' => [
+      'input_tokens' => 120, 'output_tokens' => 15,
+      'cache_read_input_tokens' => 9000, 'cache_creation_input_tokens' => 0,
+    ],
+  ]);
+  $provider = $this->providerWithResponse(new Response(200, [], $body));
+  $run = $provider->ask('system', 'user');
+
+  $this->assertStringContainsString('SELECT 1', $run->text);
+  $this->assertSame(120, $run->promptTokens);
+  $this->assertSame(15, $run->completionTokens);
+  $this->assertSame(9000, $run->cacheReadTokens);
+  $this->assertNull($run->error);
+}
+
+public function testTheSystemBlockIsMarkedCacheable(): void {
+  // Without this the schema is re-billed on every question.
+  $request = $this->captureRequest();
+  $this->assertSame('ephemeral', $request['system'][0]['cache_control']['type']);
+}
+
+public function testAnHttpErrorBecomesAnErrorNotAnException(): void {
+  // A bad turn must not take the page down.
+  $provider = $this->providerWithResponse(new Response(429, [], '{"error":{"message":"rate limited"}}'));
+  $run = $provider->ask('system', 'user');
+  $this->assertNotNull($run->error);
+  $this->assertStringContainsString('rate limited', $run->error);
+  $this->assertSame('', $run->text);
+}
+
+public function testTheApiKeyNeverAppearsInTheError(): void {
+  $provider = $this->providerWithResponse(new Response(401, [], '{"error":{"message":"bad key"}}'));
+  $this->assertStringNotContainsString('sk-ant-', (string) $provider->ask('s', 'u')->error);
+}
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `./vendor/bin/phpunit web/modules/custom/ai_sql_chat/tests/src/Unit/ClaudeApiProviderTest.php`
+Expected: FAIL — class not found.
+
+- [ ] **Step 3: Implement the provider**
+
+`POST {api_base_url}/v1/messages` with headers `x-api-key`, `anthropic-version`, `content-type: application/json`, and a body of `model`, `max_tokens`, `system` (an array with one text block carrying `cache_control`), and `messages` (one user turn). Read `content[0].text` into `ClaudeRun::$text` and map `usage` onto the four token fields. Set `'http_errors' => FALSE` and turn a non-2xx into `ClaudeRun::failed()` carrying the upstream `error.message` — never the request headers, or the key lands in a log.
+
+Timeout comes from `claude_timeout`, the same floor as CLI mode.
+
+- [ ] **Step 4: Write and run the factory test**
+
+Assert `llm_provider: cli` yields `ClaudeCliProvider`, `api` yields `ClaudeApiProvider`, and anything else throws with a message naming the valid values.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit -am "feat(ai_sql_chat): API-mode provider with prompt caching"
 ```
 
 ---
@@ -1847,8 +1934,8 @@ The three operational problems that will actually generate support tickets: the 
 
 Checks, each printing `OK` or a specific remedy:
 
-1. `claude_command` is executable by the current user. Run `claude --version` and report it.
-2. `claude_home` exists, is owned by the web server user, and contains `.claude`. This is the one that fails in production while working for the admin.
+1. In `cli` mode: `claude_command` is executable by the current user. Run `claude --version` and report it. In `api` mode: `api_key` is set, and one minimal live call succeeds.
+2. In `cli` mode: `claude_home` exists, is owned by the web server user, and contains `.claude`. This is the one that fails in production while working for the admin.
 3. `max_execution_time` and the configured `claude_timeout` are both at least 180.
 4. The database connects, and the role holds only `SELECT`.
 5. All four `metadata/*.yaml` files parse, and `systemPrompt()` builds.
@@ -1873,19 +1960,21 @@ git commit -m "feat(ai_sql_chat): doctor command and operator documentation"
 
 ## Effort
 
-17 tasks. Task 0 is a gate; Tasks 10, 12 and 13 are the bulk of the work.
+18 tasks. Task 0 is a gate; Tasks 10, 12 and 13 are the bulk of the work.
 
 | Phase | Tasks | Estimate |
 |---|---|---|
 | 0 — parser spike | 0 | 0.5–1 day |
 | 1 — working shell | 1–3 | 2–3 days |
-| 2 — Postgres and Claude | 4–5 | 2–3 days |
+| 2 — Postgres and the two providers | 4, 5, 5A | 3–4 days |
 | 3 — the sqlglot replacements | 6–7 | 3–4 days |
 | 4 — logic ports | 8–13 | 8–12 days |
 | 5 — parity and hardening | 14–16 | 3–5 days |
-| | | **19–28 working days** |
+| | | **20–30 working days** |
 
 Roughly **4 to 6 weeks** for one experienced Drupal developer, assuming the spike returns `GO`. Add a week if Task 0 forces the `libpg_query` FFI route.
+
+Task 16's `doctor` command covers both modes: for `cli` it checks the executable and its `HOME`; for `api` it makes one cheap live call and reports the model and whether the cache was read.
 
 For comparison, the proxy approach costs 300–600 lines and days rather than weeks, and keeps `sqlglot` and the existing test suite intact. You have chosen the full rewrite; this plan makes it as safe as it can be, and Tasks 0, 14 and 15 are the three that keep it honest. Do not let them be cut for schedule.
 
