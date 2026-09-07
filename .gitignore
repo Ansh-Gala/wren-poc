@@ -7,6 +7,10 @@ __pycache__/
 # Generated Wren projects (rebuild with scripts/setup_demo.py)
 wren_projects/
 
+# Console turn logs. Written by scripts/serve_api.py --log; never reviewed
+# in-repo the way results/*.md is, so the whole tree is ignored.
+logs/
+
 # Benchmark output. latest.md is kept so results stay reviewable in-repo.
 # Both the top level and per-run subdirectories (results/<run-name>/...).
 results/*.json

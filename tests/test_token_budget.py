@@ -14,7 +14,12 @@ from __future__ import annotations
 import pytest
 
 from claude.prompts import build_system_prompt, build_user_prompt
-from wren_setup.mcp_config import allowed_tools, all_disallowed_tools
+
+# Tool budgets belong to the MCP path, which a lean-only deployment does not
+# ship. The prompt-size assertions below do not depend on it.
+mcp_config = pytest.importorskip("wren_setup.mcp_config")
+allowed_tools = mcp_config.allowed_tools
+all_disallowed_tools = mcp_config.all_disallowed_tools
 
 tiktoken = pytest.importorskip("tiktoken")
 

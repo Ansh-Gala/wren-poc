@@ -37,7 +37,6 @@ from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
-from wren_setup.mcp_config import write_mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = ROOT / "ui"
@@ -207,8 +206,22 @@ def preflight(settings) -> None:
         )
 
     if not settings.cli_lean:
-        # Not fatal -- the MCP path works -- but it is almost never what is
-        # wanted here, and the difference is invisible until the token figures
+        # The MCP path needs wren_setup, which a lean-only deployment does not
+        # ship. Checked here so the answer arrives at startup with something
+        # actionable in it, rather than as a ModuleNotFoundError on the first
+        # question that mentions no module the reader has heard of.
+        try:
+            import wren_setup.mcp_config  # noqa: F401
+        except ModuleNotFoundError:
+            raise SystemExit(
+                "CLI_LEAN is false, which selects the MCP path, but wren_setup "
+                "is not installed in this checkout.\n"
+                "This is a production deployment: it ships only the lean path. "
+                "Set CLI_LEAN=true in .env.\n"
+                "The MCP path lives on the develop branch."
+            )
+        # Not fatal there -- the MCP path works -- but it is almost never what
+        # is wanted, and the difference is invisible until the token figures
         # come back three times larger.
         log.warning("CLI_LEAN is not set: using the MCP path, which needs "
                     "`wren serve mcp` running and costs ~3x the context. "
@@ -223,7 +236,14 @@ class Runtime:
         register_secrets(self.settings.secrets())
         preflight(self.settings)
         self.gazetteer = load_gazetteer()
-        self.mcp_config_path = write_mcp_config(args.config, args.privacy, self.settings)
+        # Lean mode makes no MCP calls, so there is nothing to configure and
+        # no wren_setup to import. Writing the file anyway was harmless but it
+        # made the module a hard dependency of a path that never uses it.
+        self.mcp_config_path = None
+        if not self.settings.cli_lean:
+            from wren_setup.mcp_config import write_mcp_config
+            self.mcp_config_path = write_mcp_config(
+                args.config, args.privacy, self.settings)
         self.privacy = args.privacy
         self.context_mode = args.context_mode
 
@@ -385,7 +405,7 @@ def main() -> int:
     ap.add_argument("--privacy", default="strict")
     ap.add_argument("--context-mode", default="state",
                     choices=["none", "history", "state"])
-    ap.add_argument("--log", default="results/console",
+    ap.add_argument("--log", default="logs/console",
                     help="directory to append every turn to as JSONL; "
                          "'' disables logging")
     args = ap.parse_args()
