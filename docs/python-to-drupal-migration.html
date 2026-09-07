@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Module-by-module reference for rebuilding the Python text-to-SQL chatbot as a Drupal 10 PHP module: effort, risks, and the one blocking dependency.">
+<title>Python to Drupal Port</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground:      #F2F4F3;
+    --surface:     #FFFFFF;
+    --surface-alt: #E9EDEB;
+    --ink:         #14201C;
+    --muted:       #5B6B65;
+    --hairline:    #CFD8D4;
+    --accent:      #0F6E5C;
+    --accent-soft: #DCEAE5;
+    --warn:        #A8620F;
+    --warn-soft:   #F5E6D3;
+    --danger:      #9E2C2C;
+    --danger-soft: #F4DEDC;
+
+    --f-display: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --f-body:    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --f-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --measure: 68ch;
+    --gutter:  clamp(1.25rem, 4vw, 3rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0E1513;
+      --surface:     #16201D;
+      --surface-alt: #1D2926;
+      --ink:         #E4EDE9;
+      --muted:       #9BAAA4;
+      --hairline:    #2C3A36;
+      --accent:      #5CC3A8;
+      --accent-soft: #17322B;
+      --warn:        #D79A4E;
+      --warn-soft:   #332614;
+      --danger:      #E08C86;
+      --danger-soft: #3A1E1C;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0E1513;
+    --surface:     #16201D;
+    --surface-alt: #1D2926;
+    --ink:         #E4EDE9;
+    --muted:       #9BAAA4;
+    --hairline:    #2C3A36;
+    --accent:      #5CC3A8;
+    --accent-soft: #17322B;
+    --warn:        #D79A4E;
+    --warn-soft:   #332614;
+    --danger:      #E08C86;
+    --danger-soft: #3A1E1C;
+  }
+
+  * { box-sizing: border-box; }
+
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  html { color-scheme: light dark; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: var(--gutter);
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+
+  /* ---------------------------------------------------------- masthead -- */
+
+  .masthead { display: flex; flex-direction: column; gap: 1rem; }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: clamp(2rem, 5.5vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.0625rem;
+    color: var(--muted);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  /* ------------------------------------------------------------ verdict -- */
+
+  .verdict {
+    border-top: 3px solid var(--accent);
+    background: var(--surface);
+    padding: 1.5rem 1.5rem 1.625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .verdict-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.875rem;
+  }
+
+  .verdict-head strong {
+    font-family: var(--f-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .answers { display: flex; flex-direction: column; gap: 0.875rem; margin: 0; }
+
+  .answers > div {
+    display: grid;
+    grid-template-columns: 1.75rem 1fr;
+    gap: 0 0.75rem;
+    align-items: baseline;
+  }
+
+  .answers dt {
+    font-family: var(--f-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .answers dd { margin: 0; max-width: var(--measure); }
+
+  .answers dd b { font-weight: 600; }
+
+  /* -------------------------------------------------------------- type -- */
+
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.2;
+    letter-spacing: -0.012em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--f-body);
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  section { display: flex; flex-direction: column; gap: 1.125rem; }
+
+  section > p, section > ul { margin: 0; max-width: var(--measure); }
+
+  .sec-label {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--hairline);
+    margin: 0;
+  }
+
+  code, .m {
+    font-family: var(--f-mono);
+    font-size: 0.86em;
+    font-variant-ligatures: none;
+  }
+
+  code {
+    background: var(--surface-alt);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  ul { padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  li::marker { color: var(--muted); }
+
+  /* ------------------------------------------------------------ tables -- */
+
+  .scroll { overflow-x: auto; border: 1px solid var(--hairline); background: var(--surface); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.875rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.875rem;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+
+  thead th {
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-alt);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: 0; }
+
+  td.num, th.num { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.path { font-family: var(--f-mono); font-size: 0.8rem; white-space: nowrap; }
+
+  /* -------------------------------------------------------------- pill -- */
+
+  .pill {
+    display: inline-block;
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.16rem 0.45rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .pill.copy   { background: var(--accent-soft); color: var(--accent); }
+  .pill.port   { background: var(--surface-alt); color: var(--muted); }
+  .pill.rework { background: var(--warn-soft);   color: var(--warn); }
+  .pill.risk   { background: var(--danger-soft); color: var(--danger); }
+
+  /* ------------------------------------------------------------- bars -- */
+
+  .effort { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--hairline); background: var(--surface); }
+
+  .effort-row {
+    display: grid;
+    grid-template-columns: minmax(9rem, 15rem) 1fr auto;
+    gap: 0.875rem;
+    align-items: center;
+    padding: 0.7rem 0.875rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .effort-row:last-child { border-bottom: 0; }
+
+  .effort-row .name { font-size: 0.875rem; }
+  .effort-row .name .ph {
+    font-family: var(--f-mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-right: 0.4rem;
+  }
+
+  .track { position: relative; height: 0.6rem; background: var(--surface-alt); }
+  .fill  { position: absolute; inset-block: 0; left: 0; background: var(--accent); }
+  .fill.gate { background: var(--warn); }
+
+  .effort-row .val {
+    font-family: var(--f-mono);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .axis {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.35rem 0.875rem 0.6rem;
+    font-family: var(--f-mono);
+    font-size: 0.68rem;
+    color: var(--muted);
+    border-bottom: 1px solid var(--hairline);
+    background: var(--surface-alt);
+  }
+
+  /* -------------------------------------------------------- callout --- */
+
+  .callout {
+    border-left: 3px solid var(--danger);
+    background: var(--danger-soft);
+    padding: 1rem 1.125rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout h3 { font-size: 0.9375rem; }
+  .callout p { margin: 0; max-width: var(--measure); font-size: 0.9375rem; }
+
+  /* ---------------------------------------------------------- columns -- */
+
+  .two {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    gap: 1px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+  }
+  .two > div {
+    background: var(--surface);
+    padding: 1.125rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .two h3 { display: flex; align-items: center; gap: 0.5rem; }
+  .two p { margin: 0; font-size: 0.9375rem; }
+  .two dl { margin: 0; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8125rem; }
+  .two dl > div { display: flex; justify-content: space-between; gap: 1rem; }
+  .two dl dt { color: var(--muted); }
+  .two dl dd { margin: 0; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding-top: 1.25rem;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    max-width: var(--measure);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">
+      <span>Migration reference</span>
+      <span>Drupal 10.2 &middot; PHP 8.1</span>
+      <span>7 Sep 2026</span>
+    </p>
+    <h1>Python to Drupal Port</h1>
+    <p class="standfirst">
+      What it takes to rebuild the text-to-SQL chatbot as a Drupal 10 module in PHP &mdash;
+      module by module, with the one dependency that has no PHP equivalent, and what it
+      costs to prove the behaviour did not change.
+    </p>
+  </header>
+
+  <div class="verdict">
+    <div class="verdict-head">
+      <strong>Yes, it is possible.</strong>
+      <span class="pill rework">one hard gate first</span>
+    </div>
+    <dl class="answers">
+      <div>
+        <dt>01</dt>
+        <dd>
+          <b>Possible on Drupal 10?</b> Yes. Nothing in the chatbot needs a language feature
+          PHP lacks. The frontend is vanilla JS with no build step and moves across untouched;
+          the metadata and prompts are data and copy verbatim. One dependency has no PHP
+          equivalent &mdash; <code>sqlglot</code> &mdash; and PostgreSQL itself replaces it.
+        </dd>
+      </div>
+      <div>
+        <dt>02</dt>
+        <dd>
+          <b>How long for Claude?</b> <b>11&ndash;17 working sessions</b> of writing, roughly
+          15&ndash;25 hours. The limit is not typing speed &mdash; it is that PHP for Drupal
+          cannot be verified without a running Drupal site, a PostgreSQL instance and provider
+          credentials. A human developer doing the same work is 20&ndash;30 days.
+        </dd>
+      </div>
+      <div>
+        <dt>03</dt>
+        <dd>
+          <b>Same behaviour, API and CLI?</b> Both modes are in scope and share one prompt
+          builder, so they differ only in transport. Sameness is not asserted, it is measured:
+          a parity harness runs both implementations against the same database and compares
+          result rows, with a floor of 95% agreement.
+        </dd>
+      </div>
+    </dl>
+  </div>
+
+  <section>
+    <p class="sec-label">What moves, and how hard</p>
+    <h2>Module by module</h2>
+    <p>
+      Line counts are the current production branch: <span class="m">52</span> files,
+      <span class="m">~4,500</span> lines of application Python, plus
+      <span class="m">1,007</span> lines of frontend and <span class="m">748</span> lines of
+      metadata. Expect <span class="m">5,500&ndash;6,500</span> lines of PHP, since PHP is
+      the wordier language.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Python</th>
+            <th class="num">Lines</th>
+            <th>Becomes</th>
+            <th>Effort</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="path">metadata/*.yaml</td>
+            <td class="num">748</td>
+            <td class="path">metadata/*.yaml</td>
+            <td><span class="pill copy">copy</span></td>
+            <td>Data, not code. Byte-for-byte; <code>symfony/yaml</code> is already in core.</td>
+          </tr>
+          <tr>
+            <td class="path">ui/ (js, css, html)</td>
+            <td class="num">1007</td>
+            <td class="path">js/, css/, templates/</td>
+            <td><span class="pill copy">copy</span></td>
+            <td>No framework, no build step. Three edits: endpoint, CSRF header, one Drupal behavior wrapper.</td>
+          </tr>
+          <tr>
+            <td class="path">claude/prompts.py</td>
+            <td class="num">235</td>
+            <td class="path">src/Prompt/PromptBuilder.php</td>
+            <td><span class="pill copy">copy</span></td>
+            <td>Prompt text is copied verbatim. Reworded prompts invalidate every accuracy figure on record.</td>
+          </tr>
+          <tr>
+            <td class="path">claude/parser.py</td>
+            <td class="num">182</td>
+            <td class="path">src/Llm/ResponseParser.php</td>
+            <td><span class="pill port">port</span></td>
+            <td>String handling only. Strict JSON, then fenced, then first <code>{&hellip;}</code> span, then bare SQL.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/followup.py</td>
+            <td class="num">561</td>
+            <td class="path">src/Followup/</td>
+            <td><span class="pill port">port</span></td>
+            <td>Largest single port, but plain logic. Clarifications, candidates, suggested actions.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/evaluator.py</td>
+            <td class="num">291</td>
+            <td class="path">src/Turn/FailureClassifier.php</td>
+            <td><span class="pill port">port</span></td>
+            <td>Failure categories. Plain logic, no SQL parsing.</td>
+          </tr>
+          <tr>
+            <td class="path">database/connection.py</td>
+            <td class="num">81</td>
+            <td class="path">src/Database/ReadOnlyRunner.php</td>
+            <td><span class="pill port">port</span></td>
+            <td>PDO, with its own connection &mdash; not Drupal's, which has write rights on the site database.</td>
+          </tr>
+          <tr>
+            <td class="path">config/settings.py</td>
+            <td class="num">152</td>
+            <td class="path">config/ + SettingsForm.php</td>
+            <td><span class="pill port">port</span></td>
+            <td>Becomes Drupal config, which brings an admin UI the Python never had.</td>
+          </tr>
+          <tr>
+            <td class="path">llm_api/cli_provider.py</td>
+            <td class="num">248</td>
+            <td class="path">src/Llm/ClaudeCliProvider.php</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>Lean branch only. <code>proc_open</code> with non-blocking pipes, and an explicit <code>HOME</code>.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/normalize.py</td>
+            <td class="num">253</td>
+            <td class="path">src/Repair/</td>
+            <td><span class="pill rework">rework</span></td>
+            <td><code>difflib</code>'s ratio has no PHP twin and the <span class="m">0.82</span> threshold was tuned to it.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/context.py</td>
+            <td class="num">468</td>
+            <td class="path">src/Conversation/ &times;3</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>Classifier and renderer port directly; the state reader needs <code>EXPLAIN</code>.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/sql_semantics.py</td>
+            <td class="num">526</td>
+            <td class="path">src/Sql/SchemaChecker.php</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>Only <span class="m">~80</span> lines are runtime; the other <span class="m">~440</span> score against known-correct SQL and are dropped.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/lean_runner.py</td>
+            <td class="num">618</td>
+            <td class="path">src/Turn/TurnRunner.php</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>Thirteen steps in a fixed order. All scoring fields become <code>null</code> &mdash; a real question has no known answer.</td>
+          </tr>
+          <tr>
+            <td class="path">scripts/serve_api.py</td>
+            <td class="num">439</td>
+            <td class="path">routing + AskController</td>
+            <td><span class="pill rework">rework</span></td>
+            <td>Not ported. Drupal replaces the HTTP server, and adds the access control the console never had.</td>
+          </tr>
+          <tr>
+            <td class="path">pipeline/safety.py</td>
+            <td class="num">102</td>
+            <td class="path">src/Sql/SafetyGate.php</td>
+            <td><span class="pill risk">weaker</span></td>
+            <td>The read-only gate. This is the one place the port loses something real.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">The one genuine blocker</p>
+    <h2>PHP has no SQL parser, so PostgreSQL becomes one</h2>
+    <p>
+      Three modules parse SQL into a typed tree. <code>sql_semantics.py</code> alone touches
+      about 50 node types &mdash; <code>exp.Column</code> eighteen times, plus
+      <code>Star</code>, <code>Table</code>, <code>AggFunc</code>, <code>Like</code>,
+      <code>In</code>, every comparison operator. PHP has nothing equivalent:
+      <code>phpmyadmin/sql-parser</code> is MySQL-oriented and gives no Postgres expression tree.
+    </p>
+    <p>
+      The answer is to stop parsing and start asking the database.
+      <code>EXPLAIN (VERBOSE, FORMAT JSON)</code> inside a <code>READ ONLY</code> transaction
+      plans a statement without running it, and returns everything the tree was being read for.
+    </p>
+    <div class="two">
+      <div>
+        <h3>Reading conversation state</h3>
+        <p>
+          <code>parse_sql_state</code> walked the tree for tables, filters, group keys, sort
+          keys and limit. The plan carries all five: <code>Relation Name</code>,
+          <code>Filter</code>, <code>Group Key</code>, <code>Sort Key</code>, and a
+          <code>Limit</code> node.
+        </p>
+        <p>
+          One catch: the planner rewrites predicates. Where Python stored
+          <code>x = 'AR_YD_Suiting'</code>, <code>EXPLAIN</code> reports
+          <code>(x = 'AR_YD_Suiting'::text)</code>, so casts and parentheses need stripping.
+        </p>
+      </div>
+      <div>
+        <h3>Catching an invented column</h3>
+        <p>
+          Asked for <code>profit_margin</code>, a model may write confident SQL for a column
+          that does not exist, and the query then fails with an error that looks like any other.
+          PostgreSQL names the culprit precisely:
+        </p>
+        <dl>
+          <div><dt>Unknown table</dt><dd>42P01</dd></div>
+          <div><dt>Unknown column</dt><dd>42703</dd></div>
+          <div><dt>Syntax error</dt><dd>42601</dd></div>
+          <div><dt>Timed out</dt><dd>57014</dd></div>
+        </dl>
+        <p>
+          This is <em>better</em> than the original, which diffed against a name index built
+          from a YAML file. The database cannot disagree with itself about its own columns.
+        </p>
+      </div>
+    </div>
+    <div class="callout warn">
+      <h3>Prove this before writing any module code</h3>
+      <p>
+        It is a 60-line standalone PHP script and an afternoon against the real database, with
+        eight cases and explicit pass criteria. If filters turn out to be unrecoverable for
+        joined queries, the fallbacks are a <code>libpg_query</code> FFI binding or keeping
+        Python for SQL analysis alone &mdash; and both change the estimate enough to need
+        re-approving. Do not skip it and hope.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Where the port is worse</p>
+    <h2>The read-only gate loses a layer</h2>
+    <p>
+      Generated SQL passes three independent barriers: an AST gate, a <code>SELECT</code>-only
+      database role, and a <code>READ ONLY</code> transaction with a statement timeout. The AST
+      gate was <em>primary</em> &mdash; it parsed the statement, rejected mutating node types,
+      and kept a keyword regex behind it so that even a mis-parse could not smuggle a write through.
+    </p>
+    <p>PHP cannot reproduce it. The replacement is four cheaper checks plus a plan inspection:</p>
+    <ul>
+      <li>Strip comments and string literals into a scratch copy, so <code>WHERE name = 'DROP'</code> passes while <code>/* SELECT */ DELETE&hellip;</code> does not.</li>
+      <li>Reject stacked statements &mdash; any <code>;</code> with content after it.</li>
+      <li>Require the first keyword to be <code>SELECT</code> or <code>WITH</code>.</li>
+      <li>Reject the eighteen forbidden keywords as whole words, then reject any plan containing a <code>ModifyTable</code> node.</li>
+    </ul>
+    <div class="callout">
+      <h3>Consequence, stated plainly</h3>
+      <p>
+        The <code>SELECT</code>-only role and the read-only transaction stop being
+        belt-and-braces and become the primary control. Untested, &ldquo;the role is read-only&rdquo;
+        is a belief rather than a control &mdash; so the plan verifies both independently and
+        treats a failure there as a release blocker, not a bug to triage.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Requirement: both transports</p>
+    <h2>API mode is the easier of the two</h2>
+    <p>
+      One interface, one method, two implementations. Both take a finished system prompt and a
+      finished user prompt, so a second prompt-building route cannot creep in.
+    </p>
+    <div class="two">
+      <div>
+        <h3>CLI mode <span class="pill rework">harder</span></h3>
+        <p>
+          <code>proc_open</code> with the command as an array, never a string &mdash; the user's
+          question goes in <code>-p</code>, and a string command would make that a shell injection.
+          Non-blocking reads on both pipes, because a full stderr buffer with nobody draining it
+          deadlocks a child that can run for minutes.
+        </p>
+        <p>
+          The real trouble is <code>HOME</code>. The CLI keeps credentials in
+          <code>$HOME/.claude</code>, and PHP-FPM runs as a user with no home directory &mdash;
+          so it works for the admin who installed it and is unauthenticated for the web server.
+        </p>
+      </div>
+      <div>
+        <h3>API mode <span class="pill copy">simpler</span></h3>
+        <p>
+          One HTTPS POST to <code>/v1/messages</code> through core's Guzzle client. No subprocess,
+          no stream framing, and none of the <code>HOME</code> trouble. If CLI mode proves
+          awkward to operate, this is the mode to deploy.
+        </p>
+        <p>
+          Prompt caching is mandatory here, not an optimisation: the lean design inlines a
+          583-line schema into every system prompt. The CLI gets caching for free; over the API,
+          without <code>cache_control</code> on the system block, that schema is re-billed on
+          every single question.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Cost</p>
+    <h2>Effort by phase</h2>
+    <p>
+      Human-developer days, one experienced Drupal developer. Phase&nbsp;0 is a gate rather than
+      a build step, which is why it is marked differently.
+    </p>
+    <div class="effort">
+      <div class="axis"><span>0 days</span><span>6</span><span>12 days</span></div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P0</span>Parser spike</div>
+        <div class="track"><div class="fill gate" style="width: 8.3%"></div></div>
+        <div class="val">0.5&ndash;1 d</div>
+      </div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P1</span>Working shell</div>
+        <div class="track"><div class="fill" style="width: 25%"></div></div>
+        <div class="val">2&ndash;3 d</div>
+      </div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P2</span>Postgres, both providers</div>
+        <div class="track"><div class="fill" style="width: 33.3%"></div></div>
+        <div class="val">3&ndash;4 d</div>
+      </div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P3</span>Replacing sqlglot</div>
+        <div class="track"><div class="fill" style="width: 33.3%"></div></div>
+        <div class="val">3&ndash;4 d</div>
+      </div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P4</span>Logic ports</div>
+        <div class="track"><div class="fill" style="width: 100%"></div></div>
+        <div class="val">8&ndash;12 d</div>
+      </div>
+      <div class="effort-row">
+        <div class="name"><span class="ph">P5</span>Parity and hardening</div>
+        <div class="track"><div class="fill" style="width: 41.7%"></div></div>
+        <div class="val">3&ndash;5 d</div>
+      </div>
+    </div>
+    <div class="two">
+      <div>
+        <h3>If Claude writes it</h3>
+        <dl>
+          <div><dt>Sessions</dt><dd>11&ndash;17</dd></div>
+          <div><dt>Writing time</dt><dd>15&ndash;25 h</dd></div>
+          <div><dt>Tasks</dt><dd>18</dd></div>
+          <div><dt>Tracked steps</dt><dd>92</dd></div>
+        </dl>
+        <p>
+          The constraint is verification, not writing. PHP for Drupal cannot be checked without a
+          running site, a database and credentials, and an unverified port of a security gate is
+          not a deliverable. Realistic wall-clock depends on how fast tests can be run and
+          reviewed between sessions.
+        </p>
+      </div>
+      <div>
+        <h3>If a developer writes it</h3>
+        <dl>
+          <div><dt>Working days</dt><dd>20&ndash;30</dd></div>
+          <div><dt>Calendar</dt><dd>4&ndash;6 weeks</dd></div>
+          <div><dt>If spike fails</dt><dd>+1 week</dd></div>
+          <div><dt>Team size</dt><dd>1</dd></div>
+        </dl>
+        <p>
+          For comparison, leaving the Python service in place and having Drupal call
+          <code>POST /ask</code> is 300&ndash;600 lines and a few days &mdash; and it keeps
+          <code>sqlglot</code>, the read-only gate and 231 passing tests exactly as they are.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="sec-label">Requirement: unchanged behaviour</p>
+    <h2>How sameness gets proved</h2>
+    <p>
+      Hand-ported unit tests reproduce the assumptions of whoever ported them. A corpus does not.
+      The parity harness runs the existing question suites through both implementations against
+      the same database and compares <em>result rows</em> &mdash; two different-looking queries
+      returning identical rows is a pass; identical-looking queries returning different rows is
+      a failure.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Check</th><th>Method</th><th class="num">Bar</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>System prompt is identical</td>
+            <td><code>diff</code> the built prompt against the Python's, byte for byte</td>
+            <td class="num">0 diffs</td>
+          </tr>
+          <tr>
+            <td>Repair layer behaves the same</td>
+            <td>Pin <code>difflib</code> ratios before porting: <code>actie</code>/<code>active</code> 0.91, <code>closed</code>/<code>closer</code> 0.83</td>
+            <td class="num">&plusmn;0.01</td>
+          </tr>
+          <tr>
+            <td>State reader agrees</td>
+            <td>Same SQL through both readers; compare tables, filter keys, grouping, sorting, limit</td>
+            <td class="num">exact</td>
+          </tr>
+          <tr>
+            <td>Answers agree</td>
+            <td>Full suites through both, result rows sorted and compared</td>
+            <td class="num">&ge; 95%</td>
+          </tr>
+          <tr>
+            <td>Read-only posture holds</td>
+            <td>Four writes attempted against the live role; grants enumerated from <code>information_schema</code></td>
+            <td class="num">all fail</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      The Python's own recorded figure is <span class="m">114/115</span> on its suite. A port
+      materially below that is a regression dressed as a migration.
+    </p>
+  </section>
+
+  <section>
+    <p class="sec-label">Scope</p>
+    <h2>What does not come across</h2>
+    <p>
+      The benchmark stays in Python. It is how accuracy is measured, it is not part of the
+      application, and rebuilding it in PHP would double the work while producing figures that
+      cannot be compared to the ones on record.
+    </p>
+    <ul>
+      <li><b>The benchmark and evaluation harness</b> &mdash; question suites, ground truth, scoring, reporting. Keep the Python repository for measurement.</li>
+      <li><b>Metadata generation.</b> The four <code>metadata/*.yaml</code> files are generated from the semantic registry on the Python side and promoted into the module as output. Change them there.</li>
+      <li><b>Wren and the MCP path.</b> Already removed from production; the module is lean-only.</li>
+      <li><b>The retired demo database.</b> <code>schema.sql</code> and <code>seed.sql</code> build three tables the runtime no longer queries.</li>
+      <li><b>No queue.</b> Synchronous by decision; a question occupies one PHP-FPM worker for 5&ndash;15 seconds. Revisit above a handful of concurrent users.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>
+      Measured against the <code>production</code> branch: 52 files, 157 tests passing,
+      5 dependencies. Timings observed on this hardware &mdash; a single question answered in
+      5.4&nbsp;s (<code>SELECT COUNT(*) FROM tms_task_flat</code> &rarr; 3,354) and a two-turn
+      thread carrying its filter forward in 5.6&nbsp;s.
+    </p>
+    <p>
+      Full task breakdown, with code and test cases, in
+      <code>docs/superpowers/plans/2026-09-07-drupal-module-port.md</code> on <code>develop</code>.
+    </p>
+  </footer>
+
+</div>
+
+</body>
+</html>
