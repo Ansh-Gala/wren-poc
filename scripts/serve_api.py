@@ -23,6 +23,7 @@ import argparse
 import json
 import mimetypes
 import threading
+import time
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -226,6 +227,32 @@ class Runtime:
         self.privacy = args.privacy
         self.context_mode = args.context_mode
 
+        # Questions people actually type are the only source of test cases
+        # nobody thought to write, and they were previously going to stderr and
+        # dying with the terminal. Same filename the suites use, so
+        # scripts/analyze_followup.py reads a console session unchanged.
+        self.log_path = None
+        if args.log:
+            self.log_path = Path(args.log) / "raw" / "turns.jsonl"
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_lock = threading.Lock()
+
+    def record(self, result, question: str, state: dict) -> None:
+        if self.log_path is None:
+            return
+        row = asdict(result)
+        row.update({
+            "asked_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "session_id": result.conversation_id,
+            "typed": question,
+            "state_after": state,
+        })
+        try:
+            with self.log_lock, self.log_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, default=str) + "\n")
+        except OSError as exc:      # a full disk must not lose the answer
+            log.warning("could not append to %s: %s", self.log_path, exc)
+
     def ask(self, payload: dict) -> dict:
         question = (payload.get("question") or "").strip()
         if not question:
@@ -271,6 +298,7 @@ class Runtime:
             )
             conversation.turn_index += 1
             after = state_snapshot(conversation.state)
+            self.record(result, question, after)
 
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
@@ -357,6 +385,9 @@ def main() -> int:
     ap.add_argument("--privacy", default="strict")
     ap.add_argument("--context-mode", default="state",
                     choices=["none", "history", "state"])
+    ap.add_argument("--log", default="results/console",
+                    help="directory to append every turn to as JSONL; "
+                         "'' disables logging")
     args = ap.parse_args()
 
     Handler.runtime = Runtime(args)
@@ -369,6 +400,8 @@ def main() -> int:
     print()
     print(f"  console   http://{args.host}:{args.port}/")
     print(f"  endpoint  POST http://{args.host}:{args.port}/ask")
+    if Handler.runtime.log_path:
+        print(f"  log       {Handler.runtime.log_path}")
     print()
     print("Ctrl+C to stop.")
 
