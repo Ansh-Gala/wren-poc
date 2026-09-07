@@ -143,6 +143,10 @@ class TurnResult:
     latency_ms: float = 0.0
     llm_ms: float = 0.0
     error: str | None = None
+    # Carried from QueryResult so the HTTP layer can turn a failure into
+    # something a person can act on without reading the raw message, which
+    # names the table and column it failed on.
+    sqlstate: str | None = None
     raw_output: str = ""
 
 
@@ -496,6 +500,7 @@ def run_turn(
         r.execution_success = actual.ok
         if actual.error:
             r.error = r.error or actual.error
+            r.sqlstate = r.sqlstate or actual.sqlstate
         if actual.ok and scoring:
             if compare_results(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "exact"

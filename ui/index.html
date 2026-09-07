@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SQL chatbot</title>
+<title>SQL chatbot — QA console</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,9 +11,18 @@
 <header class="bar">
   <div class="bar-left">
     <strong>SQL chatbot</strong>
-    <span id="source-badge" class="badge badge-live">live</span>
+    <span class="muted">QA console</span>
+    <span id="source-badge" class="badge badge-mock">mock</span>
   </div>
   <div class="bar-right">
+    <label class="toggle">
+      <input type="checkbox" id="use-mock" checked>
+      use mock responses
+    </label>
+    <label class="toggle" title="Off by default. The server omits SQL, metadata and diagnostics entirely rather than the page hiding them, so this applies from the next question onwards.">
+      <input type="checkbox" id="debug-mode">
+      debug mode
+    </label>
     <button id="reset-context" type="button" class="btn">Reset context</button>
     <button id="clear-chat" type="button" class="btn">Clear chat</button>
   </div>
@@ -50,7 +59,7 @@
   </section>
 
   <!-- ------------------------------------------ conversation state -->
-  <aside class="rail" aria-label="Conversation state">
+  <aside class="rail" id="state-rail" aria-label="Conversation state" hidden>
     <h2>Conversation state</h2>
     <p class="muted rail-note">
       What the next turn will be understood against. Survives between turns
@@ -71,6 +80,8 @@
 
 </main>
 
+<script src="table-copy.js"></script>
+<script src="mock.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 </body>
