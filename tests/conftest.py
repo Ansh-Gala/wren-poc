@@ -1,8 +1,9 @@
 """Shared fixtures.
 
-Integration tests need a live PostgreSQL with the demo database already set up
-(``python scripts/setup_demo.py``). They are marked ``integration`` and skipped
-automatically when the database is unreachable, so ``pytest`` is always runnable.
+Integration tests need a live PostgreSQL holding the ``tms_*`` views this
+project queries, reachable with the credentials in ``.env``. They are marked
+``integration`` and skipped automatically when the database is unreachable, so
+``pytest`` is always runnable.
 """
 
 from __future__ import annotations

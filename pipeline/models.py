@@ -1,4 +1,7 @@
-"""Data carriers shared across the benchmark. No behaviour lives here."""
+"""Data carriers shared by the pipeline and the benchmark.
+
+No behaviour lives here.
+"""
 
 from __future__ import annotations
 
