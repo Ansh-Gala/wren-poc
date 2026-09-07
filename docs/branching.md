@@ -113,6 +113,7 @@ Two files are not the same on both branches, and those live in
 | `README.md` | `develop`'s documents the benchmark; production's documents running the app. |
 | `ui/index.html` | Production drops the mock-response toggle along with `ui/mock.js`. |
 | `.env.example` | Production has no Wren, no benchmark and no demo database, so it asks for none of their settings. |
+| `requirements.txt` | Production imports five third-party packages. develop's list installs `wrenai[postgres,mcp,memory]` and `openai` on top. |
 
 Keep that set small. An overlaid file has to be changed in two places forever,
 and the second place is easy to forget. Prefer making the shared file tolerate
