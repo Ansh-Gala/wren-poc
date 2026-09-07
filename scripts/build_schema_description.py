@@ -38,6 +38,15 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "metadata" / "schema_description.yaml"
 REGISTRY = ROOT / "TMS_Semantic_Registry_v2 (1)" / "table_registry.yaml"
 
+# Appended verbatim to any column that is NULL in every row, and stripped
+# again on the next run so it never doubles up. Fixed wording on purpose: it
+# is matched as a literal string, not parsed.
+EMPTY_NOTE = (
+    " Empty in this database: NULL in every row, so a filter on it returns"
+    " nothing and an aggregate over it returns NULL. Do not use it to answer"
+    " a question; say the data is not held instead."
+)
+
 TABLES = [
     "tms_business_object_flat",
     "tms_business_object_attributes_flat",
@@ -120,6 +129,23 @@ def main() -> int:
     for table, column, dtype in res.rows:
         live.setdefault(table, []).append((column, dtype))
 
+    def empty_columns(table: str, columns: list[str]) -> set[str]:
+        """Columns that are NULL in every row.
+
+        One query per table rather than per column: count(col) counts
+        non-nulls, so a zero means the column is present in the view and holds
+        nothing. Asked to average such a column the model produces valid SQL
+        that returns NULL, which reads as a system fault rather than as an
+        empty column -- see the note appended to those descriptions below.
+        """
+        parts = ", ".join(f'count("{c}")' for c in columns)
+        r = run_readonly(settings, f"SELECT {parts} FROM {table}",
+                         settings.statement_timeout_ms)
+        if r.error or not r.rows:
+            print(f"  warn {table}: could not check for empty columns: {r.error}")
+            return set()
+        return {c for c, n in zip(columns, r.rows[0]) if n == 0}
+
     def enum_values(table: str, column: str, dtype: str) -> list[str] | None:
         """Distinct values, when there are few enough to be an enumeration."""
         if dtype not in ("character varying", "text"):
@@ -140,6 +166,7 @@ def main() -> int:
     tables_doc: dict = {}
     generated = 0
     enumerated = [0]
+    noted = [0]
     for table in TABLES:
         if table not in live:
             print(f"  skip {table}: not in database")
@@ -150,6 +177,7 @@ def main() -> int:
         reg_cols = reg.get("columns", {}) or {}
 
         cols: dict = {}
+        empty = empty_columns(table, [c for c, _ in live[table]])
         for column, dtype in live[table]:
             prior = old_cols.get(column)
             if isinstance(prior, dict) and prior.get("description"):
@@ -159,6 +187,13 @@ def main() -> int:
             else:
                 desc = f"{column.replace('_', ' ').capitalize()}."
                 generated += 1
+            # Re-derived every run, so a column that gains data loses the note.
+            # Stripped before the check so a description carried over from the
+            # previous run does not accumulate copies of it.
+            desc = desc.replace(EMPTY_NOTE, "").strip()
+            if column in empty and "NULL for every row" not in desc:
+                desc = f"{desc}{EMPTY_NOTE}"
+                noted[0] += 1
             entry_col = {"type": SQL_TO_MDL.get(dtype, "VARCHAR"), "description": desc}
             vals = enum_values(table, column, dtype)
             if vals:
@@ -219,7 +254,8 @@ def main() -> int:
     print(f"wrote {OUT.relative_to(ROOT)}")
     print(f"  {len(tables_doc)} tables, {total} columns "
           f"({generated} description(s) auto-generated, "
-          f"{enumerated[0]} column(s) with enumerated values)")
+          f"{enumerated[0]} column(s) with enumerated values, "
+          f"{noted[0]} column(s) marked empty)")
     return 0
 
 
