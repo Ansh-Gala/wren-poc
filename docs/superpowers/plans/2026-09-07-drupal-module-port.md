@@ -4,7 +4,7 @@
 
 **Goal:** Reimplement the whole text-to-SQL chatbot as a Drupal 10 module in PHP, with no Python at runtime.
 
-**Architecture:** The Python pipeline's shape carries over one service per module: repair, classify, prompt, provider, parse, safety, execute, follow-up, orchestrate. The one part that cannot carry over is `sqlglot`: PHP has no Postgres-dialect SQL AST. Everywhere the Python reads a parsed tree, the PHP asks PostgreSQL instead — `EXPLAIN (VERBOSE, FORMAT JSON)` inside a `READ ONLY` transaction, which yields relations, filters, group keys and sort keys, and which fails with `42P01`/`42703` when the model invents a name. Conversation state moves from an in-process dict to Drupal's expirable key-value store, keyed by user.
+**Architecture:** The Python pipeline's shape carries over one service per module: repair, classify, prompt, provider, parse, safety, execute, follow-up, orchestrate. The one part that cannot carry over is `sqlglot`, because PHP has no Postgres-dialect SQL AST — and it is read for three different purposes, which turn out to have three different answers. Catching an invented column becomes `EXPLAIN` inside a `READ ONLY` transaction, which returns `42703`/`42P01` naming the culprit and is *more* reliable than the original. Blocking writes becomes static checks plus a plan inspection, behind three existing layers that the port does not touch. Reading conversation state back off the executed SQL has no substitute and gets a purpose-built extractor: **this is the port's real work.** Conversation state itself moves from an in-process dict to Drupal's expirable key-value store, keyed by user.
 
 **Tech Stack:** Drupal 10.2+, PHP 8.1+, PDO PostgreSQL, `symfony/yaml` (already in core), the `claude` CLI via `proc_open`, the Anthropic Messages API via core's Guzzle `http_client`, PHPUnit via `core/scripts/run-tests.sh`, vanilla JS/CSS reused verbatim from `ui/`.
 
@@ -31,27 +31,52 @@ Tasks 1–8 build new machinery and carry complete code. Tasks 9–13 port exist
 
 ## Phase 0 — De-risk the parser substitution
 
-Everything else is ordinary work. This is the task that decides whether the port is viable at all, so it comes first and it is a hard gate: if `EXPLAIN`-derived state cannot reproduce what `sqlglot` gives, stop and re-plan rather than continuing.
+**This phase has already been run once, and it changed the plan. Read the finding before starting.**
 
-### Task 0: Spike — prove PostgreSQL can replace sqlglot
+The original plan proposed replacing every use of `sqlglot` with `EXPLAIN (VERBOSE, FORMAT JSON)`. Probed against the real database, that holds for two of the three uses and fails outright for the third, because **`tms_*` are views, not tables.**
+
+`EXPLAIN` reports how PostgreSQL will *execute* a statement, which through a view is not the statement you wrote. Asked to plan
+`SELECT assigned_user_name, COUNT(*) FROM tms_task_flat WHERE task_sla_status = 'Delayed' GROUP BY assigned_user_name`,
+it returned:
+
+| Wanted | Actually returned |
+|---|---|
+| `Relation Name: tms_task_flat` | `vf_task`, `vf_user__field_full_name`, `vf_bo_wf_mapping`, `vf_process`, `vf_role_department_list` |
+| `Filter: task_sla_status = 'Delayed'` | a ~400-character `CASE WHEN lower(task.status) = 'closed' THEN …` — the expression *defining* that column inside the view |
+| `Group Key: assigned_user_name` | `assigned_user.field_full_name_value` |
+
+So the three uses split:
+
+| Use | Python | Substitute | Status |
+|---|---|---|---|
+| Catch an invented name | `check_against_schema` | `EXPLAIN` sqlstates | **Confirmed.** `42703` names the column, `42P01` the relation, and PostgreSQL resolves query-defined aliases correctly for free. |
+| Block writes | `assert_read_only` | static checks + `ModifyTable` in the plan | **Confirmed**, and lower-risk than first assessed — see Task 6. |
+| Read conversation state | `parse_sql_state` | purpose-built extractor | **`EXPLAIN` ruled out.** Task 0 now validates the extractor instead. |
+
+Measured cost of losing the third one, on the live system: with state on, `"show AR_YD_Suiting items"` then `"how many?"` produced `SELECT COUNT(*) … WHERE business_object_type = 'AR_YD_Suiting'` returning 22. With state off, the second turn produced no SQL at all and asked "Please specify what you'd like counted". The follow-up behaviour *is* the product, so this is not a degradation to accept quietly.
+
+### Task 0: Spike — validate the state extractor against real generated SQL
 
 **Files:**
 - Create: `web/modules/custom/ai_sql_chat/spike/explain_probe.php`
+- Create: `web/modules/custom/ai_sql_chat/spike/extract_probe.php`
+- Create: `web/modules/custom/ai_sql_chat/spike/corpus.sql.txt`
 - Create: `web/modules/custom/ai_sql_chat/spike/RESULTS.md`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a go/no-go decision, and the exact JSON paths Task 10 and Task 11 will read. Record them in `RESULTS.md`; later tasks depend on the field names you find, not on the ones guessed here.
+- Produces: (a) the confirmed `sqlstate` codes and message regexes Task 7 depends on, and (b) a measured accuracy figure for the state extractor against real generated SQL, which decides whether Task 10 proceeds as planned.
 
-- [ ] **Step 1: Write a standalone probe script**
+- [ ] **Step 1: Write the EXPLAIN probe, to confirm what still holds**
 
-Standalone on purpose — no Drupal bootstrap, so it can be run against production data on any box with PHP and network access to the database.
+Standalone on purpose — no Drupal bootstrap, so it can be run against production data on any box with PHP and network access to the database. It no longer needs to answer the state question; that is settled. It confirms the sqlstate behaviour Task 7 is built on, on *your* database, through *your* views.
 
 ```php
 <?php
-// spike/explain_probe.php — run: php explain_probe.php "host=... dbname=..." 
-// Answers one question: does EXPLAIN give us everything parse_sql_state and
-// check_against_schema currently read out of a sqlglot tree?
+// spike/explain_probe.php — run: php explain_probe.php "host=... dbname=..."
+// Confirms the sqlstate behaviour Task 7 depends on, through this database's
+// own views, and records how EXPLAIN expands them so nobody re-proposes it for
+// conversation state. The state question is answered by extract_probe.php.
 declare(strict_types=1);
 
 $dsn = $argv[1] ?? 'pgsql:host=localhost;dbname=postgres';
@@ -106,36 +131,67 @@ foreach ($cases as $label => $sql) {
 
 Run: `PGPASSWORD=... php spike/explain_probe.php "pgsql:host=localhost;dbname=<your db>"`
 
-Expected, and each of these is a requirement rather than a hope:
-- `plain filter` — plan contains `Relation Name: tms_business_object_flat` and a `Filter` string containing `business_object_type` and `AR_YD_Suiting`.
-- `group and order` — plan contains `Group Key` and `Sort Key` arrays, and a `Limit` node with `Plan Rows`.
-- `two filters and a join` — **both** relations appear, and both filters are recoverable (they may sit on different plan nodes, which is the thing to check).
-- `invented column` — `ok: false`, `sqlstate: 42703`, message naming `profit_margin`.
-- `invented table` — `ok: false`, `sqlstate: 42P01`, message naming `tms_nonexistent_flat`.
-- `a write` — either `ok: false` under the read-only transaction, or a plan whose `Node Type` is `ModifyTable`. Note which.
+Expected. The first three are already known to fail through views and are run only to record *how*, so nobody re-proposes `EXPLAIN` for state later. The last four are requirements.
+- `plain filter`, `group and order`, `two filters and a join` — **will report base tables, not the `tms_*` views**, and filters will appear as the views' defining expressions. Paste one full plan into `RESULTS.md` as the evidence.
+- `invented column` — `ok: false`, `sqlstate: 42703`, message naming `profit_margin`. **Requirement.**
+- `invented table` — `ok: false`, `sqlstate: 42P01`, message naming the relation. **Requirement.**
+- `a write` — must fail. On this database it returns `55000 cannot delete from view`, because the views are not automatically updatable; a role holding only `SELECT` would give `42501`. Record which you get, since it is a layer Task 15 verifies.
 - `two statements` — must error. PostgreSQL's extended protocol rejects multiple statements; confirm it does here.
-- `cte` — the CTE's underlying relation is discoverable.
 
-- [ ] **Step 3: Write down the field paths and the gaps**
+- [ ] **Step 3: Record the sqlstates, and the view expansion**
 
-Create `spike/RESULTS.md` recording, verbatim from your output: the JSON path to relation names, to `Filter`, to `Group Key`, to `Sort Key`, to the `Limit` node, and the `sqlstate` plus the regex that extracts the offending identifier from each error message.
+Create `spike/RESULTS.md` recording, verbatim from your output: each `sqlstate` and the regex that extracts the offending identifier from its message, plus one full expanded plan as evidence that `EXPLAIN` cannot serve state reading. Task 7 reads the first; the second is there so this ground is not re-covered.
 
-Then record the gaps honestly. Two are known in advance and must be measured, not assumed:
+- [ ] **Step 4: Collect a corpus of real generated SQL**
 
-1. **Filter strings are rewritten by the planner.** The Python stores `business_object_type = 'AR_YD_Suiting'`; `EXPLAIN` will report something like `(business_object_type = 'AR_YD_Suiting'::text)`. Task 10 has to normalise. Write down the exact shape you see, including casts and parentheses.
-2. **The planner may drop or fold predicates** — a constant-false filter, a filter satisfied by an index condition (`Index Cond` rather than `Filter`). Record every key under which a predicate appeared across your cases.
+The extractor's accuracy is only meaningful against SQL the model actually produces. Harvest it from the Python side, where every turn has been logged as JSONL:
 
-- [ ] **Step 4: Decide, in writing**
+```bash
+# In the Python repo, from a console or benchmark run:
+python -c "
+import json, pathlib
+seen = set()
+for line in pathlib.Path('logs/console/raw/turns.jsonl').read_text(encoding='utf-8').splitlines():
+    sql = (json.loads(line).get('generated_sql') or '').strip()
+    if sql and sql not in seen:
+        seen.add(sql); print(sql.replace(chr(10), ' '))
+" > corpus.sql.txt
+```
 
-Add a `## Verdict` section to `RESULTS.md`: `GO` or `NO-GO`, with the reason.
+Aim for 100+ distinct statements. If the log is thin, run the lean suite first — `python scripts/run_lean_suite.py` — which exercises every question category.
 
-`NO-GO` if any of these is true: filters are unrecoverable for joined queries, multiple statements are not rejected, or invented names do not produce a distinguishable sqlstate. If `NO-GO`, **stop and report** — the fallback options are a PHP FFI binding to `libpg_query`, or keeping the Python service for SQL analysis only, and both change the plan enough to need re-approval.
+- [ ] **Step 5: Write the extractor probe and measure it**
 
-- [ ] **Step 5: Commit**
+A throwaway PHP script implementing just the five extractions (FROM tables, top-level AND-ed comparisons, GROUP BY columns, ORDER BY column, LIMIT), run over the corpus, compared against the Python's own answer for each statement:
+
+```bash
+# Python side, ground truth for the same corpus:
+python -c "
+import json, sys
+from pipeline.context import parse_sql_state
+for sql in open('corpus.sql.txt', encoding='utf-8'):
+    sql = sql.strip()
+    if sql: print(json.dumps({'sql': sql, 'state': parse_sql_state(sql)}))
+" > corpus.expected.jsonl
+
+php spike/extract_probe.php corpus.expected.jsonl
+```
+
+Report per-field agreement: tables, filter keys, filter strings, grouping, sorting, limit.
+
+- [ ] **Step 6: Decide, in writing**
+
+Add a `## Verdict` section to `RESULTS.md`: `GO` or `NO-GO`, with the numbers.
+
+`GO` needs **≥95% agreement on filter keys and tables** — those two drive the next turn's context — and ≥90% on the rest. Filter *strings* may differ in punctuation without counting against it, since the next turn addresses filters by column name.
+
+`NO-GO` if filter keys fall below that. Then the fallbacks are a PHP FFI binding to `libpg_query` (PostgreSQL's real parser, giving the statement pre-rewrite — correct, but you must build the C library and there is no maintained PHP binding to point at), or keeping the Python service for state reading alone. Both change the plan enough to need re-approval. **Stop and report rather than shipping a state reader that silently remembers the wrong filter** — a wrong remembered filter is worse than none, because every following turn inherits it invisibly.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add web/modules/custom/ai_sql_chat/spike/
-git commit -m "spike: probe whether EXPLAIN can replace the sqlglot AST"
+git commit -m "spike: measure a hand-rolled state extractor against real generated SQL"
 ```
 
 ---
@@ -1177,9 +1233,20 @@ git commit -am "feat(ai_sql_chat): API-mode provider with prompt caching"
 - Consumes: `ai_sql_chat.readonly_runner` (Task 4) for `explain()`.
 - Produces: service `ai_sql_chat.safety_gate`, method `assertReadOnly(string $sql): void`, throwing `UnsafeSqlException` with a message naming what was rejected.
 
-Ports `pipeline/safety.py`. **Read that file first, including its docstring**, because this is the one place where the port is genuinely weaker than the original and the compensation has to be deliberate.
+Ports `pipeline/safety.py`. **Read that file first, including its docstring.**
 
-The Python has three layers: an AST gate, a SELECT-only role, and a read-only transaction. Layer 1 was primary — `sqlglot` parses the statement and rejects mutating node types, with a keyword regex as backup so a mis-parse cannot smuggle a write through. **PHP has no equivalent parser, so layer 1 is rebuilt out of four cheaper checks and layers 2 and 3 become load-bearing rather than belt-and-braces.** Task 15 verifies them independently for that reason.
+This was initially assessed as the port's biggest risk. Measured on the live system, it is not — and the reasoning matters, because it is what stops anyone treating the static checks as the only thing standing between a model and your data.
+
+Asked `"delete all tasks"`, the running system produced **no SQL at all**. The model refused on its own and returned a clarification: *"This system only supports read-only SELECT queries. I can't delete data."* The `sqlglot` gate was never reached. There are four layers, not three, and they fire in this order:
+
+| | Layer | Survives the port? |
+|---|---|---|
+| 0 | `LEAN_SYSTEM_PROMPT` instructs a single read-only `SELECT` | **Yes** — copied verbatim as a string (Task 8) |
+| 1 | The `sqlglot` AST gate | **No** — rebuilt from cheaper checks, below |
+| 2 | The `tms_*` views are not automatically updatable (`55000`) | **Yes** — it is your schema, untouched |
+| 3 | A `SELECT`-only role in a `READ ONLY` transaction with a timeout | **Yes** — verified on this database: `wren_ro` holds `['SELECT']` |
+
+So the port loses one of four, and it is the layer that never fires in normal use because layer 0 already refused. That is a real reduction in defence in depth and it is *not* a licence to be sloppy here — layer 0 is a request the model chooses to honour, not a boundary, and layers 2 and 3 are now the guarantees. Task 15 verifies them independently for exactly that reason, and treats a failure as a release blocker.
 
 - [ ] **Step 1: Write the failing unit test**
 
@@ -1559,12 +1626,22 @@ Ports `pipeline/context.py` (468 lines). The largest single port, and two parts 
 
 **`ContextRenderer` must be ported literally.** It emits the block the model reads, so a reworded heading is a prompt change. In particular `awaitingAnswerTo` renders **first**, before `WHAT IS SELECTED` — the reason is in the comment at `pipeline/context.py:390`: a reply of "both" is only interpretable against the question that prompted it.
 
-**`StateReader` is the second sqlglot replacement.** `parse_sql_state` walks the tree for tables, top-level AND-ed comparison predicates, group keys, sort keys and limit. Rebuild it from `EXPLAIN (VERBOSE, FORMAT JSON)` using the field paths in `spike/RESULTS.md`. Two things it must do that the Python got for free:
+**`StateReader` is the port's real work, and `EXPLAIN` cannot do it.** See Phase 0: through views, `EXPLAIN` reports base tables and the views' defining expressions, not the statement the model wrote. Build the extractor validated in Task 0 instead.
 
-- **Normalise the planner's filter strings.** `EXPLAIN` reports `(business_object_type = 'AR_YD_Suiting'::text)`; strip the outer parentheses and `::type` casts so the stored predicate matches what the Python stored. The next turn addresses filters by column name, so the key matters more than the exact text — but the text is rendered into the context the model reads, so it must not be noisy.
-- **Collect predicates from every key the spike found them under**, at minimum `Filter`, `Index Cond` and `Recheck Cond`, across all plan nodes, not just the root.
+Five extractions, and no more — resist any urge to write a general SQL parser:
 
-Keep the Python's failure behaviour exactly: `read()` returns the empty shape rather than throwing, because a query the reader cannot understand should degrade the context, not abort the conversation.
+1. **Tables** — identifiers after `FROM` and each `JOIN`, alias stripped.
+2. **Filters** — top-level `AND`-ed comparisons only (`=`, `<>`, `IN`, `<`, `>`, `<=`, `>=`), keyed by column name. Anything nested inside a subquery, `CASE`, `OR` group or function argument is deliberately skipped, exactly as the Python skips it: `parse_sql_state` keeps only what the next turn could address by column name and leaves the rest to `previous_sql`.
+3. **Grouping** — bare column names in `GROUP BY`.
+4. **Sorting** — the first `ORDER BY` term with its direction.
+5. **Limit** — the integer after `LIMIT`.
+
+Three properties make this tractable where a general parser would not be. The input is model-generated, always a single `SELECT` against a known handful of views. The clauses appear in a fixed order. And **it is allowed to fail**: `read()` returns the empty shape rather than throwing, because — in the Python's own words — a query the reader cannot understand "should degrade the context, not abort the conversation."
+
+Two rules that keep a miss safe rather than harmful:
+
+- **Tokenise before matching.** Strip comments and string literals into a scratch copy first, the same way `SafetyGate` does, so a literal containing the word `where` or a comma cannot be read as syntax.
+- **Prefer returning nothing to returning a guess.** A wrong remembered filter is worse than no filter, because the next turn inherits it silently and the user sees a confidently wrong answer with no indication why. When a clause does not match cleanly, drop that field and keep the rest.
 
 Required test cases, ported from `tests/test_context.py` (287 lines) — port all of them, and at minimum:
 
@@ -1595,20 +1672,40 @@ git commit -am "feat(ai_sql_chat): turn classification and context rendering"
 
 - [ ] **Step 5: Write the failing StateReaderTest**
 
-A Kernel test, because it needs `EXPLAIN`. Assert against the same statements used in the Task 0 spike: `tables` for a join contains both relations; `filters` is keyed by column with casts stripped; `grouping`, `sorting` and `limit` are recovered from the GROUP BY / ORDER BY / LIMIT case.
+A pure unit test — the extractor reads text and touches no database. Cases, at minimum:
 
-- [ ] **Step 6: Run it red, then implement from `spike/RESULTS.md`**
+```php
+// The two-turn case the whole feature exists for.
+['SELECT a, b FROM tms_business_object_flat WHERE business_object_type = \'AR_YD_Suiting\'',
+  ['tables' => ['tms_business_object_flat'],
+   'filters' => ['business_object_type' => "business_object_type = 'AR_YD_Suiting'"]]],
+// Aliases stripped; two filters; group, sort and limit all present.
+['SELECT t.assigned_user_name, COUNT(*) AS n FROM tms_task_flat t
+  WHERE t.task_sla_status = \'Delayed\' AND t.sub_department = \'X\'
+  GROUP BY t.assigned_user_name ORDER BY n DESC LIMIT 5',
+  ['tables' => ['tms_task_flat'], 'grouping' => ['assigned_user_name'],
+   'sorting' => 'n DESC', 'limit' => 5]],
+// A literal containing SQL words must not be read as syntax.
+['SELECT a FROM tms_task_flat WHERE task_name = \'group by order\'',
+  ['filters' => ['task_name' => "task_name = 'group by order'"]]],
+// OR is not a top-level AND: no filter is remembered, and that is correct.
+['SELECT a FROM tms_task_flat WHERE x = 1 OR y = 2', ['filters' => []]],
+// Unparseable input degrades, never throws.
+['SELECT FROM WHERE', ['tables' => [], 'filters' => []]],
+```
 
-Walk the whole plan tree, not only the root node, collecting predicates from every key the spike recorded.
+- [ ] **Step 6: Run it red, then implement the five extractions**
 
-- [ ] **Step 7: Compare against the Python reader on identical SQL**
+Port the extractor from `spike/extract_probe.php`, which Task 0 already measured against real generated SQL. Do not extend its scope while porting.
 
-Run the same statement through both and diff the result. Expected: same `tables`, same `filters` keys, same `grouping`, `sorting` and `limit`. Filter *strings* may still differ in punctuation — record any residual difference in `spike/RESULTS.md` rather than leaving it undocumented.
+- [ ] **Step 7: Re-run the Task 0 corpus as a regression test**
+
+Point the corpus comparison at the finished service rather than the probe. Expected: the same per-field agreement Task 0 recorded, or better. A drop means the port lost something the probe had.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git commit -am "feat(ai_sql_chat): read conversation state back out of EXPLAIN"
+git commit -am "feat(ai_sql_chat): extract conversation state from generated SQL"
 ```
 
 ### Task 11: Repair layer
@@ -1960,19 +2057,21 @@ git commit -m "feat(ai_sql_chat): doctor command and operator documentation"
 
 ## Effort
 
-18 tasks. Task 0 is a gate; Tasks 10, 12 and 13 are the bulk of the work.
+18 tasks. Task 0 is a gate; Task 10 carries the port's real risk, and Tasks 12 and 13 the bulk of its volume.
 
 | Phase | Tasks | Estimate |
 |---|---|---|
-| 0 — parser spike | 0 | 0.5–1 day |
+| 0 — parser spike and extractor probe | 0 | 1–2 days |
 | 1 — working shell | 1–3 | 2–3 days |
 | 2 — Postgres and the two providers | 4, 5, 5A | 3–4 days |
-| 3 — the sqlglot replacements | 6–7 | 3–4 days |
-| 4 — logic ports | 8–13 | 8–12 days |
+| 3 — the sqlglot replacements | 6–7 | 2–3 days |
+| 4 — logic ports, incl. the state extractor | 8–13 | 10–14 days |
 | 5 — parity and hardening | 14–16 | 3–5 days |
-| | | **20–30 working days** |
+| | | **22–32 working days** |
 
-Roughly **4 to 6 weeks** for one experienced Drupal developer, assuming the spike returns `GO`. Add a week if Task 0 forces the `libpg_query` FFI route.
+Roughly **5 to 6 weeks** for one experienced Drupal developer, assuming the spike returns `GO`. Add a week if Task 0 forces the `libpg_query` FFI route.
+
+The estimate moved up from the first version of this plan, and moved for a reason worth keeping in view: the risk is not where it first appeared to be. Blocking writes turned out to be cheap, because three of its four layers are prompt text and database configuration that the port does not touch. Remembering what the user is looking at turned out to be the expensive part, because it is the one thing `EXPLAIN` cannot recover through a view and the one thing no PHP library provides.
 
 Task 16's `doctor` command covers both modes: for `cli` it checks the executable and its `HOME`; for `api` it makes one cheap live call and reports the model and whether the cache was read.
 
