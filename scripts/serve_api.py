@@ -33,7 +33,7 @@ import _bootstrap  # noqa: F401
 from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
-from pipeline.labels import column_labels
+from pipeline.labels import with_column_labels
 from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
 from pipeline.redact import public_response, safe_error
@@ -131,17 +131,6 @@ def state_mutations(before: dict, after: dict) -> list[str]:
     return out
 
 
-def with_labels(result) -> dict | None:
-    """Add readable headings beside the column names the database returned.
-
-    Additive on purpose: `columns` still holds exactly what PostgreSQL said,
-    so the debug pane and the state reader keep seeing the real names.
-    """
-    if not isinstance(result, dict):
-        return result
-    return {**result, "column_labels": column_labels(result.get("columns"))}
-
-
 def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
 
@@ -166,7 +155,7 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
         "error": safe_error(r.error, getattr(r, "sqlstate", None)),
         "raw_error": r.error,
         "failure_category": r.failure_category,
-        "result": with_labels(r.actual_result),
+        "result": with_column_labels(r.actual_result),
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,

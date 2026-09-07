@@ -58,6 +58,11 @@ const MOCK = (() => {
 
   const BO_COLUMNS = ["business_object_id", "business_object_ref_id",
                       "business_unit", "business_object_status"];
+  // What the server sends alongside BO_COLUMNS for display. Precomputed with
+  // pipeline/labels.py rather than derived here, so the fixture exercises the
+  // same path a real answer takes and there is only ever one labelling rule.
+  const BO_LABELS = ["Business Object Id", "Business Object Ref Id",
+                     "Business Unit", "Business Object Status"];
   const BO_ROWS = [
     [112, "AR_DummyEve011_Suiting", "unit1", "Active"],
     [109, "AR_12312_Suiting_YD_Merch", "unit1", "Active"],
@@ -188,7 +193,7 @@ const MOCK = (() => {
             `business_object_status\nFROM ${BO}\nWHERE business_object_type = '${value}'`,
           sql_valid: true,
           execution_success: true,
-          result: { columns: BO_COLUMNS, rows: BO_ROWS, row_count: 22, truncated: true },
+          result: { columns: BO_COLUMNS, column_labels: BO_LABELS, rows: BO_ROWS, row_count: 22, truncated: true },
           semantic_match: true,
           projection_verdict: "superset",
           semantic_issues: ["projection includes extra column(s): ['business_object_status', 'business_unit']"],
@@ -238,7 +243,7 @@ const MOCK = (() => {
             `business_object_status\nFROM ${BO}\nWHERE business_object_type = 'AR_YD_Suiting'`,
           sql_valid: true,
           execution_success: true,
-          result: { columns: BO_COLUMNS, rows: BO_ROWS, row_count: 22, truncated: true },
+          result: { columns: BO_COLUMNS, column_labels: BO_LABELS, rows: BO_ROWS, row_count: 22, truncated: true },
           semantic_match: true,
           projection_verdict: "superset",
           semantic_issues: [],
@@ -278,7 +283,7 @@ const MOCK = (() => {
             Object.values(filters).join("\n  AND "),
           sql_valid: true,
           execution_success: true,
-          result: { columns: BO_COLUMNS, rows: BO_ROWS.slice(0, 2), row_count: black ? 12 : 19, truncated: true },
+          result: { columns: BO_COLUMNS, column_labels: BO_LABELS, rows: BO_ROWS.slice(0, 2), row_count: black ? 12 : 19, truncated: true },
           semantic_match: true,
           projection_verdict: "superset",
           semantic_issues: [],
@@ -304,7 +309,7 @@ const MOCK = (() => {
           Object.values(s.filters || {}).join("\n  AND "),
         sql_valid: true,
         execution_success: true,
-        result: { columns: ["count"], rows: [[19]], row_count: 1, truncated: false },
+        result: { columns: ["count"], column_labels: ["Count"], rows: [[19]], row_count: 1, truncated: false },
         semantic_match: true,
         projection_verdict: "exact",
         semantic_issues: [],
@@ -331,6 +336,7 @@ const MOCK = (() => {
         execution_success: true,
         result: {
           columns: ["task_id", "task_display_name"],
+          column_labels: ["Task Id", "Task Display Name"],
           rows: [[921, "Data base sheet generation"], [944, "Sample approval"]],
           row_count: 17, truncated: true,
         },
@@ -386,7 +392,7 @@ const MOCK = (() => {
         `business_object_status\nFROM ${BO}\nWHERE business_object_type = '${named}'`,
       sql_valid: true,
       execution_success: true,
-      result: { columns: BO_COLUMNS, rows: BO_ROWS, row_count: 22, truncated: true },
+      result: { columns: BO_COLUMNS, column_labels: BO_LABELS, rows: BO_ROWS, row_count: 22, truncated: true },
       semantic_match: true,
       projection_verdict: "superset",
       semantic_issues: ["projection includes extra column(s): ['business_object_status', 'business_unit']"],

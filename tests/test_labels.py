@@ -112,3 +112,57 @@ def test_every_real_column_in_the_schema_gets_a_non_empty_label():
     assert len(names) > 100, "expected the full schema"
     blank = [n for n in names if not column_label(n)]
     assert not blank, f"columns with no label: {blank}"
+
+
+# --------------------------------------------- results, as the API sends them --
+
+def test_a_result_gains_labels_without_losing_its_column_names():
+    """Both travel. Debug strips `columns` later; that is not this layer's job."""
+    from pipeline.labels import with_column_labels
+
+    result = {"columns": ["task_id", "task_sla_status"], "rows": [[1, "Delayed"]],
+              "row_count": 1, "truncated": False}
+    out = with_column_labels(result)
+
+    assert out["columns"] == ["task_id", "task_sla_status"]
+    assert out["column_labels"] == ["Task Id", "Task SLA Status"]
+    assert out["rows"] == [[1, "Delayed"]]
+    assert out["row_count"] == 1
+
+
+def test_labels_are_always_present_when_columns_are():
+    """The console falls back to raw column names when labels are absent.
+
+    That fallback is why a stale server showed task_id, task_display_name and
+    business_object_ref_id as headings: the page was current, the process was
+    not. So the invariant worth asserting is that a result carrying columns
+    always carries labels of the same length.
+    """
+    from pipeline.labels import with_column_labels
+
+    for columns in ([], ["count"], ["a", "b", "c"], ["" , "x"]):
+        out = with_column_labels({"columns": columns, "rows": []})
+        assert "column_labels" in out
+        assert len(out["column_labels"]) == len(columns)
+
+
+def test_a_result_with_no_columns_key_still_gets_the_field():
+    from pipeline.labels import with_column_labels
+
+    assert with_column_labels({"rows": []})["column_labels"] == []
+
+
+def test_a_missing_result_passes_through_untouched():
+    """A clarification has no rows, and must not grow an empty table."""
+    from pipeline.labels import with_column_labels
+
+    assert with_column_labels(None) is None
+    assert with_column_labels("not a dict") == "not a dict"
+
+
+def test_the_original_result_is_not_mutated():
+    from pipeline.labels import with_column_labels
+
+    result = {"columns": ["task_id"], "rows": [[1]]}
+    with_column_labels(result)
+    assert "column_labels" not in result
