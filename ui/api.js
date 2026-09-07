@@ -12,9 +12,22 @@
        "question":       "only the active ones",   // exactly what was typed
        "session_id":     "qa-1712...",             // stable per conversation
        "reset_context":  false,                    // true right after Reset
-       "action":         null                      // set when a chip was clicked:
+       "action":         null,                     // set when a chip was clicked:
                                                    //   {type, field, operator, value}
+       "debug":          false                     // see below
      }
+
+   DEBUG is off unless the console asks for it, and it is enforced server-side
+   rather than in the page: with it off the response simply does not contain
+   the SQL, the schema names or the diagnostics, so there is nothing to hide
+   in the DOM and nothing to find in the network tab. Off, the response is
+   exactly these five fields:
+
+     question, clarification, error, followup, result
+
+   with `result` reduced to {column_labels, rows, row_count, truncated} and
+   each suggestion reduced to {label}. Everything documented below arrives
+   only with "debug": true.
 
    RESPONSE the console renders. Every field is optional -- anything missing
    shows as "-" rather than breaking the page -- but the more you return, the
@@ -34,14 +47,18 @@
        "generated_sql":        "SELECT ...",   // null if it asked instead
        "sql_valid":            true,
        "execution_success":    true,
-       "error":                null,
+       "error":                null,           // safe to show; never the raw one
+       "raw_error":            null,           // the database's own words (debug only)
        "failure_category":     "",             // e.g. SILENT_SUBSTITUTION
 
        "result": {
-         "columns":   ["business_object_id", "..."],
-         "rows":      [[112, "..."], ...],     // a preview is fine
-         "row_count": 22,
-         "truncated": false
+         "columns":       ["business_object_id", "..."],   // debug only
+         // What the table actually renders. Derived from `columns` by
+         // pipeline/labels.py, so the query and the heading never disagree.
+         "column_labels": ["Business Object Id", "..."],
+         "rows":          [[112, "..."], ...],     // a preview is fine
+         "row_count":     22,
+         "truncated":     false
        },
 
        // ------------------------------------- scoring, when ground truth exists

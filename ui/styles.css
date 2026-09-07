@@ -171,6 +171,31 @@ body {
 .sql-none { background: #f0f1f3; color: var(--muted); font-style: italic; }
 
 .rows { margin-bottom: 10px; overflow-x: auto; }
+.rows-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin: .5rem 0 .25rem;
+}
+
+.rows-count { color: var(--muted, #667); font-size: .82rem; }
+
+.copy-btn {
+  font: inherit;
+  font-size: .78rem;
+  padding: .18rem .5rem;
+  cursor: pointer;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  opacity: .65;
+}
+
+.copy-btn:hover, .copy-btn:focus-visible { opacity: 1; }
+.copy-btn.copied { opacity: 1; font-weight: 600; }
+
 .rows table { border-collapse: collapse; font: 12px/1.4 var(--mono); }
 .rows th, .rows td {
   border: 1px solid var(--line);
