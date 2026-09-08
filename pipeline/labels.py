@@ -51,3 +51,17 @@ def column_labels(names: list[str] | None) -> list[str]:
     zips this against the column list to build the header row.
     """
     return [column_label(name) for name in (names or [])]
+
+
+def with_column_labels(result):
+    """A result dict with readable headings added beside its column names.
+
+    Additive, never a replacement: `columns` keeps exactly what PostgreSQL
+    said, so the state reader and the debug pane still see the real names.
+    Anything that is not a dict passes through -- a clarification has no
+    result, and inventing an empty table for it would put a header row under
+    a sentence.
+    """
+    if not isinstance(result, dict):
+        return result
+    return {**result, "column_labels": column_labels(result.get("columns"))}

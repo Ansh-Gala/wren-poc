@@ -33,7 +33,7 @@ import _bootstrap  # noqa: F401
 from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
-from pipeline.labels import column_labels
+from pipeline.labels import with_column_labels
 from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
 from pipeline.redact import public_response, safe_error
@@ -42,6 +42,9 @@ from config.settings import load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = ROOT / "ui"
+
+# How many turns of debug detail a conversation keeps for later inspection.
+DEBUG_LOG_TURNS = 50
 
 log = get_logger("serve_api")
 
@@ -63,11 +66,17 @@ class Conversation:
         self.session = Session(session_id=session_id, turns=[])
         self.lock = threading.Lock()
         self.turn_index = 0
+        # Full responses for recent turns, so switching debug on can fill in
+        # answers already on screen without re-running anything. Kept here
+        # rather than sent and hidden: with debug off the SQL must not reach
+        # the browser at all, which is the whole point of the switch.
+        self.debug_log: list[dict] = []
 
     def reset(self) -> None:
         self.state = ConversationState()
         self.session = Session(session_id=self.id, turns=[])
         self.turn_index = 0
+        self.debug_log.clear()
 
 
 SESSIONS: dict[str, Conversation] = {}
@@ -131,17 +140,6 @@ def state_mutations(before: dict, after: dict) -> list[str]:
     return out
 
 
-def with_labels(result) -> dict | None:
-    """Add readable headings beside the column names the database returned.
-
-    Additive on purpose: `columns` still holds exactly what PostgreSQL said,
-    so the debug pane and the state reader keep seeing the real names.
-    """
-    if not isinstance(result, dict):
-        return result
-    return {**result, "column_labels": column_labels(result.get("columns"))}
-
-
 def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
 
@@ -166,7 +164,7 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
         "error": safe_error(r.error, getattr(r, "sqlstate", None)),
         "raw_error": r.error,
         "failure_category": r.failure_category,
-        "result": with_labels(r.actual_result),
+        "result": with_column_labels(r.actual_result),
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,
@@ -320,6 +318,7 @@ class Runtime:
 
             before = state_snapshot(conversation.state)
 
+            turn_index = conversation.turn_index
             turn = SuiteTurn(
                 id=f"{conversation.id}.{conversation.turn_index}",
                 question=question,
@@ -340,6 +339,13 @@ class Runtime:
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
         full = to_response(result, question, before, after)
+
+        # Bounded: a long session should not grow without limit, and nobody
+        # scrolls back past fifty answers to read their SQL. Under the lock
+        # because /debug reads this list from another thread.
+        with conversation.lock:
+            conversation.debug_log.append({**full, "turn_index": turn_index})
+            del conversation.debug_log[:-DEBUG_LOG_TURNS]
         # Debug off is the default, and it is enforced here rather than in the
         # page: a field the browser receives has already left the server.
         return full if payload.get("debug") else public_response(full)
@@ -399,7 +405,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        if self.path.split("?", 1)[0] != "/ask":
+        path = self.path.split("?", 1)[0]
+
+        if path == "/debug":
+            # What the server kept for turns it has already answered. Reads
+            # only; nothing is generated and nothing is executed.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError) as exc:
+                return self._json(400, {"error": f"bad request body: {exc}"})
+            conversation = conversation_for(payload.get("session_id") or "default")
+            with conversation.lock:
+                return self._json(200, {"turns": list(conversation.debug_log)})
+
+        if path != "/ask":
             return self._json(404, {"error": "POST /ask"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
