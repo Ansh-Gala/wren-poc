@@ -94,6 +94,7 @@ body {
 .messages { flex: 1; overflow-y: auto; padding: 16px; }
 
 .empty { padding: 28px 8px; }
+.chat-hero { display: none; }   /* chat mode only; see the bottom of this file */
 .starters { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 18px; }
 
 /* -------------------------------------------------------- messages */
@@ -323,3 +324,222 @@ details.debug[open] > summary::before { content: "▾ "; }
   0% { content: ""; } 25% { content: "."; }
   50% { content: ".."; } 75% { content: "..."; }
 }
+
+/* =====================================================================
+   CHAT MODE  --  the console with debug off.
+   =====================================================================
+
+   Debug on is a QA console: dense, light, bordered, everything on screen at
+   once. Debug off is a chatbot someone uses to get an answer, and that wants
+   the opposite -- a narrow dark column, the question as a bubble, the answer
+   as plain content, and nothing on the page that is not the conversation.
+
+   Scoped entirely under body.chat-mode, set from app.js, so none of it can
+   reach the debug view. */
+
+body.chat-mode {
+  --bg: #0d0d0d;
+  --panel: #181818;
+  --ink: #ececec;
+  --muted: #9b9b9b;
+  --line: #2a2a2a;
+  --accent: #1a7f4b;
+  --user: #1f5e3a;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ---- chrome: present, because the debug switch lives in it, but quiet */
+
+body.chat-mode .bar {
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 20px;
+}
+body.chat-mode .badge { display: none; }
+body.chat-mode .btn {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--muted);
+}
+body.chat-mode .btn:hover { border-color: #3d3d3d; color: var(--ink); }
+
+/* ---- one narrow centred column, no card around it */
+
+body.chat-mode .layout { padding: 0; max-width: none; }
+
+body.chat-mode .chat {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-height: calc(100vh - 47px);
+}
+
+body.chat-mode .messages { padding: 28px 20px 8px; }
+
+/* The reading column. Applied to the children rather than to .messages so
+   the scrollbar stays at the window edge, where it belongs. */
+body.chat-mode .msg,
+body.chat-mode .empty,
+body.chat-mode .composer > *,
+body.chat-mode .error-banner {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---- the empty state, centred and unhurried */
+
+body.chat-mode .empty { padding: 18vh 8px 0; text-align: center; }
+body.chat-mode .chat-hero {
+  display: block;
+  font: 400 2rem/1.2 inherit;
+  letter-spacing: -.01em;
+  margin: 0 0 26px;
+}
+/* Debug-oriented wording, and the section labels, are not part of this view. */
+body.chat-mode #empty-hint > p { display: none; }
+body.chat-mode .starters { justify-content: center; margin: 0 0 10px; }
+
+/* ---- the question: a bubble. the answer: just content. */
+
+body.chat-mode .msg { margin-bottom: 26px; }
+
+body.chat-mode .msg-user .bubble {
+  background: var(--user);
+  border: 0;
+  border-radius: 20px;
+  padding: 10px 18px;
+  max-width: 75%;
+  text-align: left;
+  color: #fff;
+}
+
+body.chat-mode .msg-bot .head { margin-bottom: 10px; }
+body.chat-mode .tag {
+  border: 0;
+  padding: 0;
+  font: 500 12px/1 inherit;
+  color: var(--muted);
+}
+body.chat-mode .tag-ok { color: var(--muted); }
+
+body.chat-mode .clarify-text,
+body.chat-mode .error-text {
+  background: transparent;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+  padding: 2px 0 2px 14px;
+  color: var(--ink);
+}
+body.chat-mode .error-text { border-left-color: #7f3a33; }
+
+/* ---- tables: hairlines between rows, and nothing else */
+
+body.chat-mode .rows { margin: 4px 0 6px; }
+
+body.chat-mode .rows table {
+  width: 100%;
+  font: 14px/1.5 inherit;
+}
+body.chat-mode .rows th,
+body.chat-mode .rows td {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 14px;
+  white-space: normal;
+}
+body.chat-mode .rows th {
+  background: transparent;
+  color: var(--ink);
+  font-weight: 600;
+}
+body.chat-mode .rows td { color: #d6d6d6; }
+/* Figures line up on the right, the way they do in a spreadsheet. */
+body.chat-mode .rows td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The copy control reads as an action on the answer, so it sits under it. */
+body.chat-mode .rows { display: flex; flex-direction: column; }
+body.chat-mode .rows-scroll { order: 1; }
+body.chat-mode .rows-bar { order: 2; margin: 10px 0 0; justify-content: flex-start; }
+body.chat-mode .rows-count { display: none; }
+body.chat-mode .copy-btn {
+  border: 0;
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--muted);
+  opacity: 1;
+}
+body.chat-mode .copy-btn:hover,
+body.chat-mode .copy-btn:focus-visible { background: var(--panel); color: var(--ink); }
+body.chat-mode .copy-btn.copied { color: #4ea87a; }
+
+/* ---- chips */
+
+body.chat-mode .chip {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+body.chat-mode .chip:hover { border-color: #454545; background: var(--panel); }
+body.chat-mode .chip small { display: none; }
+
+/* ---- the composer: one pill, floating over the ground */
+
+body.chat-mode .composer {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0;
+  border-top: 0;
+  background: transparent;
+  padding: 10px 20px 22px;
+}
+body.chat-mode .composer textarea {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  color: var(--ink);
+  padding: 15px 60px 15px 22px;
+  font-size: 15px;
+  width: 100%;
+}
+body.chat-mode .composer textarea:focus {
+  outline: none;
+  border-color: #3d3d3d;
+}
+/* The send button rides inside the pill's right edge. */
+body.chat-mode .composer .btn-primary {
+  position: absolute;
+  right: calc(50% - 380px + 10px);
+  bottom: 30px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+body.chat-mode .composer .btn-primary::before {
+  content: "↑";
+  font-size: 17px;
+  font-weight: 700;
+  color: #181818;
+}
+body.chat-mode .composer .btn-primary:disabled { opacity: .3; }
+
+@media (max-width: 820px) {
+  body.chat-mode .composer .btn-primary { right: 30px; }
+}
+
+body.chat-mode .error-banner {
+  background: #2a1512;
+  border-color: #7f3a33;
+  color: #e8a49c;
+}
+body.chat-mode .thinking { color: var(--muted); }

@@ -255,7 +255,13 @@
     const tbody = document.createElement("tbody");
     for (const row of rows.slice(0, 8)) {
       const tr = document.createElement("tr");
-      for (const cell of row) tr.append(text("td", null, cell === null ? "NULL" : cell));
+      for (const cell of row) {
+        // Right-aligned only where the value is actually a figure; the class
+        // does nothing in the debug view, which is monospaced throughout.
+        const td = text("td", typeof cell === "number" ? "num" : null,
+                        cell === null ? "NULL" : cell);
+        tr.append(td);
+      }
       tbody.append(tr);
     }
     table.append(tbody);
@@ -582,6 +588,9 @@
     // whole width rather than leaving its column empty.
     const layout = document.querySelector(".layout");
     if (layout) layout.classList.toggle("no-rail", !on);
+    // Debug on is a QA console; debug off is a chatbot. The two want opposite
+    // things from a stylesheet, so the whole chat theme hangs off this class.
+    document.body.classList.toggle("chat-mode", !on);
   }
 
   paintDebug();
