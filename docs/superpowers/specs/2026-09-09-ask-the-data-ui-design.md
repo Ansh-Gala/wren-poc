@@ -380,3 +380,56 @@ instead of waiting on a real observer.
 - **Streaming responses.** The endpoint returns one whole answer; changing
   that is a separate piece of work.
 - **The Ask TMS menu link.** Unrelated, and tracked separately.
+
+---
+
+## 11. Built
+
+Implemented 9 September 2026. Plan:
+`docs/superpowers/plans/2026-09-09-ask-the-data-ui.md`.
+
+- **Backend** (`dev-arvind-retail-chatbot`, `Tms-Sql-Chatbot-Testing`):
+  `21f419b..54509ae`, 2 commits.
+- **Frontend** (`WCMS - Frontend - Arvind Retail`, `feat/sql-chatbot`):
+  `8dabb68..e7b00d4`, 9 commits.
+- 40 tests across 6 new suites. 14 files added, 3 edited.
+
+### What this spec got wrong
+
+Four claims were corrected. Three were caught during planning, before any
+code was written; the fourth came out of implementation.
+
+| Claim | Reality |
+|---|---|
+| §3.2 — the shared theme's `--ag-cell-horizontal-border: none` hides the borders, so the fix has blast radius | Scoped to `.test_datatable_table`; the chat grid never receives it. The cause is AG Grid's own `solid transparent` base default. **No blast radius at all.** |
+| §5 — the hook scrolls the message list | The message list is not a scroll container. `<main>` is unstyled and the document scrolls. |
+| §9 — PHPUnit in the module | The module has none. The backend check follows the module's own script pattern instead. |
+| §4.1 — the `??` guards protect against `TurnRunner`'s synthetic result | That array reaches `classifyFailure()`, never `summary()`, and does carry `'types' => []`. The `duration_ms` guard is still right, because `summary()` is public and a caller may pass a result with no timing. The `types` guard is inert. |
+
+The §3.2 correction was independently re-verified against `node_modules`
+during implementation: all five `--ag-*` variables are real in 32.3.3, and the
+base default sits on `[class*=ag-theme-]` — the same element as the chat grid's
+wrapper — so the scoped override wins on specificity. Had that default been set
+on a descendant instead, the whole approach would have failed silently.
+
+### Two things worth carrying forward
+
+- **`summary()` fields with a `?? ` fallback need assertions on their
+  content, not their presence.** `duration_ms` is caught by luck of typing —
+  `is_numeric(NULL)` is false, so its fallback trips its own check. `types`'
+  `[]` fallback passes `is_array`, which is why a broken `types` shipped green
+  until the review probed it. Any field added later inherits that blind spot.
+- **`docs/conversation-storage-plan.md`'s turn table has `latency_ms` but no
+  `duration_ms` column.** Whoever implements that storage needs to add one, or
+  the query timing added here will not persist.
+
+### Not verified
+
+Every visual check in §9 is still open — nothing here was confirmed in a real
+browser. The two most worth a human's attention, because nothing tests them
+end to end:
+
+1. The page-size selector actually resizing the grid — no test covers
+   `onPaginationChanged` / `paginationGetPageSize()` end to end.
+2. The debug panel's `0fr → 1fr` slide. It is the least conventional CSS in
+   the change and `grid-template-rows` transitions cannot be asserted in jsdom.
