@@ -76,8 +76,11 @@ rules:
       apply, and the query must see every row, in any of these cases. When the
       question states a status, that status decides and this default is not
       added on top of it: "closed initiatives", "short closed items", "my
-      closed tasks". When the question asks for everything or for history:
-      "all initiatives", "every task", "including the closed ones". When the
+      closed tasks". When the question explicitly asks for every status, or for
+      history: "whatever the status", "including the closed ones", "active and
+      closed". The word "all" on its own is NOT such a request -- people say
+      "show me all my tasks" when they mean the ones still to do -- so "all"
+      alone does not switch the default off. When the
       question asks how records are distributed across statuses -- "how many by
       status", "the status breakdown" -- because adding the filter would empty
       the answer. When the question counts distinct values of a column rather
