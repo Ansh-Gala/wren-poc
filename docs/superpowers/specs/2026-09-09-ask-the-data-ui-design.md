@@ -48,6 +48,8 @@ does not use.
 | `components/SqlChatbot/Composer.jsx` | new | Items 9, 10 |
 | `components/SqlChatbot/CopyButton.jsx` | new | Item 7 |
 | `components/SqlChatbot/useStickyScroll.js` | new | Item 4 |
+| `components/SqlChatbot/chatGridLayout.js` | new | Items 1, 3 — pagination and height decisions, as pure functions |
+| `components/SqlChatbot/answerToText.js` | new | Item 7 — the copied text, as a pure function |
 | `components/SqlChatbot/ChatResultGrid.jsx` | edited | Items 1, 3 |
 | `pages/SqlChatbotPage.jsx` | slimmed to about 260 lines | Composition, send and reset |
 | `css/SqlChatbotPage.css` | edited | Items 5, 8, 10 |
@@ -94,15 +96,35 @@ through AG Grid's `paginationPageSize` change event.
 
 ### 3.2 Vertical borders
 
-The shared theme sets `--ag-cell-horizontal-border: none`
-(`AGGrid/Styles/ag-grid-theme.css:683`). That variable is AG Grid's name for
-the line *between* columns, and it is why the chat grid has none.
+**Corrected during planning.** An earlier reading of this blamed
+`--ag-cell-horizontal-border: none` in the shared theme
+(`AGGrid/Styles/ag-grid-theme.css:683`). That rule is real but irrelevant
+here: it is scoped to `.test_datatable_table .ag-root-wrapper`, and the chat
+grid has no such ancestor, so it never receives it.
 
-The override is scoped to `.sqlchat-grid`, not applied to the variable at its
-source. Every datatable in the application imports that theme, so changing it
-there would put borders on Tasks, Reports, Issues and every other grid — a
-visual change to screens nobody asked about. Header cells take their own rule,
-since the header does not inherit the cell variable.
+The actual cause is AG Grid's own default. The base `ag-grid.css` ships
+`--ag-cell-horizontal-border: solid transparent` and
+`--ag-header-column-separator-display: none`. The column border is therefore
+already being drawn — it is simply transparent, and the header separator is
+switched off.
+
+This is better news than the original diagnosis: there is **no blast radius**.
+The application's other grids set their own values on their own scoped
+selector, which this work does not touch. Giving the chat grid visible borders
+cannot change Tasks, Reports or anything else.
+
+Five variables, on `.sqlchat .sqlchat-grid-body.ag-theme-alpine`:
+
+```css
+--ag-cell-horizontal-border: 1px solid var(--sc-line-soft);
+--ag-header-column-separator-display: block;
+--ag-header-column-separator-color: var(--sc-line);
+--ag-header-column-separator-width: 1px;
+--ag-header-column-separator-height: 100%;
+```
+
+The header needs its own four because `--ag-cell-horizontal-border` governs
+body cells only.
 
 ### 3.3 The resize conflict
 
@@ -174,14 +196,28 @@ a debugging view that guesses is worse than one that says nothing.
 or `busy` changes. It scrolls ancestor containers as well as the message list,
 and it always wins against the user.
 
-`useStickyScroll(containerRef, contentRef)` replaces it:
+**Corrected during planning: what actually scrolls.** An earlier draft had the
+hook operating on the message list as its own scroll container. It is not one.
+`.sqlchat-messages` sets padding and nothing else, `<main>` in `Layout.jsx` is
+unstyled, and the page's own CSS header states the design outright — the
+document scrolls and the toolbar, composer and rail are sticky against it.
+There is no inner scroller to write `scrollTop` on.
 
-- A `scroll` listener sets `pinned` true when the container is within **80px**
-  of the bottom, false otherwise. Scrolling up unpins; coming back re-pins.
-- A `ResizeObserver` on the content element sets `container.scrollTop` to
-  `container.scrollHeight` **only while pinned**.
-- Writing `scrollTop` directly, rather than calling `scrollIntoView`, keeps
-  the effect inside the message list and leaves the page around it alone.
+So the hook targets the document scroller, `document.scrollingElement`, and
+listens on `window`.
+
+`useStickyScroll(contentRef)` replaces it:
+
+- A `scroll` listener on `window` sets `pinned` true when the document is
+  within **80px** of the bottom, false otherwise. Scrolling up unpins; coming
+  back re-pins.
+- A `ResizeObserver` on the content element scrolls the document to the bottom
+  **only while pinned**.
+- The near-bottom decision is a pure function, `isNearBottom(metrics,
+  threshold)`, so the three behaviours the tests care about — follows, yields,
+  resumes — are assertable without a layout engine. jsdom has neither real
+  layout nor `window.scrollTo`, which makes a purely component-level test of
+  this untrustworthy.
 
 One `ResizeObserver` covers every cause of growth — a new turn, the thinking
 indicator, the answer landing, a debug section expanding, the grid finishing
@@ -300,15 +336,38 @@ Tests cover the places where being wrong is silent rather than obvious.
 | Send — stop | While busy the control aborts the in-flight request |
 | Debug — new fields | Query time, column types, rows and the Follow-up group render |
 | Debug — absent fields | A response missing the new keys renders an em dash and does not throw |
-| Grid — page size | Choosing 50 shows more rows than the default 25 |
-| Grid — pager threshold | A 20-row result has a pager and a size selector; a 3-row result has neither |
-| Grid — height tracks page size | Dropping to 10 per page shortens the grid instead of leaving a 420px box |
-| Grid — resize holds | A resized column keeps its width after a re-render |
+| Grid — pager threshold | `gridLayout` paginates a 20-row result and not a 3-row one |
+| Grid — height tracks page size | 10 per page gives a shorter height than 100 per page, for the same rows |
+| Grid — height cap | A 500-row result never exceeds `MAX_BODY_HEIGHT` |
 
-PHPUnit, in the module: `summary()` returns `duration_ms` and `types`.
+The grid assertions run against `gridLayout()` rather than a rendered
+AgGridReact. jsdom has no layout, and AG Grid virtualises rows against
+measured heights, so a rendered-grid test would assert the mock rather than
+the behaviour. Column resizing and the border variables are verified by eye —
+a drag cannot be simulated meaningfully without layout, and CSS custom
+properties are not computed in jsdom.
 
-Manual check, because CSS scoping cannot be asserted in Jest: open a Tasks or
-Reports datatable and confirm it has **not** gained vertical borders.
+**Backend, corrected during planning.** The spec first said "PHPUnit, in the
+module". The module has no PHPUnit setup — `tests/` holds question-set YAML
+and a parity checker, and there is no `phpunit.xml` outside Drupal core's own.
+Standing PHPUnit up would be a larger piece of work than the two-key change it
+would be testing.
+
+The module's established pattern is a script under `scripts/` that boots
+Drupal through `bootstrap.php`, prints what it checked, counts failures and
+exits non-zero — as `verify_readonly.php` does. The backend check follows it:
+`scripts/verify_summary_fields.php` runs a real read through
+`QueryRunner::runReadonly()`, passes the result to `summary()`, and asserts
+both keys are present and numeric.
+
+Manual check, because CSS variables cannot be asserted in jsdom: open a Tasks
+or Reports datatable and confirm it looks unchanged. Per §3.2 it cannot have
+changed, but the check is cheap and the earlier misdiagnosis is a reason to
+look rather than assume.
+
+`ResizeObserver` is not implemented in jsdom. The sticky-scroll tests install
+a stub that records its callback, so a test can drive a growth event directly
+instead of waiting on a real observer.
 
 ---
 
