@@ -235,7 +235,10 @@ def _attach_followup(
     """Decide what to offer next, and score it against the case."""
     if not followup_mode:
         return
-    followup = decide(state, row_count, r.clarification)
+    # The executed result, so a breakdown is only offered where the rows can
+    # support one. r already carries it -- set before this is reached on every
+    # path -- so this needs no new argument.
+    followup = decide(state, row_count, r.clarification, r.actual_result)
     r.followup_type = followup.type
     r.followup = followup.to_dict()
     # Set after update_state, which resets the block and would clear it.

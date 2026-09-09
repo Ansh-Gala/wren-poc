@@ -30,6 +30,8 @@ from pathlib import Path
 
 import yaml
 
+from pipeline.column_order import hidden_names
+
 # What a suggestion can ask the system to do. Each maps onto a mutation of
 # ConversationState, and from there back through the normal pipeline -- so
 # there is still exactly one thing that writes SQL.
@@ -273,7 +275,38 @@ def _columns(table: str) -> dict:
 
 # ------------------------------------------------------------- exploration --
 
-def explore(state, row_count: int | None) -> FollowUp | None:
+def _varies(result: dict | None, column: str) -> bool | None:
+    """Whether the returned rows hold more than one value for ``column``.
+
+    None means "no information": there was no result, no rows, or the column
+    was not projected. None is not False -- a suggestion must not be
+    suppressed because the evidence is missing, only because the evidence is
+    against it.
+    """
+    if not isinstance(result, dict):
+        return None
+    columns, rows = result.get("columns"), result.get("rows")
+    if not columns or not rows or column not in columns:
+        return None
+    index = columns.index(column)
+    seen = set()
+    for row in rows:
+        if index < len(row):
+            seen.add(row[index])
+        if len(seen) > 1:
+            return True
+    return False
+
+
+def _projected(result: dict | None, column: str) -> bool | None:
+    """Whether ``column`` is among the columns the answer actually carries."""
+    if not isinstance(result, dict) or not result.get("columns"):
+        return None
+    return column in result["columns"]
+
+
+def explore(state, row_count: int | None,
+            result: dict | None = None) -> FollowUp | None:
     """Next moves worth offering, or None when there are none worth offering.
 
     Suggestions are only useful while they are specific, so this is gated
@@ -288,6 +321,11 @@ def explore(state, row_count: int | None) -> FollowUp | None:
 
     table = state.active_tables[0]
     in_force = set(state.active_filters)
+    # A column the hierarchy does not show is not worth grouping or
+    # sorting by either. That one declaration is what keeps
+    # task_display_status out of a GROUP BY the schema explicitly
+    # forbids, and boolean flags like is_delayed_open_task out of a sort.
+    hidden = hidden_names(state.active_tables)
     # The predicates themselves, not just their columns: telling a
     # defaulted status from one the user chose means reading the value.
     in_force_predicates = dict(state.active_filters)
@@ -321,7 +359,12 @@ def explore(state, row_count: int | None) -> FollowUp | None:
     # Breaking the answer down, but only if it is not already broken down.
     if not state.active_grouping:
         for column in _enum_columns(table):
-            if column in _NOT_GROUPABLE or column in in_force:
+            if column in _NOT_GROUPABLE or column in in_force or column in hidden:
+                continue
+            # One group is not a breakdown. Only skip on evidence against:
+            # _varies returns None when the column was not projected, and that
+            # is not a reason to withhold the suggestion.
+            if _varies(result, column) is False:
                 continue
             suggestions.append(Suggestion(
                 id=f"group_{_slug(column)}",
@@ -333,7 +376,11 @@ def explore(state, row_count: int | None) -> FollowUp | None:
     # Ordering, once there is a list to order.
     if state.active_sorting is None and state.last_intent == "list":
         for fragment in _SORTABLE:
-            column = next((c for c in _columns(table) if fragment in c), None)
+            column = next(
+                (c for c in _columns(table)
+                 if fragment in c and c not in hidden
+                 and _projected(result, c) is not False),
+                None)
             if column:
                 suggestions.append(Suggestion(
                     id=f"sort_{_slug(column)}",
@@ -517,7 +564,8 @@ NO_FOLLOWUP = FollowUp(type="none", reason="answer_complete", question="",
                        suggestions=[], allow_free_text=True)
 
 
-def decide(state, row_count: int | None, clarification: str | None) -> FollowUp:
+def decide(state, row_count: int | None, clarification: str | None,
+           result: dict | None = None) -> FollowUp:
     """What to say once the turn is over.
 
     Ordered by how much the user needs it. An unanswered question needs a
@@ -527,7 +575,7 @@ def decide(state, row_count: int | None, clarification: str | None) -> FollowUp:
     """
     if clarification is not None:
         return clarification_followup(clarification)
-    return explore(state, row_count) or NO_FOLLOWUP
+    return explore(state, row_count, result) or NO_FOLLOWUP
 
 
 # ------------------------------------------------ answering a clarification --

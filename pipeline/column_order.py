@@ -65,7 +65,9 @@ def presentation(columns: list[str] | None, tables: list[str] | None) -> dict:
 
     spec = _spec(tables)
     priority = list(spec.get("priority") or [])
-    hidden_names = set(spec.get("hidden") or [])
+    # Not named hidden_names: that is a module-level function now, and the
+    # local would shadow it.
+    hidden_set = set(spec.get("hidden") or [])
 
     rank = {name: i for i, name in enumerate(priority)}
     # A stable sort on (rank, original position) puts the named columns in the
@@ -75,5 +77,18 @@ def presentation(columns: list[str] | None, tables: list[str] | None) -> dict:
         range(len(names)),
         key=lambda i: (rank.get(names[i], len(priority)), i),
     )
-    hidden = [i for i, name in enumerate(names) if name in hidden_names]
+    hidden = [i for i, name in enumerate(names) if name in hidden_set]
     return {"order": order, "hidden": hidden}
+
+
+def hidden_names(tables: list[str] | None) -> frozenset[str]:
+    """The columns the hierarchy says are not worth showing for these tables.
+
+    Exposed because "not worth showing" and "not worth grouping or sorting by"
+    are the same judgement, and the follow-up layer needs the second one.
+    task_display_status is the case that proves it: the schema says "for UI
+    display only. Do not filter or group by this column; use task_status", and
+    it is hidden here for that reason -- so one declaration can settle both
+    rather than the two layers keeping separate lists that drift.
+    """
+    return frozenset(_spec(tables).get("hidden") or [])
