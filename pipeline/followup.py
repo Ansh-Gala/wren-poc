@@ -242,6 +242,22 @@ def _rule_predicates() -> tuple[tuple[str, str, str, str], ...]:
     return tuple(out)
 
 
+def _default_values() -> dict[str, str]:
+    """Column -> the value the active-first default would have added.
+
+    Read out of the registry rather than written here, so that renaming a
+    status value in the rules cannot leave this list quietly wrong. The
+    default_to_active policy rule carries no fragment of its own by design --
+    it must not become a togglable filter -- so the values come from the two
+    rules it refers to.
+    """
+    return {
+        column: value
+        for name, _table, column, value in _rule_predicates()
+        if name in ("active_business_object", "open_task")
+    }
+
+
 def _enum_columns(table: str) -> dict[str, list[str]]:
     spec = (_schema().get("tables") or {}).get(table) or {}
     return {
@@ -272,6 +288,9 @@ def explore(state, row_count: int | None) -> FollowUp | None:
 
     table = state.active_tables[0]
     in_force = set(state.active_filters)
+    # The predicates themselves, not just their columns: telling a
+    # defaulted status from one the user chose means reading the value.
+    in_force_predicates = dict(state.active_filters)
     suggestions: list[Suggestion] = []
 
     # A grouped answer's most obvious continuation is the rows behind it.
@@ -332,9 +351,25 @@ def explore(state, row_count: int | None) -> FollowUp | None:
     removable = [c for c in in_force if c not in _NOT_GROUPABLE]
     if removable:
         column = sorted(removable)[0]
+        # A status filter matching the active-first default was never typed by
+        # the user, so "remove your filter" describes it from the system's
+        # point of view. Dropping it is the only way out of the default, which
+        # makes this label load-bearing: it has to read like the question a
+        # person would actually ask. The action is unchanged -- remove_filter
+        # on the status column is exactly right.
+        defaulted = _default_values().get(column)
+        was_defaulted = (
+            defaulted is not None
+            and f"'{defaulted}'" in (in_force_predicates.get(column) or "")
+        )
+        label = (
+            f"Show every {column.replace('_', ' ')}, not just {defaulted.lower()}"
+            if was_defaulted
+            else f"Remove the {column.replace('_', ' ')} filter"
+        )
         suggestions.append(Suggestion(
             id=f"remove_{_slug(column)}",
-            label=f"Remove the {column.replace('_', ' ')} filter",
+            label=label,
             action=Action(type="remove_filter", field=column),
         ))
 
