@@ -1,0 +1,183 @@
+# Does the active-first default fire when it should, and stay out of the way
+# when it should not?
+#
+# Paired by construction. Every implicit question has an explicit twin, so a
+# model that ignores the default and a model that applies it unconditionally
+# both fail -- one on the implicit half, the other on the explicit half. A
+# suite of implicit questions alone would score full marks for a rule that
+# simply filtered everything to Active always.
+#
+# Every count below was executed against the live database on 9 September 2026
+# before the question was written. Nothing here is assumed:
+#
+#   AR_NPD_Shirting       10 initiatives, 5 Active / 5 Closed, no NULLs -- a
+#                         clean split, so the default reads as 5 and a turn
+#                         that should escape it reads as 10
+#   AR_YD_Suiting         208 tasks: 32 open, 176 closed
+#   AR_NPD_YD_SHIRTING    59 initiatives: 49 Active, 8 Closed, 1 Short Closed,
+#                         1 NULL
+#   whole table           17 distinct business_object_type values;
+#                         72 initiatives with no workflow_name
+#
+# ONE THING TO KNOW ABOUT THE DATA. business_object_status holds NULL in 6 rows
+# across the table, and schema_description.yaml documents only Active, Closed
+# and Short Closed as its values. A NULL-status row is therefore invisible to
+# `= 'Active'` and invisible to `= 'Closed'`: the active-first default drops it,
+# and so does every explicit status. That is defensible -- a row with no status
+# is not active -- but it is the reason the follow-up layer must offer a way out
+# of the default, and it is why the "everything" turns below use
+# AR_NPD_Shirting, which has no NULLs and so gives a clean 10-versus-5.
+
+version: 1
+
+questions:
+
+# ------------------------------------------------- the default should fire ==
+
+- id: AF01
+  category: Implicit Status
+  question: Show the AR_NPD_Shirting items
+  note: No status named. Expect 5 rows, not 10.
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_Shirting'
+      AND business_object_status = 'Active'
+
+- id: AF02
+  category: Implicit Count
+  question: How many AR_NPD_Shirting items are there?
+  note: A count of records, so the default applies. Expect 5, not 10.
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_Shirting'
+      AND business_object_status = 'Active'
+
+- id: AF03
+  category: Implicit Task Status
+  question: Show the tasks in AR_YD_Suiting
+  note: Tasks are active when open. Expect 32, not 208.
+  expected_sql: |
+    SELECT task_id, task_display_name, task_status
+    FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_status = 'open'
+
+# ------------------------------------- an explicit status must always win ==
+
+- id: AF04
+  category: Explicit Status
+  question: Show the closed AR_NPD_Shirting items
+  note: Stated status. Expect the 5 closed, and no Active predicate anywhere.
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_Shirting'
+      AND business_object_status = 'Closed'
+
+- id: AF05
+  category: Explicit Status
+  question: Show the short closed AR_NPD_YD_SHIRTING items
+  note: >-
+    The multi-word status value, which has to survive quoting. Only 1 row
+    matches, so this turn is weak evidence on its own -- it is here for the
+    quoting, not for the count.
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+      AND business_object_status = 'Short Closed'
+
+- id: AF06
+  category: Explicit Task Status
+  question: Show the closed tasks in AR_YD_Suiting
+  note: Expect 176.
+  expected_sql: |
+    SELECT task_id, task_display_name, task_status
+    FROM tms_task_flat
+    WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_status = 'closed'
+
+# --------------------------------------------- the carve-outs, one by one ==
+
+- id: AF07
+  category: Carve-out - Everything
+  question: Show all AR_NPD_Shirting items, active and closed
+  note: Asks for everything outright. Expect 10.
+  expected_sql: |
+    SELECT business_object_id, business_object_ref_id, business_object_status
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_Shirting'
+
+- id: AF08
+  category: Carve-out - Status Breakdown
+  question: How many AR_NPD_Shirting items are there by status?
+  note: >-
+    A distribution across statuses. The default would empty it -- one group of
+    5 rather than Active 5 and Closed 5.
+  expected_sql: |
+    SELECT business_object_status, COUNT(*)
+    FROM tms_business_object_flat
+    WHERE business_object_type = 'AR_NPD_Shirting'
+    GROUP BY business_object_status
+
+- id: AF09
+  category: Carve-out - Distinct Values
+  question: How many distinct business object types are there?
+  note: Counts values of a column, not records. Expect 17, not the active subset.
+  expected_sql: |
+    SELECT COUNT(DISTINCT business_object_type) FROM tms_business_object_flat
+
+- id: AF10
+  category: Carve-out - Missing Data
+  question: How many business objects have no workflow name recorded?
+  note: >-
+    A data-quality question. Expect 72; restricting to active would answer a
+    different question and look like the same one.
+  expected_sql: |
+    SELECT COUNT(*) FROM tms_business_object_flat
+    WHERE workflow_name IS NULL
+
+- id: AF11
+  category: Carve-out - No Such Status
+  question: Show me the cancelled AR_NPD_Shirting items
+  note: >-
+    There is no 'cancelled' status in this database -- only Active, Closed,
+    Short Closed and NULL. The default must not quietly rescue the question by
+    substituting Active; returning nothing or saying so are both right.
+  expect_behavior: zero_or_clarify
+
+# ------------------------------------------------- across a conversation ==
+
+- id: AFC01
+  category: Conversation - Override The Default
+  turns:
+    - id: AFC01.1
+      question: Show the AR_NPD_Shirting items
+      note: Default fires. 5 rows.
+      expect_decision: new_block
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Active'
+    - id: AFC01.2
+      question: what about the closed ones?
+      note: >-
+        Elliptical and explicit at once. The status must be replaced, not added
+        to -- Active AND Closed is empty, and an empty answer here would look
+        like a data problem rather than a bug. Expect 5.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Closed'
+    - id: AFC01.3
+      question: show me all of them, whatever the status
+      note: An explicit escape from the default. Expect 10.
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT business_object_id, business_object_ref_id, business_object_status
+        FROM tms_business_object_flat
+        WHERE business_object_type = 'AR_NPD_Shirting'
