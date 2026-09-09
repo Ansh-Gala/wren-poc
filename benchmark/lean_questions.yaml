@@ -392,39 +392,49 @@ questions:
         WHERE business_object_type = 'AR_YD_Suiting'
           AND business_object_status = 'Active'
     - id: C04.2
-      question: Only the active ones
+      question: Only the closed ones
+      note: >-
+        Narrows on a status the active-first default never supplies. That is
+        what makes C04.4 able to detect a leak at all: while this turn asked
+        for Active, the default put Active on every turn of the thread and a
+        leaked status was indistinguishable from a correct one. Expect 3.
       expect_decision: follow_up
       expected_sql: |
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+          AND business_object_status = 'Closed'
     - id: C04.3
       question: How many?
+      note: Intent switches to a count; the closed filter must survive. Expect 3.
       expect_decision: follow_up
       expected_sql: |
         SELECT COUNT(*) FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+          AND business_object_status = 'Closed'
     - id: C04.4
-      question: Show AR_NPD_Shirting items
+      question: Show AR_NPD_YD_SHIRTING items
       note: >-
-        The leakage test. A new subject must drop the Active filter from the
-        previous block: 10 rows, not the 5 that leaking Active would give.
+        The leakage test. A new subject must drop the Closed filter from the
+        previous block and fall back to the active-first default: 49 rows, not
+        the 8 that leaking Closed would give. The subject is
+        AR_NPD_YD_SHIRTING rather than AR_NPD_Shirting because that type splits
+        5 Active / 5 Closed, so after the default arrived a leak and a correct
+        answer both returned 5 and the count could no longer tell them apart.
       expect_decision: switch
       expected_sql: |
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
           AND business_object_status = 'Active'
     - id: C04.5
       question: Only the closed ones
-      note: The filter now applies to the new subject. Expect 5.
+      note: The filter now applies to the new subject. Expect 8.
       expect_decision: follow_up
       expected_sql: |
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
+        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
           AND business_object_status = 'Closed'
 
 - id: C05

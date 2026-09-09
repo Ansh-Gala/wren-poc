@@ -62,14 +62,32 @@ def test_the_suite_covers_the_required_behaviours():
 def test_context_leakage_case_is_present_and_discriminating():
     """C04.4 must be answerable wrongly if the previous filter leaks.
 
-    AR_NPD_Shirting is 5 Active of 10, so a leaked Active filter shows up as
-    5 rows instead of 10. A subject with no such split would hide the bug.
+    The instrument has to be a status the active-first default never supplies.
+    While the thread narrowed on Active, the default put Active on every turn
+    and a leaked filter was indistinguishable from a correct answer -- the test
+    would have passed whatever the model did. So the previous turn narrows on
+    Closed, and the switch must come back to the default: AR_NPD_YD_SHIRTING is
+    49 Active and 8 Closed, so a leak reads as 8 where the right answer is 49.
+
+    AR_NPD_Shirting cannot be the subject any more: it splits 5 Active / 5
+    Closed, so once the default arrived both the leak and the correct answer
+    returned 5 rows and the count could no longer separate them.
     """
     c04 = next(c for c in CONVS if c.id == "C04")
-    switch = [t for t in c04.turns if t.expect_decision == "switch"]
-    assert switch, "C04 has no switch turn"
-    assert "AR_NPD_Shirting" in switch[0].expected_sql
-    assert "Active" not in switch[0].expected_sql
+    turns = c04.turns
+    index = next((i for i, t in enumerate(turns)
+                  if t.expect_decision == "switch"), None)
+    assert index is not None, "C04 has no switch turn"
+    assert index > 0, "the switch turn has nothing to leak from"
+    switch, previous = turns[index], turns[index - 1]
+
+    assert "AR_NPD_YD_SHIRTING" in switch.expected_sql
+    assert "'Closed'" in previous.expected_sql, (
+        "the turn before the switch must narrow on a status the default does "
+        "not supply, or a leak cannot be detected")
+    assert "'Closed'" not in switch.expected_sql, "the previous status leaked"
+    assert "'Active'" in switch.expected_sql, (
+        "the switch should fall back to the active-first default")
 
 
 def test_selection_returns_whole_conversations():
@@ -112,7 +130,15 @@ def test_a_reset_expectation_never_carries_the_previous_filters():
 
     # The columns that identify the subject rather than narrow it. These are
     # expected to change on a switch; everything else is expected to vanish.
-    entity_columns = {"business_object_type", "workflow_code", "workflow_name"}
+    #
+    # The status columns are here for a different reason: since the
+    # active-first default (metadata/business_rules.yaml, default_to_active) a
+    # status predicate is re-derived on every turn rather than carried from the
+    # one before, so finding one on both sides of a switch is not evidence of a
+    # leak. What would be evidence is the *value* surviving, and C04.4 asserts
+    # exactly that -- see test_context_leakage_case_is_present_and_discriminating.
+    entity_columns = {"business_object_type", "workflow_code", "workflow_name",
+                      "business_object_status", "task_status"}
 
     contradictions = []
     for suite in ("lean_questions.yaml", "targeted_questions.yaml",
