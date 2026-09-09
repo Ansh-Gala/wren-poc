@@ -62,6 +62,33 @@ rules:
       When counting Business Objects from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).
     sql_fragment: "COUNT(DISTINCT tms_task_flat.bo_id)"
 
+  - name: default_to_active
+    definition: >-
+      When a question asks for records, or for a count of records, and names no
+      status of its own, answer about the active ones only. An Initiative
+      (Business Object) is active when business_object_status = 'Active'; a task
+      is active when task_status = 'open'. Add that predicate even though the
+      question did not ask for it: a user asking "show me my tasks" means the
+      ones still to do, not every task they have ever been assigned.
+    scope: >-
+      This default applies only to questions about the records themselves --
+      "show the AR_YD_Suiting items", "how many tasks are in it". It does not
+      apply, and the query must see every row, in any of these cases. When the
+      question states a status, that status decides and this default is not
+      added on top of it: "closed initiatives", "short closed items", "my
+      closed tasks". When the question asks for everything or for history:
+      "all initiatives", "every task", "including the closed ones". When the
+      question asks how records are distributed across statuses -- "how many by
+      status", "the status breakdown" -- because adding the filter would empty
+      the answer. When the question counts distinct values of a column rather
+      than counting records: "how many distinct business object types are
+      there". And when the question is about missing or malformed data, such as
+      "how many business objects have no workflow name recorded", because an
+      answer that saw only the active rows would not be an answer about the
+      data. When the conversation already carries a status filter, that filter
+      decides. Never use task_display_status for any of this; task_status is
+      the column to filter on.
+
   - name: entity_alias
     definition: >-
       Initiative, Order, BO and Business Object are all the same TMS entity (tms_business_object_flat).
