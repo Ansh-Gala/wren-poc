@@ -6,14 +6,31 @@
 #
 # Anchors were chosen for how well they discriminate, not for convenience:
 #   AR_YD_Suiting        22 BOs (19 Active, 3 Closed), 208 tasks (32 open)
-#   AR_NPD_Shirting      10 BOs (5 Active, 5 Closed)  -- clean split, so a
-#                        leaked "Active" filter is visible as 5 instead of 10
+#   AR_NPD_Shirting      10 BOs (5 Active, 5 Closed)  -- clean split, so the
+#                        active-first default is visible as 5 instead of 10,
+#                        and a turn that should have escaped it as 10
 #   AR_NPD_YD_SHIRTING   59 BOs, 4 distinct statuses, the only PVH row
 #   AR_YD_Shirting       52 BOs -- large enough for limit changes
 #
 # expect_decision asserts what the session layer should conclude about the
 # turn. A thread can produce correct SQL while classifying a turn wrongly,
 # which then breaks the turn after it, so the classification is checked too.
+
+# RE-BASELINED 9 September 2026 for the active-first default.
+#
+# A question that names no status now means the active records:
+# business_object_status = 'Active' for initiatives, task_status = 'open' for
+# tasks (metadata/business_rules.yaml, rule default_to_active). That changed
+# what a correct answer is for most of the turns below, so their expected SQL
+# carries the predicate now. Figures recorded in results/ before this date
+# measured the old definition and do not compare.
+#
+# Six turns were deliberately left alone, because the rule's own scope excludes
+# them. Each says so in its note: S12 counts distinct values rather than
+# records, S21 asks about missing data, S22 asks about a historical cohort,
+# C02.3 asks for every status outright, and S17 and T43 name "delayed", which
+# the my_tasks rule already says must not have "open" stacked on top of it.
+#
 
 version: 1
 
@@ -28,6 +45,7 @@ questions:
     SELECT business_object_id, business_object_ref_id, business_object_status
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
 
 - id: S02
   category: Count
@@ -35,6 +53,7 @@ questions:
   expected_sql: |
     SELECT COUNT(*) FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
 
 - id: S03
   category: Status Filter
@@ -62,6 +81,7 @@ questions:
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
       AND business_unit = 'PVH'
+      AND business_object_status = 'Active'
 
 - id: S06
   category: Multi Filter
@@ -81,6 +101,7 @@ questions:
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
       AND business_object_color = 'Black'
+      AND business_object_status = 'Active'
 
 - id: S08
   category: BO Aggregation
@@ -89,6 +110,7 @@ questions:
     SELECT business_object_color, COUNT(*)
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
     GROUP BY business_object_color
 
 - id: S09
@@ -98,6 +120,7 @@ questions:
     SELECT business_object_id, business_object_ref_id, business_object_status
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
     LIMIT 5
 
 - id: S10
@@ -108,6 +131,7 @@ questions:
     SELECT business_object_id, business_object_ref_id, business_object_status
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
     ORDER BY business_object_id
 
 - id: S11
@@ -118,12 +142,16 @@ questions:
     SELECT business_object_id, business_object_ref_id, business_object_created_at
     FROM tms_business_object_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND business_object_status = 'Active'
     ORDER BY business_object_created_at DESC
     LIMIT 3
 
 - id: S12
   category: Distinct
   question: How many distinct business object types are there?
+  note: >-
+    CARVE-OUT from the active-first default: this counts distinct values of a
+    column, not records. Expect 17.
   expected_sql: |
     SELECT COUNT(DISTINCT business_object_type) FROM tms_business_object_flat
 
@@ -134,6 +162,7 @@ questions:
     SELECT task_id, task_display_name, task_status
     FROM tms_task_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_status = 'open'
 
 - id: S14
   category: Task Filter
@@ -150,6 +179,7 @@ questions:
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
     WHERE business_object_type = 'AR_YD_Suiting'
+      AND task_status = 'open'
 
 - id: S16
   category: Task Aggregation
@@ -163,7 +193,13 @@ questions:
 - id: S17
   category: Semantic Rule
   question: How many delayed tasks are there in AR_YD_Suiting?
-  note: Exercises the delayed_task rule -- task_sla_status = 'Delayed'.
+  note: >-
+    Exercises the delayed_task rule -- task_sla_status = 'Delayed'. CARVE-OUT
+    from the active-first default: "delayed" is a status the user named, and
+    the my_tasks rule's scope already says the only invariant for "my delayed
+    tasks" is the assignee -- so task_status = 'open' must not be stacked on
+    top. Delayed closed tasks exist (is_delayed_closed_task), so stacking it
+    would change the count.
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
     WHERE business_object_type = 'AR_YD_Suiting'
@@ -178,6 +214,7 @@ questions:
     JOIN tms_business_object_attributes_flat a
       ON a.business_object_id = b.business_object_id
     WHERE b.business_object_type = 'AR_YD_Suiting'
+      AND b.business_object_status = 'Active'
 
 - id: S19
   category: MY_TASK
@@ -202,6 +239,9 @@ questions:
 - id: S21
   category: Null Handling
   question: How many business objects have no workflow name recorded?
+  note: >-
+    CARVE-OUT from the active-first default: a question about missing data has
+    to see every row or it answers a different question. Expect 72.
   expected_sql: |
     SELECT COUNT(*) FROM tms_business_object_flat
     WHERE workflow_name IS NULL
@@ -210,6 +250,11 @@ questions:
   category: Date Filter
   question: How many business objects were created in July 2026?
   tags: [date]
+  note: >-
+    CARVE-OUT from the active-first default: a date cohort is a question about
+    what happened, not about what is current. Restricting to active would
+    answer "how many created in July are still active", which is a different
+    question wearing the same words.
   expected_sql: |
     SELECT COUNT(*) FROM tms_business_object_flat
     WHERE business_object_created_at >= DATE '2026-07-01'
@@ -222,6 +267,7 @@ questions:
   expected_sql: |
     SELECT business_object_type, COUNT(*) AS item_count
     FROM tms_business_object_flat
+    WHERE business_object_status = 'Active'
     GROUP BY business_object_type
     ORDER BY item_count DESC
     LIMIT 1
@@ -245,9 +291,16 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
     - id: C01.2
       question: Only the active ones
-      note: Anaphoric filter. Must keep the type and add the status.
+      note: >-
+        Anaphoric filter. Under the active-first default turn 1 already
+        returned only the active rows, so the correct SQL here is identical to
+        turn 1's: this now asserts that a redundant refinement is harmless
+        rather than that a filter gets added. The strong version of this case
+        -- implicit, then an explicit override -- is AFC01 in
+        benchmark/active_first_questions.yaml.
       expect_decision: follow_up
       expected_sql: |
         SELECT business_object_id, business_object_ref_id, business_object_status
@@ -285,7 +338,11 @@ questions:
           AND business_object_status = 'Closed'
     - id: C02.3
       question: Now show all statuses
-      note: Removes the status filter but keeps the type. Expect 10.
+      note: >-
+        Removes the status filter but keeps the type. Expect 10. Also the
+        escape hatch from the active-first default: "all statuses" names
+        status explicitly, which is what the default's scope requires -- a
+        bare "all" would not be enough.
       expect_decision: follow_up
       expected_sql: |
         SELECT business_object_id, business_object_ref_id, business_object_status
@@ -302,6 +359,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
     - id: C03.2
       question: Group those by status
       note: Adds a dimension and changes the shape of the answer. Expect 4 groups.
@@ -332,6 +390,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
     - id: C04.2
       question: Only the active ones
       expect_decision: follow_up
@@ -357,6 +416,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Active'
     - id: C04.5
       question: Only the closed ones
       note: The filter now applies to the new subject. Expect 5.
@@ -377,6 +437,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
     - id: C05.2
       question: How many?
       note: Expect 22.
@@ -384,6 +445,7 @@ questions:
       expected_sql: |
         SELECT COUNT(*) FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Suiting'
+          AND business_object_status = 'Active'
     - id: C05.3
       question: 'New question: show AR_NPD_Shirting items'
       expect_decision: new_block
@@ -391,6 +453,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Active'
     - id: C05.4
       question: How many?
       note: >-
@@ -399,6 +462,7 @@ questions:
       expected_sql: |
         SELECT COUNT(*) FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_Shirting'
+          AND business_object_status = 'Active'
 
 - id: C06
   category: Conversation - Task Domain
@@ -410,6 +474,7 @@ questions:
         SELECT task_id, task_display_name, task_status
         FROM tms_task_flat
         WHERE business_object_type = 'AR_YD_Suiting'
+          AND task_status = 'open'
     - id: C06.2
       question: Only the open ones
       note: Expect 32.
@@ -440,6 +505,7 @@ questions:
         SELECT business_object_id, business_object_ref_id
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Shirting'
+          AND business_object_status = 'Active'
         LIMIT 5
     - id: C07.2
       question: Give me 10 instead
@@ -449,6 +515,7 @@ questions:
         SELECT business_object_id, business_object_ref_id
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Shirting'
+          AND business_object_status = 'Active'
         LIMIT 10
     - id: C07.3
       question: Show their status as well
@@ -458,6 +525,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_object_status
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_YD_Shirting'
+          AND business_object_status = 'Active'
         LIMIT 10
 
 - id: C08
@@ -470,6 +538,7 @@ questions:
         SELECT business_object_id, business_object_ref_id, business_unit
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+          AND business_object_status = 'Active'
     - id: C08.2
       question: What about PVH?
       note: >-
@@ -481,3 +550,4 @@ questions:
         FROM tms_business_object_flat
         WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
           AND business_unit = 'PVH'
+          AND business_object_status = 'Active'

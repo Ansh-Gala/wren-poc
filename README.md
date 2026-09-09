@@ -112,6 +112,20 @@ python -m pytest
 Tests needing a live database or the Claude CLI are marked `integration`;
 `python -m pytest -m "not integration"` skips them.
 
+### A note on comparing accuracy figures
+
+On 9 September 2026 the chatbot began defaulting to the active records when a
+question names no status (`metadata/business_rules.yaml`, rule
+`default_to_active`). That changed what counts as a correct answer for 55 of
+the 136 turns in `benchmark/lean_questions.yaml` and `benchmark/questions.yaml`,
+whose expected SQL was re-baselined to match.
+
+Every figure recorded under `results/` predates that change and measured the
+old definition. Pre- and post-change accuracy figures therefore do not compare,
+and neither does anything derived from them. Six turns were deliberately left
+on the old ground truth because the rule's scope excludes them; each explains
+itself in its own `note`.
+
 ## Layout
 
 ```
