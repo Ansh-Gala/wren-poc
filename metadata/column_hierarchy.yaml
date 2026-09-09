@@ -31,13 +31,13 @@ tables:
       - open_task_count
       - total_task_count
       - workflow_name
+      - workflow_code
       - current_active_milestone
     hidden:
       # Free text, long enough to wreck a row height.
       - business_object_note
       # Identifiers the reader cannot act on; workflow_name is the readable one.
       - workflow_id
-      - workflow_code
       # Only ever set on the one Short Closed row, so a column of blanks.
       - short_closed_by
       - short_closed_on
@@ -78,7 +78,10 @@ tables:
   tms_business_object_attributes_flat:
     priority:
       - business_object_id
-      - business_object_ref_id
+      - category
+      - season
+      - program
+      - stage
     hidden: []
 
   tms_user_flat:
