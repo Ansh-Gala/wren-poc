@@ -33,7 +33,7 @@ import _bootstrap  # noqa: F401
 from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
-from pipeline.labels import with_column_labels
+from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
 from pipeline.redact import public_response, safe_error
@@ -164,7 +164,8 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
         "error": safe_error(r.error, getattr(r, "sqlstate", None)),
         "raw_error": r.error,
         "failure_category": r.failure_category,
-        "result": with_column_labels(r.actual_result),
+        "result": with_presentation(
+            with_column_labels(r.actual_result), after.get("tables")),
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,

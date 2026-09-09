@@ -50,7 +50,16 @@ _PUBLIC_FIELDS = frozenset({
 
 # Inside ``result``, the same distinction. ``columns`` holds raw database
 # column names, so only the labels travel when debug is off.
-_PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated"})
+#
+# column_order and hidden_columns are public deliberately. They are lists of
+# integer positions into the result, so they name nothing: no column, no table,
+# no SQL. They are strictly less revealing than column_labels, which is already
+# here and is derived from the column names themselves. And they have to travel
+# with a normal answer, because debug off is the mode the grid actually runs in
+# -- withholding them would leave the presentation metadata reaching only the
+# people who least need it.
+_PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated",
+                                   "column_order", "hidden_columns"})
 
 # The suggestion chips stay -- they are the product, not a diagnostic -- but
 # their plumbing does not. `action` carries the column it filters on and `id`

@@ -65,3 +65,21 @@ def with_column_labels(result):
     if not isinstance(result, dict):
         return result
     return {**result, "column_labels": column_labels(result.get("columns"))}
+
+
+def with_presentation(result, tables):
+    """A result dict with display order and hidden columns added.
+
+    Additive in the same way as with_column_labels, and for the same reason:
+    `columns` and `rows` keep exactly what PostgreSQL said, so the state
+    reader and the debug pane are unaffected. Anything that is not a dict
+    passes through -- a clarification has no result, and inventing an empty
+    table for it would put a header row under a sentence.
+    """
+    if not isinstance(result, dict):
+        return result
+    from pipeline.column_order import presentation
+
+    shape = presentation(result.get("columns"), tables)
+    return {**result, "column_order": shape["order"],
+            "hidden_columns": shape["hidden"]}
