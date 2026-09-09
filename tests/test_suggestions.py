@@ -130,3 +130,97 @@ def test_suggestion_ids_are_unique_within_a_turn():
     followup = explore(_state_after(_DEFAULTED), row_count=5)
     ids = [s.id for s in followup.suggestions]
     assert len(ids) == len(set(ids))
+
+
+# --------------------------------------------- reflecting the rows returned --
+
+_ONE_UNIT = {
+    "columns": ["business_object_id", "business_unit"],
+    "rows": [[1, "unit1"], [2, "unit1"], [3, "unit1"]],
+}
+_TWO_UNITS = {
+    "columns": ["business_object_id", "business_unit"],
+    "rows": [[1, "unit1"], [2, "unit2"], [3, "unit1"]],
+}
+
+
+def test_grouping_is_not_offered_when_every_row_shares_the_value():
+    """One group is not a breakdown.
+
+    The schema says business_unit is enumerated, which is what made it a
+    candidate; the rows say this answer holds one unit, which is what makes
+    grouping by it useless.
+    """
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_UNIT)
+    grouped = [s for s in (followup.suggestions if followup else [])
+               if s.action.type == "add_group_by"
+               and s.action.field == "business_unit"]
+    assert grouped == []
+
+
+def test_grouping_is_still_offered_when_the_value_varies():
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_TWO_UNITS)
+    grouped = [s for s in followup.suggestions
+               if s.action.type == "add_group_by"
+               and s.action.field == "business_unit"]
+    assert len(grouped) == 1
+
+
+def test_a_sort_is_only_offered_on_a_column_the_answer_contains():
+    """Sorting by a column that was not projected asks the user to reorder
+    something they cannot see."""
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_UNIT)
+    sorts = [s for s in (followup.suggestions if followup else [])
+             if s.action.type == "set_sort"]
+    for s in sorts:
+        assert s.action.field in _ONE_UNIT["columns"]
+
+
+def test_omitting_the_result_preserves_the_old_behaviour_exactly():
+    """The parity harness calls the two-argument form over 1,254 recorded
+    cases. Those must not move."""
+    with_none = explore(_state_after(_DEFAULTED), row_count=5, result=None)
+    without = explore(_state_after(_DEFAULTED), row_count=5)
+    assert [s.to_dict() for s in with_none.suggestions] == \
+           [s.to_dict() for s in without.suggestions]
+
+
+def test_a_result_with_no_rows_is_treated_as_no_information():
+    """An error result carries no `rows` key at all, and a clarification
+    carries no result. Neither may crash the layer nor silently suppress
+    every suggestion."""
+    followup = explore(_state_after(_DEFAULTED), row_count=3,
+                       result={"error": "boom"})
+    assert followup is not None and followup.suggestions
+
+
+def test_a_column_the_hierarchy_hides_is_never_offered_as_a_grouping():
+    """task_display_status is the case that matters.
+
+    schema_description.yaml says it is "for UI display only. Do not filter or
+    group by this column; use task_status" -- so offering it produced SQL that
+    contradicted the registry's own instruction. It is already declared hidden
+    in metadata/column_hierarchy.yaml, and a column not worth showing is not
+    worth grouping by, so that one declaration settles both.
+    """
+    followup = explore(_state_after(
+        "SELECT task_id, task_status FROM tms_task_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "AND task_status = 'open'"), row_count=32)
+    fields = [s.action.field for s in (followup.suggestions if followup else [])]
+    assert "task_display_status" not in fields
+
+
+def test_a_boolean_flag_is_never_offered_as_a_sort():
+    """"Sort by is delayed open task" orders rows by a two-valued flag.
+
+    The _SORTABLE fragment "delay" matched is_delayed_open_task, which is
+    hidden in the hierarchy for the same reason it is useless here.
+    """
+    followup = explore(_state_after(
+        "SELECT task_id, task_status FROM tms_task_flat "
+        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "AND task_status = 'open'"), row_count=32)
+    sorts = [s.action.field for s in (followup.suggestions if followup else [])
+             if s.action.type == "set_sort"]
+    assert not any((f or "").startswith("is_") for f in sorts)
