@@ -41,14 +41,27 @@ def test_the_default_carves_out_the_questions_it_must_not_touch():
     """The carve-outs are the rule. Without them it is simply wrong.
 
     Each phrase below stands for a question class that must still see every
-    row: a stated status, an explicit request for everything, a distribution
+    row: a stated status, an explicit request for every status, a distribution
     across statuses, a count of distinct values, and a question about missing
     data.
     """
     scope = " ".join(_rule("default_to_active")["scope"].split())
-    for carve_out in ("states a status", "everything", "distributed across",
+    for carve_out in ("states a status", "every status", "distributed across",
                       "distinct", "missing"):
         assert carve_out in scope, f"scope does not exclude {carve_out!r}"
+
+
+def test_the_word_all_on_its_own_does_not_switch_the_default_off():
+    """"Show me all my tasks" still means the ones still to do.
+
+    The spec is explicit that "show me all orders" follows the active-first
+    behaviour, and people use "all" as filler rather than as a request for
+    closed records. An earlier draft of this rule listed "all initiatives" as
+    an escape, which would have inverted exactly the case the spec calls out.
+    """
+    scope = " ".join(_rule("default_to_active")["scope"].split())
+    assert '"all" on its own is NOT such a request' in scope
+    assert '"all initiatives"' not in scope, "bare 'all' is offered as an escape again"
 
 
 def test_the_default_is_a_policy_not_a_togglable_filter():
