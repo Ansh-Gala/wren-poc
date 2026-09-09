@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-09-09-ask-the-data-ui-design.md` in the `wren-poc` repo. Read it before starting.
-- **Two repos.** Frontend: `c:/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail`. Backend: `c:/xampp/htdocs/dev-arvind-retail-chatbot`. Commit in each separately.
+- **Two repos.** Frontend: `c:/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail` (branch `feat/sql-chatbot`). Backend: `c:/xampp/htdocs/dev-arvind-retail-chatbot` (branch `Tms-Sql-Chatbot-Testing`). Commit in each separately. Both are already on the right branch — do not create, switch or rebase branches.
+- **Stage only the files your task names.** Never `git add -A`, `git add .`, or `git commit -a`. The backend repo has tracked local-environment changes already in its working tree — `web/sites/site-arvind-retail/settings.php` and a `dxpr_theme` CSS file — and committing either would push one machine's configuration to everyone. The `git add` lines in each task list the exact paths; use them as written.
 - **Scope is the Ask the Data page only.** Never edit `components/DataTables/AGGrid/AGGridGenerator.jsx` or `components/DataTables/AGGrid/Styles/ag-grid-theme.css`. Every grid change is scoped under `.sqlchat`.
 - **Item 6 (conversation sidebar) is out of scope.** Do not add a sidebar, conversation list, or `localStorage` persistence.
 - **Do not port the Scoring debug group** (`result_match`, `semantic_match`, `projection_verdict`, `semantic_issues`).
@@ -1891,12 +1892,21 @@ import useStickyScroll from "../components/SqlChatbot/useStickyScroll";
 import "../css/SqlChatbotPage.css";
 ```
 
-Then delete, in one go:
-- the `show` helper (lines 37-47)
-- the `/* ---- debug: a turn ---- */` comment and the whole `DebugDetails` component (lines 49-127)
-- the `/* ---- debug: the state rail ---- */` comment and the whole `StateRail` component (lines 129-220)
+Then delete, identified by name rather than by line number — each deletion
+shifts what follows, so counted ranges go stale as you work:
 
-Keep the file's opening docblock and the `STARTERS` and `newSessionId` constants.
+- the `show` arrow function and its `/** A value as something printable… */`
+  comment
+- the `/* ---- debug: a turn ---- */` banner comment and the whole
+  `DebugDetails` component, down to its closing `});`
+- the `/* ---- debug: the state rail ---- */` banner comment and the whole
+  `StateRail` component, down to its closing `});`
+
+Keep the file's opening docblock, the `STARTERS` array, the `newSessionId`
+arrow function, and the `/* ---- the page ---- */` banner.
+
+After deleting, the first thing below the imports should be the file docblock's
+neighbours — `STARTERS`, `newSessionId`, then the page component.
 
 - [ ] **Step 2: Replace the scroll effect**
 
@@ -1927,7 +1937,7 @@ Add the hook call immediately after the refs:
 
 In `send()`, remove the `textarea.current?.focus();` line from the `finally` block — the ref is gone and focus is no longer taken away, because the textarea is never disabled.
 
-Then delete the two handlers the `Composer` has taken over, at lines 326-339 — `onKeyDown` and `onInput`. They are orphaned by this change and nothing else calls them. Leave every other function in the file alone.
+Then delete the two handlers the `Composer` has taken over — `const onKeyDown = (event) => {…}` and `const onInput = (event) => {…}`, together with the `// Grow with the text, up to a point…` comment above `onInput`. Find them by name, not by line number: Step 1's deletions have already shifted everything below them. They are orphaned by this change and nothing else calls them. Leave every other function in the file alone.
 
 - [ ] **Step 3: Add the stop handler**
 
