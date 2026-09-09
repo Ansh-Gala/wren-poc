@@ -39,7 +39,22 @@ Repo: `c:/xampp/htdocs/dev-arvind-retail-chatbot`
 
 **Context:** `QueryRunner::result()` already builds `types` and `duration_ms`. `summary()` receives that array and drops both. Nothing new is computed here.
 
-`?? ` coalescing is required, not decorative: `TurnRunner.php:428` builds a synthetic result — `['columns' => [], 'types' => [], 'rows' => [], 'error' => NULL, 'sqlstate' => NULL, 'ok' => TRUE]` — which has no `duration_ms` key at all. Reading it unguarded would emit a PHP warning on every clarification turn.
+**This paragraph was wrong and is corrected.** It originally claimed the `??`
+coalescing guards the synthetic result at `TurnRunner.php:428`, which has no
+`duration_ms` key. Two reviewers independently disproved it: that array's only
+consumer is `classifyFailure()` at `:433`, it never reaches `summary()`, and it
+does carry `'types' => []`. All three real `summary()` call sites receive a
+live `runReadonly()` return, which always has both keys.
+
+The guard on `duration_ms` is still right, for a different reason: `summary()`
+is public API and a caller may hand it a result with no timing — the
+verification script's second block does exactly that, and would warn without
+it. It is also what makes this task's own `Produces` contract true.
+
+The guard on `types` is inert under every reachable shape, since `summary()`
+already reads `error`, `rows` and `columns` unguarded. It stays anyway, by
+decision, but the script must assert `types` properly rather than lean on it —
+see Step 1.
 
 - [ ] **Step 1: Write the verification script**
 
@@ -151,7 +166,8 @@ In `src/Service/QueryRunner.php`, the return of `summary()` becomes:
       // Both are built by result() and were being dropped here. types names
       // each column's Postgres type; duration_ms is how long the query took,
       // which is not the turn's latency_ms -- that includes the model call.
-      // Coalesced because TurnRunner builds synthetic results without them.
+      // Coalesced because summary() is public and a caller may pass a result
+      // carrying no timing, as verify_summary_fields.php does.
       'types' => $result['types'] ?? [],
       'duration_ms' => $result['duration_ms'] ?? NULL,
     ];
