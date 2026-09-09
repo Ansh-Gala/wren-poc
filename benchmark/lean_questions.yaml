@@ -25,11 +25,15 @@
 # carries the predicate now. Figures recorded in results/ before this date
 # measured the old definition and do not compare.
 #
-# Six turns were deliberately left alone, because the rule's own scope excludes
-# them. Each says so in its note: S12 counts distinct values rather than
-# records, S21 asks about missing data, S22 asks about a historical cohort,
-# C02.3 asks for every status outright, and S17 and T43 name "delayed", which
-# the my_tasks rule already says must not have "open" stacked on top of it.
+# Four turns were deliberately left alone, because the rule's own scope
+# excludes them. Each says so in its note: S12 counts distinct values rather
+# than records, S21 asks about missing data, S22 asks about a historical
+# cohort, and C02.3 asks for every status outright.
+#
+# S17 and T43 were carve-outs too, on the reasoning that naming "delayed"
+# amounted to naming a status. That was wrong: task_sla_status says how a task
+# is running, not where it is in its life, so "how many tasks are delayed"
+# means the open ones. Both now carry the default.
 #
 
 version: 1
@@ -194,16 +198,16 @@ questions:
   category: Semantic Rule
   question: How many delayed tasks are there in AR_YD_Suiting?
   note: >-
-    Exercises the delayed_task rule -- task_sla_status = 'Delayed'. CARVE-OUT
-    from the active-first default: "delayed" is a status the user named, and
-    the my_tasks rule's scope already says the only invariant for "my delayed
-    tasks" is the assignee -- so task_status = 'open' must not be stacked on
-    top. Delayed closed tasks exist (is_delayed_closed_task), so stacking it
-    would change the count.
+    Exercises the delayed_task rule -- task_sla_status = 'Delayed' -- together
+    with the active-first default. "Delayed" says how a task is running, not
+    where it is in its life, so it does not count as naming a status and the
+    default still applies: expect the 32 delayed open tasks, not the 35 that
+    include the 3 delayed closed ones.
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
     WHERE business_object_type = 'AR_YD_Suiting'
       AND task_sla_status = 'Delayed'
+      AND task_status = 'open'
 
 - id: S18
   category: Join

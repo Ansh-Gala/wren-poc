@@ -40,7 +40,9 @@ rules:
       Do NOT add them when the question supplies its own status or asks for a
       distribution across statuses -- they would contradict or empty the answer.
       "my closed tasks" is assigned_user_id = 1 AND task_status = 'closed'.
-      "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = 'Delayed'.
+      "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = 'Delayed'
+      AND task_status = 'open': delayed is not a lifecycle status, so the
+      active-first default still applies on top of it.
       "my task status breakdown" is assigned_user_id = 1 GROUP BY task_status.
       The only invariant across all of them is assigned_user_id = 1.
 
@@ -90,7 +92,11 @@ rules:
       answer that saw only the active rows would not be an answer about the
       data. When the conversation already carries a status filter, that filter
       decides. Never use task_display_status for any of this; task_status is
-      the column to filter on.
+      the column to filter on. And task_sla_status is NOT a status for the
+      purposes of this rule: "delayed" describes how a task is running, not
+      where it is in its life, so "how many tasks are delayed" still means the
+      open ones -- task_sla_status = 'Delayed' AND task_status = 'open'. The
+      same holds for "my delayed tasks".
 
   - name: entity_alias
     definition: >-

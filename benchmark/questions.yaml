@@ -38,11 +38,15 @@
 # carries the predicate now. Figures recorded in results/ before this date
 # measured the old definition and do not compare.
 #
-# Six turns were deliberately left alone, because the rule's own scope excludes
-# them. Each says so in its note: S12 counts distinct values rather than
-# records, S21 asks about missing data, S22 asks about a historical cohort,
-# C02.3 asks for every status outright, and S17 and T43 name "delayed", which
-# the my_tasks rule already says must not have "open" stacked on top of it.
+# Four turns were deliberately left alone, because the rule's own scope
+# excludes them. Each says so in its note: S12 counts distinct values rather
+# than records, S21 asks about missing data, S22 asks about a historical
+# cohort, and C02.3 asks for every status outright.
+#
+# S17 and T43 were carve-outs too, on the reasoning that naming "delayed"
+# amounted to naming a status. That was wrong: task_sla_status says how a task
+# is running, not where it is in its life, so "how many tasks are delayed"
+# means the open ones. Both now carry the default.
 #
 
 version: 1
@@ -494,15 +498,16 @@ questions:
   question: Show my delayed tasks
   tags: [my_tasks]
   note: >-
-    CARVE-OUT from the active-first default, on the my_tasks rule's own
-    authority: its scope says "my delayed tasks" is assigned_user_id = 1 AND
-    task_sla_status = 'Delayed', and that the only invariant across the
-    variants is the assignee. task_status = 'open' must not be stacked on.
+    "My delayed tasks" gets the active-first default on top of the SLA status,
+    because delayed says how a task is running rather than where it is in its
+    life. Expect the 17 delayed open tasks assigned to user 1, not the 27 that
+    include the 10 delayed closed ones.
   expected_sql: |
     SELECT task_id, task_display_name, task_sla_status, business_object_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_sla_status = 'Delayed'
+      AND task_status = 'open'
 
 - id: T44
   category: MY_TASK + Workflow
