@@ -1,0 +1,98 @@
+# Which columns matter, and which the UI may start collapsed.
+#
+# Presentation only. Nothing here reaches the model and nothing here changes a
+# query: a generic question can still project all 33 columns of
+# tms_business_object_flat, and this file decides the order they are shown in
+# and which of them start hidden. Keeping it out of the prompt is deliberate --
+# the built system prompt is compared byte for byte against the PHP port, and
+# accuracy figures are only comparable while the prompt is unchanged.
+#
+# `priority` is the order the listed columns are shown in, most useful first.
+# A column absent from the list keeps its own relative order and follows
+# everything named. `hidden` columns are still in the result and still
+# exported; they simply do not open by default.
+#
+# Only columns that exist are listed. The names below were taken from
+# metadata/schema_description.yaml, not from memory.
+
+version: 1
+
+tables:
+  tms_business_object_flat:
+    priority:
+      - business_object_id
+      - business_object_ref_id
+      - business_object_status
+      - business_object_type
+      - business_unit
+      - business_object_color
+      - business_object_client_due_at
+      - days_to_due_date
+      - open_task_count
+      - total_task_count
+      - workflow_name
+      - current_active_milestone
+    hidden:
+      # Free text, long enough to wreck a row height.
+      - business_object_note
+      # Identifiers the reader cannot act on; workflow_name is the readable one.
+      - workflow_id
+      - workflow_code
+      # Only ever set on the one Short Closed row, so a column of blanks.
+      - short_closed_by
+      - short_closed_on
+      # A list inside a cell.
+      - open_tasks_list
+      # Buffer internals: meaningful to the scheduler, noise in an answer.
+      - common_buffer
+      - buff_penetration_prcnt
+      - buff_penetration_days
+
+  tms_task_flat:
+    priority:
+      - task_id
+      - task_code
+      - task_display_name
+      - task_status
+      - assigned_user_name
+      - task_department
+      - task_sla_status
+      - task_elapsed_days
+      - next_followup_at
+      - business_object_ref_id
+      - business_object_type
+    hidden:
+      - task_machine_code
+      # Booleans that restate task_status and task_sla_status.
+      - display_flag
+      - is_open_task
+      - is_closed_task
+      - is_not_started_task
+      - is_delayed_open_task
+      - is_delayed_closed_task
+      - is_business_object_delayed
+      - task_reopen_at
+      # Presentation form of task_status; showing both is showing it twice.
+      - task_display_status
+
+  tms_business_object_attributes_flat:
+    priority:
+      - business_object_id
+      - business_object_ref_id
+    hidden: []
+
+  tms_user_flat:
+    priority:
+      - user_id
+      - user_name
+      - role_count
+      - department_count
+    hidden: []
+
+  tms_user_department_flat:
+    priority:
+      - user_id
+      - user_name
+      - department
+      - sub_department
+    hidden: []
