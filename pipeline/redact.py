@@ -19,7 +19,7 @@ from typing import Any
 
 # Enough of the answer to act on, and no more. The nouns here are business
 # vocabulary from the semantic layer's TERMINOLOGY section -- "task",
-# "business object" -- not table or column names.
+# "initiative" -- not table or column names.
 _GENERIC = ("I couldn't process that request. Please try rephrasing your "
             "question.")
 
@@ -29,9 +29,9 @@ _BY_SQLSTATE = {
               "a single business unit, or a shorter date range."),
     # undefined_column / undefined_table: the query named something absent.
     "42703": ("I couldn't find the information you asked for. Try asking about "
-              "tasks, business objects, users, departments or roles."),
+              "tasks, initiatives, users, departments or roles."),
     "42P01": ("I couldn't find the information you asked for. Try asking about "
-              "tasks, business objects, users, departments or roles."),
+              "tasks, initiatives, users, departments or roles."),
     # syntax_error, and the read-only refusals.
     "42601": _GENERIC,
     "42501": ("I can only read data, so I can't make that change."),
@@ -58,8 +58,17 @@ _PUBLIC_FIELDS = frozenset({
 # with a normal answer, because debug off is the mode the grid actually runs in
 # -- withholding them would leave the presentation metadata reaching only the
 # people who least need it.
+#
+# initiative and colours are public for the same reason and on the same terms.
+# `initiative` is three integer positions into the result; `colours` maps an
+# initiative id -- a number the reader is about to be shown anyway, and which
+# the details dialog takes -- to a CSS class code such as "a_bl". Neither
+# carries a column name, a table name or any SQL. Without them here the grid
+# would draw no colour bar and open no dialog when debug is off, which is the
+# mode it actually runs in: exactly how the column hierarchy shipped inert.
 _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated",
-                                   "column_order", "hidden_columns"})
+                                   "column_order", "hidden_columns",
+                                   "initiative", "colours", "grouping"})
 
 # The suggestion chips stay -- they are the product, not a diagnostic -- but
 # their plumbing does not. `action` carries the column it filters on and `id`

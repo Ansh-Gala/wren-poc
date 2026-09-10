@@ -31,7 +31,7 @@ const MOCK = (() => {
         { type: "add_filter", field: "business_object_status", operator: "=", value: "Active" }),
       suggest("group_business_unit", "Group by business unit",
         { type: "add_group_by", field: "business_unit" }),
-      suggest("sort_business_object_client_due_at", "Sort by business object client due at",
+      suggest("sort_business_object_client_due_at", "Sort by initiative client due at",
         { type: "set_sort", field: "business_object_client_due_at", operator: "DESC" }),
       suggest("aggregate_count", "Just count them",
         { type: "set_aggregate", field: "*", operator: "COUNT" }),
@@ -47,9 +47,9 @@ const MOCK = (() => {
     suggestions: [
       suggest("group_business_unit", "Group by business unit",
         { type: "add_group_by", field: "business_unit" }),
-      suggest("sort_business_object_client_due_at", "Sort by business object client due at",
+      suggest("sort_business_object_client_due_at", "Sort by initiative client due at",
         { type: "set_sort", field: "business_object_client_due_at", operator: "DESC" }),
-      suggest("remove_business_object_status", "Remove the business object status filter",
+      suggest("remove_business_object_status", "Remove the initiative status filter",
         { type: "remove_filter", field: "business_object_status" }),
       suggest("aggregate_count", "Just count them",
         { type: "set_aggregate", field: "*", operator: "COUNT" }),
@@ -61,8 +61,8 @@ const MOCK = (() => {
   // What the server sends alongside BO_COLUMNS for display. Precomputed with
   // pipeline/labels.py rather than derived here, so the fixture exercises the
   // same path a real answer takes and there is only ever one labelling rule.
-  const BO_LABELS = ["Business Object Id", "Business Object Ref Id",
-                     "Business Unit", "Business Object Status"];
+  const BO_LABELS = ["Initiative Id", "Initiative Ref Id",
+                     "Business Unit", "Initiative Status"];
   const BO_ROWS = [
     [112, "AR_DummyEve011_Suiting", "unit1", "Active"],
     [109, "AR_12312_Suiting_YD_Merch", "unit1", "Active"],
@@ -122,14 +122,14 @@ const MOCK = (() => {
         sql_valid: false,
         execution_success: false,
         clarification:
-          "The schema has no revenue or cost column for business objects or " +
+          "The schema has no revenue or cost column for initiatives or " +
           "tasks, so there is no way to compute that figure.",
         followup: {
           follow_up_required: true,
           type: "clarification",
           reason: "ambiguous_request",
           question:
-            "The schema has no revenue or cost column for business objects or " +
+            "The schema has no revenue or cost column for initiatives or " +
             "tasks, so there is no way to compute that figure.",
           suggestions: [],
           allow_free_text: true,

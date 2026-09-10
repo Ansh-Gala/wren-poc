@@ -10,14 +10,14 @@ from pipeline.labels import column_label, column_labels
 @pytest.mark.parametrize("name,expected", [
     ("task_name", "Task Name"),
     ("task_start_at", "Task Start At"),
-    ("business_object_ref_id", "Business Object Ref Id"),
+    ("business_object_ref_id", "Initiative Ref Id"),
 ])
 def test_the_stated_cases(name, expected):
     assert column_label(name) == expected
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("business_object_client_due_at", "Business Object Client Due At"),
+    ("business_object_client_due_at", "Initiative Client Due At"),
     # One word.
     ("count", "Count"),
     ("role", "Role"),
@@ -32,7 +32,7 @@ def test_the_stated_cases(name, expected):
     # A generated alias, which no registry has ever seen. This is why the
     # transformation has to be a rule rather than a lookup table.
     ("avg_delay_days", "Avg Delay Days"),
-    ("business_object_count", "Business Object Count"),
+    ("business_object_count", "Initiative Count"),
     # Already-readable input is left readable rather than mangled.
     ("Total Tasks", "Total Tasks"),
 ])
@@ -43,7 +43,7 @@ def test_ordinary_names(name, expected):
 @pytest.mark.parametrize("name,expected", [
     ("task_sla_status", "Task SLA Status"),
     ("task_sla_hours", "Task SLA Hours"),
-    ("bo_id", "BO Id"),
+    ("bo_id", "Initiative Id"),
     ("moq", "MOQ"),
     ("csbd_date", "CSBD Date"),
     ("pi_date", "PI Date"),

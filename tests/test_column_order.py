@@ -140,3 +140,185 @@ def test_the_presentation_fields_survive_debug_being_off():
     # The guarantees that were already here must not have been widened.
     assert "columns" not in public["result"], "raw column names leaked"
     assert "generated_sql" not in public, "SQL leaked"
+
+
+# --- Guards on metadata/column_hierarchy.yaml itself -------------------------
+#
+# The file is a plain list of names with no schema behind it, and it exists in
+# two copies. Both of its failure modes are silent: a name that is not a real
+# column does nothing, and an edit to one copy leaves the other behind. Neither
+# shows up in presentation() output, so neither shows up in the parity harness.
+
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+
+_ROOT = Path(__file__).resolve().parents[1]
+_HIERARCHY = _ROOT / "metadata" / "column_hierarchy.yaml"
+
+
+def _module_metadata() -> Path | None:
+    """The PHP port's copy of metadata/, or None if the module is not here.
+
+    The Python project has to stay standalone -- it is the specification, and
+    it is cloned on machines that carry no Drupal -- so a missing module skips
+    rather than fails.
+    """
+    env = os.environ.get("VF_MODULE_ROOT")
+    candidates = [Path(env)] if env else []
+    candidates.append(Path("C:/xampp/htdocs/dev-arvind-retail-chatbot/web"
+                           "/modules/custom/vf_sql_chatbot"))
+    for root in candidates:
+        if (root / "metadata" / "column_hierarchy.yaml").is_file():
+            return root / "metadata"
+    return None
+
+
+def test_every_column_the_hierarchy_names_is_a_column_that_exists():
+    """An unknown name is not an error to the loader, so it has to be one here.
+
+    This is how a typo becomes a no-op: `presentation` looks the name up in a
+    rank map, misses, and treats the column as unlisted. The file reads as
+    though it configured something and configures nothing. Caught once already
+    -- tms_business_object_attributes_flat listed business_object_ref_id, a
+    column that table does not have.
+    """
+    schema = yaml.safe_load(
+        (_ROOT / "metadata" / "schema_description.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(_HIERARCHY.read_text(encoding="utf-8")) or {}
+
+    unknown = []
+    for table, spec in (cfg.get("tables") or {}).items():
+        real = set((((schema.get("tables") or {}).get(table)) or {}).get("columns") or {})
+        if not real:
+            unknown.append(f"{table} (no such table)")
+            continue
+        for key in ("priority", "hidden"):
+            unknown += [f"{table}.{col} (in {key})"
+                        for col in (spec.get(key) or []) if col not in real]
+
+    assert not unknown, "column_hierarchy.yaml names things that do not exist: " \
+                        + ", ".join(unknown)
+
+
+def test_the_two_copies_of_the_hierarchy_are_byte_identical():
+    """The port reads its own copy of this file.
+
+    Byte-identical rather than semantically equal, because line endings are one
+    of the ways it has drifted -- and because the two copies exist only so that
+    each project can be checked out alone, never so they can disagree.
+    """
+    module_metadata = _module_metadata()
+    if module_metadata is None:
+        pytest.skip("PHP module not present; set VF_MODULE_ROOT to check parity")
+
+    theirs = module_metadata / "column_hierarchy.yaml"
+    assert _HIERARCHY.read_bytes() == theirs.read_bytes(), (
+        f"{_HIERARCHY} and {theirs} have drifted; re-sync them in one commit")
+
+
+# --- Grouping nomination ----------------------------------------------------
+
+def test_a_nominated_group_and_its_aggregates_come_back_as_positions():
+    from pipeline.column_order import grouping
+
+    columns = ["business_object_type", "open_task_count", "total_task_count",
+               "business_unit"]
+    out = grouping(columns, ["tms_business_object_flat"])
+    assert out["row_groups"] == [0]
+    assert out["value_columns"] == [{"index": 1, "aggFunc": "sum"},
+                                    {"index": 2, "aggFunc": "sum"}]
+
+
+def test_pivot_is_not_nominated_anywhere_yet():
+    """Grouping shipped without it deliberately.
+
+    Pivot is the half that breaks the layout: pagination counts top-level
+    groups, so with pivotMode and no row groups the pager reads "1 to 1 of 1".
+    """
+    from pipeline.column_order import grouping
+
+    for table in ("tms_business_object_flat", "tms_task_flat"):
+        assert grouping(["business_object_type", "task_department"],
+                        [table])["pivot_columns"] == []
+
+
+def test_a_table_that_nominates_nothing_is_never_grouped():
+    """The default. Grouping changes what a row means, so it is opt-in."""
+    from pipeline.column_order import grouping
+
+    out = grouping(["user_id", "user_name"], ["tms_user_flat"])
+    assert out == {"row_groups": [], "pivot_columns": [], "value_columns": []}
+
+
+def test_a_nomination_the_result_did_not_project_is_simply_absent():
+    """The nomination is per table; the result is per question."""
+    from pipeline.column_order import grouping
+
+    out = grouping(["business_object_id", "business_object_status"],
+                   ["tms_business_object_flat"])
+    assert out["row_groups"] == []
+    assert out["value_columns"] == []
+
+
+def test_an_unknown_aggfunc_is_dropped_rather_than_passed_through():
+    """ag-grid renders an unknown aggFunc as a blank column and says nothing,
+    which is the same silent failure an unknown column name has in this
+    file -- so it is rejected here instead."""
+    import pipeline.column_order as co
+
+    spec = {"value_columns": [{"column": "open_task_count", "aggFunc": "median"},
+                              {"column": "total_task_count", "aggFunc": "SUM"}]}
+    original = co._spec
+    co._spec = lambda tables: spec
+    try:
+        out = co.grouping(["open_task_count", "total_task_count"], ["anything"])
+    finally:
+        co._spec = original
+
+    # median is not one of the seven; SUM is, case-insensitively.
+    assert out["value_columns"] == [{"index": 1, "aggFunc": "sum"}]
+
+
+def test_no_columns_is_not_an_error_for_grouping_either():
+    from pipeline.column_order import grouping
+
+    assert grouping(None, ["tms_task_flat"]) == {
+        "row_groups": [], "pivot_columns": [], "value_columns": []}
+
+
+def test_grouping_survives_debug_being_off():
+    from pipeline.redact import public_response
+
+    out = public_response({"result": {
+        "rows": [["AR_YD_Suiting", 3]], "column_labels": ["Type", "Open"],
+        "grouping": {"row_groups": [0], "pivot_columns": [],
+                     "value_columns": [{"index": 1, "aggFunc": "sum"}]},
+    }})
+    assert out["result"]["grouping"]["row_groups"] == [0]
+
+
+def test_every_nominated_column_exists_and_every_aggfunc_is_real():
+    """The same guard priority and hidden get, for the same reason."""
+    import yaml
+    from pipeline.column_order import _AGG_FUNCS
+
+    schema = yaml.safe_load(
+        (_ROOT / "metadata" / "schema_description.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load(_HIERARCHY.read_text(encoding="utf-8")) or {}
+
+    problems = []
+    for table, spec in (cfg.get("tables") or {}).items():
+        real = set((((schema.get("tables") or {}).get(table)) or {}).get("columns") or {})
+        for column in (spec.get("row_groups") or []) + (spec.get("pivot_columns") or []):
+            if column not in real:
+                problems.append(f"{table}.{column} (nominated, does not exist)")
+        for entry in (spec.get("value_columns") or []):
+            if entry.get("column") not in real:
+                problems.append(f"{table}.{entry.get('column')} (value, does not exist)")
+            if str(entry.get("aggFunc") or "").lower() not in _AGG_FUNCS:
+                problems.append(f"{table}.{entry.get('column')}: bad aggFunc "
+                                f"{entry.get('aggFunc')!r}")
+    assert not problems, "; ".join(problems)

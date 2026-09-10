@@ -55,10 +55,30 @@
          "columns":       ["business_object_id", "..."],   // debug only
          // What the table actually renders. Derived from `columns` by
          // pipeline/labels.py, so the query and the heading never disagree.
-         "column_labels": ["Business Object Id", "..."],
+         "column_labels": ["Initiative Id", "..."],
          "rows":          [[112, "..."], ...],     // a preview is fine
          "row_count":     22,
-         "truncated":     false
+         "truncated":     false,
+
+         // Presentation metadata, all of it positional so that none of it
+         // names a column and all of it survives redaction. `columns` does
+         // not, and debug off is the mode the grid runs in.
+         "column_order":   [1, 0, 2],   // display order, as positions
+         "hidden_columns": [2],         // start collapsed, still exported
+         // Which cell identifies the initiative. `ref_id` is the cell that
+         // opens the details dialog; `id` is what the dialog is given. Any
+         // of the three may be null -- an aggregate has none of them.
+         "initiative":     {"id": 0, "ref_id": 1, "colour": null},
+         // Initiative id -> the CSS class the colour bar draws. Absent when
+         // the answer has no initiative, or no colour could be resolved.
+         "colours":        {"112": "a_bl"},
+         // The grouping the table nominated, if any. Empty lists mean the
+         // grid shows records, not groups.
+         "grouping": {
+           "row_groups":    [0],
+           "pivot_columns": [],
+           "value_columns": [{"index": 3, "aggFunc": "sum"}]
+         }
        },
 
        // ------------------------------------- scoring, when ground truth exists

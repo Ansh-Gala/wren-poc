@@ -33,6 +33,7 @@ import _bootstrap  # noqa: F401
 from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
+from pipeline.initiative import with_initiative
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
@@ -140,7 +141,8 @@ def state_mutations(before: dict, after: dict) -> list[str]:
     return out
 
 
-def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
+def to_response(r: TurnResult, asked: str, before: dict, after: dict,
+                settings=None) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
 
     result_match and semantic_match come through as None, which the console
@@ -164,8 +166,14 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict) -> dict:
         "error": safe_error(r.error, getattr(r, "sqlstate", None)),
         "raw_error": r.error,
         "failure_category": r.failure_category,
+        # with_initiative is innermost: it needs the real column names, and
+        # the two wrappers around it only add fields.
         "result": with_presentation(
-            with_column_labels(r.actual_result), after.get("tables")),
+            with_column_labels(
+                with_initiative(r.actual_result,
+                                (r.actual_result or {}).get("columns"),
+                                settings)),
+            after.get("tables")),
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,
@@ -339,7 +347,7 @@ class Runtime:
 
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
-        full = to_response(result, question, before, after)
+        full = to_response(result, question, before, after, self.settings)
 
         # Bounded: a long session should not grow without limit, and nobody
         # scrolls back past fifty answers to read their SQL. Under the lock

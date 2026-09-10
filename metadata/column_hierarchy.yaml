@@ -12,6 +12,19 @@
 # everything named. `hidden` columns are still in the result and still
 # exported; they simply do not open by default.
 #
+# `row_groups` and `value_columns` are the grouping nomination, and they are
+# optional: a table that names neither is never grouped. Nothing is enabled
+# unconditionally, because grouping changes what a row means and a page of
+# groups is not a page of records. Each entry in `value_columns` carries an
+# `aggFunc`, validated against the seven ag-grid accepts -- an unknown name
+# yields blank aggregates rather than an error, which is the same silent
+# failure an unknown column name has here.
+#
+# Pivot is deliberately not nominated. It is the half that breaks the layout:
+# pagination counts top-level groups, so with pivotMode and no row groups the
+# pager reads "1 to 1 of 1", and sizeColumnsToFit nulls flex against dozens of
+# generated columns. The frontend suppresses it until a nomination exists.
+#
 # Only columns that exist are listed. The names below were taken from
 # metadata/schema_description.yaml, not from memory.
 
@@ -21,7 +34,6 @@ tables:
   tms_business_object_flat:
     priority:
       - business_object_id
-      - business_object_ref_id
       - business_object_status
       - business_object_type
       - business_unit
@@ -30,6 +42,10 @@ tables:
       - days_to_due_date
       - open_task_count
       - total_task_count
+      # Demoted below the counts. The id is what opens the initiative and the
+      # reference is long enough to crowd the columns a reader came for, so it
+      # earns its place after them rather than second.
+      - business_object_ref_id
       - workflow_name
       - workflow_code
       - current_active_milestone
@@ -47,6 +63,16 @@ tables:
       - common_buffer
       - buff_penetration_prcnt
       - buff_penetration_days
+    # Type is the dimension a question about initiatives almost always means,
+    # and the task counts are pre-aggregated, so summing them across a group
+    # is the same arithmetic the database already did per row.
+    row_groups:
+      - business_object_type
+    value_columns:
+      - column: open_task_count
+        aggFunc: sum
+      - column: total_task_count
+        aggFunc: sum
 
   tms_task_flat:
     priority:
@@ -74,6 +100,14 @@ tables:
       - task_reopen_at
       # Presentation form of task_status; showing both is showing it twice.
       - task_display_status
+    # Department is the grouping a task list is usually read by. Elapsed days
+    # averages rather than sums: a total of elapsed days across a department
+    # is a number with no meaning.
+    row_groups:
+      - task_department
+    value_columns:
+      - column: task_elapsed_days
+        aggFunc: avg
 
   tms_business_object_attributes_flat:
     priority:

@@ -1,17 +1,17 @@
 rules:
   - name: active_business_object
     definition: >-
-      An Active business object (Initiative, Order, BO) is one where business_object_status = 'Active'.
+      An Active Initiative (Business Object, Order, BO) is one where business_object_status = 'Active'.
     sql_fragment: "tms_business_object_flat.business_object_status = 'Active'"
 
   - name: short_closed_business_object
     definition: >-
-      A Short Closed business object is one where business_object_status = 'Short Closed'.
+      A Short Closed Initiative is one where business_object_status = 'Short Closed'.
     sql_fragment: "tms_business_object_flat.business_object_status = 'Short Closed'"
 
   - name: closed_business_object
     definition: >-
-      A Closed business object is one where business_object_status = 'Closed'.
+      A Closed Initiative is one where business_object_status = 'Closed'.
     sql_fragment: "tms_business_object_flat.business_object_status = 'Closed'"
 
   - name: open_task
@@ -61,7 +61,7 @@ rules:
 
   - name: count_business_objects_from_tasks
     definition: >-
-      When counting Business Objects from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).
+      When counting Initiatives from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).
     sql_fragment: "COUNT(DISTINCT tms_task_flat.bo_id)"
 
   - name: default_to_active
@@ -86,9 +86,9 @@ rules:
       question asks how records are distributed across statuses -- "how many by
       status", "the status breakdown" -- because adding the filter would empty
       the answer. When the question counts distinct values of a column rather
-      than counting records: "how many distinct business object types are
+      than counting records: "how many distinct initiative types are
       there". And when the question is about missing or malformed data, such as
-      "how many business objects have no workflow name recorded", because an
+      "how many initiatives have no workflow name recorded", because an
       answer that saw only the active rows would not be an answer about the
       data. When the conversation already carries a status filter, that filter
       decides. Never use task_display_status for any of this; task_status is
