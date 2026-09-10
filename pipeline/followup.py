@@ -31,6 +31,7 @@ from pathlib import Path
 import yaml
 
 from pipeline.column_order import hidden_names
+from pipeline.labels import column_phrase
 
 # What a suggestion can ask the system to do. Each maps onto a mutation of
 # ConversationState, and from there back through the normal pipeline -- so
@@ -368,7 +369,7 @@ def explore(state, row_count: int | None,
                 continue
             suggestions.append(Suggestion(
                 id=f"group_{_slug(column)}",
-                label=f"Group by {column.replace('_', ' ')}",
+                label=f"Group by {column_phrase(column)}",
                 action=Action(type="add_group_by", field=column),
             ))
             break
@@ -384,7 +385,7 @@ def explore(state, row_count: int | None,
             if column:
                 suggestions.append(Suggestion(
                     id=f"sort_{_slug(column)}",
-                    label=f"Sort by {column.replace('_', ' ')}",
+                    label=f"Sort by {column_phrase(column)}",
                     action=Action(type="set_sort", field=column, operator="DESC"),
                 ))
                 break
@@ -410,9 +411,9 @@ def explore(state, row_count: int | None,
             and f"'{defaulted}'" in (in_force_predicates.get(column) or "")
         )
         label = (
-            f"Show every {column.replace('_', ' ')}, not just {defaulted.lower()}"
+            f"Show every {column_phrase(column)}, not just {defaulted.lower()}"
             if was_defaulted
-            else f"Remove the {column.replace('_', ' ')} filter"
+            else f"Remove the {column_phrase(column)} filter"
         )
         suggestions.append(Suggestion(
             id=f"remove_{_slug(column)}",
@@ -454,7 +455,7 @@ def apply_action(state, action: Action) -> str:
     written here is provisional in exactly the way the rest of the pipeline
     expects: update_state overwrites it from whatever query actually ran.
     """
-    label = (action.field or "").replace("_", " ")
+    label = column_phrase(action.field)
 
     if action.type in ("add_filter", "replace_filter"):
         operator = action.operator or "="

@@ -7,26 +7,26 @@ catalog: ''
 schema: public
 tables:
   tms_business_object_flat:
-    description: Flat TMS Business Object table containing business-object identity, business unit, type,
+    description: Flat TMS Initiative table containing initiative identity, business unit, type,
       priority/color, due dates, buffers, workflow, process status, milestone and task summary information.
-      Also known as Initiative, Order, or BO.
+      Also known as Business Object, Order, or BO.
     primary_key: business_object_id
     columns:
       business_object_id:
         type: INTEGER
-        description: Unique identifier of the Business Object / Initiative / Order / BO.
+        description: Unique identifier of the Initiative / Business Object / Order / BO.
       business_object_ref_id:
         type: VARCHAR
-        description: Human-readable reference identifier of the Business Object.
+        description: Human-readable reference identifier of the Initiative.
       business_unit:
         type: VARCHAR
-        description: Business unit associated with the Business Object.
+        description: Business unit associated with the Initiative.
         values:
         - PVH
         - unit1
       business_object_type:
         type: VARCHAR
-        description: 'Type of the Business Object, e.g. AR_YD_Suiting, AR_NPD_Shirting. This is the canonical
+        description: 'Type of the Initiative, e.g. AR_YD_Suiting, AR_NPD_Shirting. This is the canonical
           column for the kind of item a question names: when a user says "AR_YD_Suiting items" or "TESTING_MG
           items", filter on this column. Values are case-sensitive and include near-duplicates that are
           genuinely distinct types (AR_YD_Shirting and AR_YD_SHIRTING). Do not substitute workflow_code
@@ -51,7 +51,7 @@ tables:
         - test
       business_object_color:
         type: VARCHAR
-        description: Priority/color classification of the Business Object.
+        description: Priority/color classification of the Initiative.
         values:
         - Black
         - Green
@@ -59,19 +59,19 @@ tables:
         - White
       business_object_note:
         type: VARCHAR
-        description: Business note or remark associated with the Business Object.
+        description: Business note or remark associated with the Initiative.
       business_object_created_at:
         type: TIMESTAMP
-        description: Timestamp when the Business Object was created.
+        description: Timestamp when the Initiative was created.
       business_object_updated_at:
         type: TIMESTAMP
-        description: Timestamp when the Business Object was last updated.
+        description: Timestamp when the Initiative was last updated.
       business_object_client_due_at:
         type: TIMESTAMP
         description: Client/customer-required due date. Not the system/buffered due date.
       common_buffer:
         type: INTEGER
-        description: Common buffer associated with the Business Object.
+        description: Common buffer associated with the Initiative.
       buff_penetration_prcnt:
         type: REAL
         description: Percentage of buffer penetration.
@@ -80,19 +80,19 @@ tables:
         description: Buffer penetration expressed in days.
       total_remaining_duration:
         type: INTEGER
-        description: Total remaining duration for the Business Object.
+        description: Total remaining duration for the Initiative.
       days_to_due_date:
         type: INTEGER
         description: Days remaining until the due date; negative means the due date has passed.
       hold_days:
         type: INTEGER
-        description: Number of days the Business Object has been on hold.
+        description: Number of days the Initiative has been on hold.
       workflow_id:
         type: INTEGER
-        description: Identifier of the workflow associated with the Business Object.
+        description: Identifier of the workflow associated with the Initiative.
       workflow_code:
         type: VARCHAR
-        description: 'Code of the workflow attached to the Business Object. NOT a substitute for business_object_type:
+        description: 'Code of the workflow attached to the Initiative. NOT a substitute for business_object_type:
           it is NULL for 72 of 307 rows and differs from the type on 75, so filtering on it silently drops
           rows. Use it only when the question is explicitly about the workflow rather than the item type.'
         values:
@@ -109,7 +109,7 @@ tables:
         - test
       workflow_name:
         type: VARCHAR
-        description: Name of the workflow attached to the Business Object. NULL for 72 of 307 rows. Like
+        description: Name of the workflow attached to the Initiative. NULL for 72 of 307 rows. Like
           workflow_code, not a substitute for business_object_type.
         values:
         - AR_NPD_Shirting
@@ -125,17 +125,17 @@ tables:
         - test
       business_object_status:
         type: VARCHAR
-        description: Business Object process status, mapped as Active, Closed, or Short Closed.
+        description: Initiative process status, mapped as Active, Closed, or Short Closed.
         values:
         - Active
         - Closed
         - Short Closed
       business_object_start_date:
         type: TIMESTAMP
-        description: Start timestamp of the Business Object process.
+        description: Start timestamp of the Initiative process.
       business_object_end_date:
         type: TIMESTAMP
-        description: End timestamp of the Business Object process.
+        description: End timestamp of the Initiative process.
       elapsed_days:
         type: DOUBLE
         description: Elapsed duration of the process in days.
@@ -144,12 +144,12 @@ tables:
         description: Expected completion date based on remaining duration.
       short_closed_by:
         type: VARCHAR
-        description: User who short-closed the Business Object.
+        description: User who short-closed the Initiative.
         values:
         - WCMS Admin
       short_closed_on:
         type: TIMESTAMP
-        description: Timestamp when the Business Object was short-closed.
+        description: Timestamp when the Initiative was short-closed.
       current_active_milestone:
         type: VARCHAR
         description: 'Current active milestone. Empty in this database: NULL in every row, so a filter
@@ -167,36 +167,36 @@ tables:
           use it to answer a question; say the data is not held instead.'
       total_task_count:
         type: BIGINT
-        description: 'Total number of tasks on this Business Object, pre-aggregated. Prefer it over counting
+        description: 'Total number of tasks on this Initiative, pre-aggregated. Prefer it over counting
           rows in tms_task_flat: same answer, one table.'
       open_task_count:
         type: BIGINT
-        description: Number of open tasks on this Business Object, pre-aggregated. Prefer it over counting
+        description: Number of open tasks on this Initiative, pre-aggregated. Prefer it over counting
           tms_task_flat rows with task_status = 'open'.
       closed_task_count:
         type: BIGINT
-        description: Number of closed tasks on this Business Object, pre-aggregated. Prefer it over counting
+        description: Number of closed tasks on this Initiative, pre-aggregated. Prefer it over counting
           tms_task_flat rows with task_status = 'closed'.
       delayed_task_count:
         type: BIGINT
-        description: 'Number of currently delayed OPEN tasks on this Business Object. It does NOT include
+        description: 'Number of currently delayed OPEN tasks on this Initiative. It does NOT include
           closed tasks that breached SLA: across the database it sums to 481 while 635 tasks have task_sla_status
           = ''Delayed'', the difference being 154 delayed closed tasks. Use this column for "has delayed
           work outstanding"; join to tms_task_flat on task_sla_status = ''Delayed'' if closed breaches
           should count too.'
       open_tasks_list:
         type: VARCHAR
-        description: List of open task names associated with the Business Object.
+        description: List of open task names associated with the Initiative.
   tms_business_object_attributes_flat:
-    description: Dynamic JSON attributes for the Business Object, such as season, category, quality, etc.
+    description: Dynamic JSON attributes for the Initiative, such as season, category, quality, etc.
     primary_key: business_object_id
     columns:
       business_object_id:
         type: INTEGER
-        description: Unique identifier of the Business Object.
+        description: Unique identifier of the Initiative.
       category:
         type: VARCHAR
-        description: Category attribute for the Business Object.
+        description: Category attribute for the Initiative.
       initiative_type:
         type: VARCHAR
         description: 'Initiative type attribute. Empty in this database: NULL in every row, so a filter
@@ -207,7 +207,7 @@ tables:
         description: End date attribute, stored as text.
       season:
         type: VARCHAR
-        description: 'Season attribute for the Business Object. Sparsely populated: only 16 of 307 rows
+        description: 'Season attribute for the Initiative. Sparsely populated: only 16 of 307 rows
           have a value, and they all belong to the AR_NPD_YD_SALESPLAN, AR_SALESPLAN_Shirting and AR_SALESPLAN_Suiting
           types.'
         values:
@@ -237,7 +237,7 @@ tables:
           is not held instead.'
       data_color:
         type: VARCHAR
-        description: 'Colour attribute recorded on the Business Object data. Empty in this database: NULL
+        description: 'Colour attribute recorded on the Initiative data. Empty in this database: NULL
           in every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not
           use it to answer a question; say the data is not held instead.'
       brandix_t_a:
@@ -310,7 +310,7 @@ tables:
         description: Assign date attribute, stored as text.
       quality:
         type: VARCHAR
-        description: Quality attribute for the Business Object. Present in the view but NULL for every
+        description: Quality attribute for the Initiative. Present in the view but NULL for every
           row in this database, so no filter on it can return results.
       buyer:
         type: VARCHAR
@@ -369,7 +369,7 @@ tables:
           a question; say the data is not held instead.'
   tms_task_flat:
     description: Flat TMS task table containing task identity, assignment, status, dates, SLA/buffer,
-      workflow/process context, Business Object context, and task-related business fields.
+      workflow/process context, Initiative context, and task-related business fields.
     primary_key: task_id
     columns:
       task_id:
@@ -508,23 +508,23 @@ tables:
         description: Foreign key to tms_business_object_flat.business_object_id.
       business_object_ref_id:
         type: VARCHAR
-        description: Reference ID of the associated Business Object.
+        description: Reference ID of the associated Initiative.
       business_unit:
         type: VARCHAR
-        description: Business unit of the parent Business Object.
+        description: Business unit of the parent Initiative.
         values:
         - PVH
         - unit1
       business_object_status:
         type: VARCHAR
-        description: Status of the parent Business Object, as text.
+        description: Status of the parent Initiative, as text.
         values:
         - Active
         - Closed
         - Short Closed
       business_object_type:
         type: VARCHAR
-        description: Type of the associated Business Object.
+        description: Type of the associated Initiative.
         values:
         - AR_NPD_Shirting
         - AR_NPD_Suiting
@@ -542,7 +542,7 @@ tables:
         - test
       business_object_color:
         type: VARCHAR
-        description: Priority/colour of the parent Business Object.
+        description: Priority/colour of the parent Initiative.
         values:
         - a_bl
         - b_re
@@ -550,7 +550,7 @@ tables:
         - e_wh
       is_business_object_delayed:
         type: VARCHAR
-        description: Indicates whether the parent Business Object is delayed.
+        description: Indicates whether the parent Initiative is delayed.
         values:
         - 'No'
         - 'Yes'
@@ -612,18 +612,18 @@ relationships:
   from: tms_task_flat.bo_id
   to: tms_business_object_flat.business_object_id
   join_type: MANY_TO_ONE
-  description: A task belongs to a Business Object.
+  description: A task belongs to an Initiative.
 - name: business_object_attributes
   from: tms_business_object_attributes_flat.business_object_id
   to: tms_business_object_flat.business_object_id
   join_type: ONE_TO_ONE
-  description: Attributes for a business object.
+  description: Attributes for an initiative.
 terminology:
-  business object: Also known as Initiative, Order, or BO. Represents a workflow process.
+  initiative: Also known as Business Object, Order, or BO. Represents a workflow process.
   delayed task: A task whose elapsed duration exceeds its SLA buffer.
   my tasks: Tasks assigned to the current user that are open and meant to be displayed.
 ambiguities:
-- subject: business object synonyms
+- subject: initiative synonyms
   note: Initiative, Order, BO, and Business Object all refer to tms_business_object_flat.
 - subject: task assignment
   note: Use assigned_user_id to check who is assigned to a task.

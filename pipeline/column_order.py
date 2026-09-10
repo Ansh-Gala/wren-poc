@@ -53,6 +53,56 @@ def _spec(tables: list[str] | None) -> dict:
     return {}
 
 
+# The aggregations ag-grid ships. An unknown name is not an error to ag-grid:
+# it yields blank aggregates, which is the same silent failure an unknown
+# column name has in this file -- so it is rejected here instead.
+_AGG_FUNCS = frozenset({"sum", "first", "last", "min", "max", "count", "avg"})
+
+
+def grouping(columns: list[str] | None, tables: list[str] | None) -> dict:
+    """Which columns to group by, and which to aggregate, as positions.
+
+    Positions for the same reason as `order`: a result may project one name
+    twice and the grid keys its rows by index.
+
+    Empty lists when the table nominates nothing, which is the normal case.
+    Grouping changes what a row means -- a page of groups is not a page of
+    records -- so it is never turned on because a column happened to be
+    present, only because this file named it.
+
+    `pivot_columns` is read but stays empty until a table nominates one:
+    pivot is the half that breaks the layout, and the frontend suppresses it
+    while nothing is nominated.
+    """
+    names = list(columns or [])
+    if not names:
+        return {"row_groups": [], "pivot_columns": [], "value_columns": []}
+
+    spec = _spec(tables)
+
+    def positions(wanted: list[str]) -> list[int]:
+        return [i for i, name in enumerate(names) if name in set(wanted or [])]
+
+    values = []
+    for entry in (spec.get("value_columns") or []):
+        if not isinstance(entry, dict):
+            continue
+        agg = str(entry.get("aggFunc") or "").strip().lower()
+        if agg not in _AGG_FUNCS:
+            # Named but unusable. Dropped rather than passed through, because
+            # ag-grid would render an empty column and say nothing.
+            continue
+        for i, name in enumerate(names):
+            if name == entry.get("column"):
+                values.append({"index": i, "aggFunc": agg})
+
+    return {
+        "row_groups": positions(spec.get("row_groups")),
+        "pivot_columns": positions(spec.get("pivot_columns")),
+        "value_columns": values,
+    }
+
+
 def presentation(columns: list[str] | None, tables: list[str] | None) -> dict:
     """Where each column should sit, and which start collapsed.
 
