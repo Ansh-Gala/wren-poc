@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import threading
@@ -22,6 +23,36 @@ from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
 from config.settings import Settings
 from llm_api.provider import LLMProvider
+
+
+# The system prompt goes to a file, not onto the command line.
+#
+# Windows caps an entire command line at 32,767 characters. The prompt passed
+# 35,900 when the attachment and task-issue views were described, and every
+# call then failed with "[WinError 206] The filename or extension is too long"
+# before the CLI was even reached. The text is identical either way; only how
+# it is handed over changes.
+#
+# The file is named by the hash of its contents, so the same prompt is written
+# once and reused by every later call and by every pooled process. Nothing
+# deletes them: they are small, they live in the system temp directory, and a
+# fixed name means a concurrent run finds the file already correct rather than
+# racing to rewrite it.
+def system_prompt_file(text: str) -> str:
+    """Write ``text`` to a temp file named by its hash, and return the path."""
+    import hashlib
+    import tempfile
+
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    path = pathlib.Path(tempfile.gettempdir()) / f"wren_system_prompt_{digest}.txt"
+    if not path.exists():
+        # Write beside the target and move into place, so a reader never sees
+        # a half-written prompt if two runs start at once.
+        tmp = path.with_suffix(f".{os.getpid()}.part")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    return str(path)
+
 
 
 def detect_claude(command: str = "claude") -> str | None:
@@ -61,8 +92,8 @@ def build_command(
             "--output-format",
             "stream-json",
             "--verbose",
-            "--system-prompt",
-            build_lean_system_prompt(),
+            "--system-prompt-file",
+            system_prompt_file(build_lean_system_prompt()),
             "--tools",
             "",
             "--permission-mode",
@@ -89,8 +120,8 @@ def build_command(
         # Only the Wren server from the file above. Any MCP server the user has
         # configured globally is excluded, so runs are reproducible.
         "--strict-mcp-config",
-        "--append-system-prompt",
-        build_system_prompt(),
+        "--append-system-prompt-file",
+        system_prompt_file(build_system_prompt()),
         # bypassPermissions so no run can stall waiting for a prompt that
         # nobody is there to answer. Safety comes from --disallowedTools below,
         # which is a hard deny, plus a SELECT-only database role. Note that
