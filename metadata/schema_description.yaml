@@ -607,6 +607,236 @@ tables:
       department_path:
         type: VARCHAR
         description: Full department/sub-department path for the role.
+  tms_attachment_flat:
+    description: Files attached to an Initiative or one of its tasks, joined to the tag that classifies
+      them and to the stored file record. One row per attachment, 111 attachments across 48 Initiatives.
+      Only active attachments are present, so this table cannot answer questions about deleted or inactive
+      ones.
+    primary_key: task_id
+    columns:
+      initiative_id:
+        type: INTEGER
+        description: The Initiative this attachment belongs to. Joins to tms_initiative_flat.initiative_id.
+          48 of the 307 Initiatives have an attachment.
+      task_id:
+        type: INTEGER
+        description: The task this attachment belongs to. Joins to tms_task_flat.task_id. Unique in this
+          view, one row per task.
+      tag_name:
+        type: VARCHAR
+        description: What the attachment is for, from the tagging configuration, for example 'Costing
+          details and mail copy'. This is the column to filter on when a question names a kind of document.
+        values:
+        - Attach email from sales team
+        - Blend and Merchants final selection
+        - Costing details and mail copied to Sales
+        - Costing files from each vendor
+        - Data base and CAD number
+        - EPI PPI Sheet
+        - Final Excel with EPI PPI
+        - Final sourcing plan
+        - Generated PO
+        - Generated PR
+        - Mail containing updates
+        - Mail to vendors
+        - Mail with Merchants and MOQs
+        - Mail with- Region, Blends, Variety , Shade
+        - Mail/Suggestion sheet
+        - 'Penelope copy of Color pallet '
+        - Priority list
+        - SO number, tech sheet and CAD number
+        - SO number, tech sheet and CAD numbers
+        - Tech sheet
+        - Vendor to merchant list
+        - test attachment 3
+      tag_desc:
+        type: VARCHAR
+        description: Description of the tag. Empty in this database, '' in every row, so a filter on it
+          returns nothing. Do not use it to answer a question; say the data is not held instead.
+      folder_path:
+        type: VARCHAR
+        description: Storage folder the file was filed under.
+        values:
+        - ArvindRetail/Sales
+        - ArvindRetail/Shirting
+        - ArvindRetail/Suiting
+        - bo_files
+      task_names:
+        type: VARCHAR
+        description: Comma-separated task names the tag applies to. Configuration of the tag, not of this
+          attachment.
+      extensions:
+        type: VARCHAR
+        description: Comma-separated file extensions the tag permits. Configuration of the tag, not of
+          this attachment, so it does not say what this file's extension is. For that, read file_name.
+        values:
+        - msg
+        - pptx,docx,csv,xlsx,jpeg,png,pdf
+        - pptx,docx,csv,xlsx,jpeg,png,pdf,msg,oft,eml,zip
+      max_file_size:
+        type: VARCHAR
+        description: Maximum upload size the tag permits, in bytes, held as text. Configuration of the
+          tag. It is not this file's size, which is file_size.
+        values:
+        - '2097152'
+        - '20971520'
+      initiative_name:
+        type: VARCHAR
+        description: Despite its name this holds Initiative TYPE values such as AR_YD_Shirting and AR_NPD_Shirting,
+          the same vocabulary as tms_initiative_flat.initiative_type. It is the Initiative type the tag
+          applies to, configuration of the tag rather than a name of any one Initiative. To filter attachments
+          by the type of their Initiative, join tms_initiative_flat on initiative_id instead.
+        values:
+        - AR_NPD_Shirting
+        - AR_PD_Shirting
+        - AR_PD_Suiting
+        - AR_SALESPLAN_Shirting
+        - AR_SALESPLAN_Suiting
+        - AR_YD_Shirting
+        - AR_YD_Suiting
+        - TESTING_MG
+      sequence:
+        type: INTEGER
+        description: Ordering position of the tag. Empty in this database, 0 in every row, so ordering
+          by it does nothing. Do not use it to answer a question; say the data is not held instead.
+      file_name:
+        type: VARCHAR
+        description: Name of the uploaded file, including its extension.
+      file_uri:
+        type: VARCHAR
+        description: Storage URI of the uploaded file.
+      file_size:
+        type: BIGINT
+        description: Size of this uploaded file in bytes. This is the real size of the file; max_file_size
+          is the tag's limit.
+      entity_type:
+        type: VARCHAR
+        description: Empty in this database, '' in every row, because the view selects only rows where
+          it is null or empty. Do not use it to answer a question; say the data is not held instead.
+      entity_id:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it to answer a question; say
+          the data is not held instead.
+      status:
+        type: VARCHAR
+        description: Constant in this database, 'active' in every row, because the view selects only active
+          attachments. A count of active attachments is therefore just a count of rows, and there are
+          no inactive ones to find.
+        values:
+        - active
+      attachment_created_at:
+        type: TIMESTAMP
+        description: When the attachment was uploaded.
+      attachment_created_by_user_id:
+        type: INTEGER
+        description: User who uploaded the attachment. Joins to tms_user_flat.user_id.
+  tms_task_issue_flat:
+    description: Issues raised against a task, with a count of their comments and the most recent one.
+      25 issues across 8 tasks. It carries no issue identifier of its own, because the source groups by
+      the issue id but does not select it, so an individual issue cannot be addressed by id; count and
+      group instead. It has no Initiative column either, so to reach the Initiative join tms_task_flat
+      on task_id.
+    columns:
+      task_id:
+        type: INTEGER
+        description: The task the issue was raised against. Joins to tms_task_flat.task_id. The 25 issues
+          fall on only 8 distinct tasks, so counting issues and counting tasks with issues give very different
+          answers.
+      issue_title:
+        type: VARCHAR
+        description: Short title of the issue.
+      issue_description:
+        type: VARCHAR
+        description: Free-text description of the issue.
+        values:
+        - TEST
+        - abc
+        - issue test
+        - issue_desc
+      issue_sub_department:
+        type: VARCHAR
+        description: Sub-department the issue was raised against, resolved from the issue's department
+          role.
+        values:
+        - Arvind Retail QA Team
+        - Central Sales Team
+        - Design Team
+        - QA and Design Team
+        - Sales team
+        - Sourcing Team
+        - User Management
+      issue_category_name:
+        type: VARCHAR
+        description: The issue category as a name, for example 'Delay from Vendor'. This is the column
+          to filter on when a question names a reason or a category.
+        values:
+        - Delay due to internal training
+        - Delay from Vendor
+        - Delay in Manufacturing
+        - Incorrect format used
+        - Mail not received
+        - Other Issues
+        - Stock Mismatch
+      issue_status:
+        type: VARCHAR
+        description: Issue status. The vocabulary differs from tasks, an issue may be 'resolved' as well
+          as 'open' or 'closed', and tms_task_flat.task_status has no such value. A question about resolved
+          work means issues, not tasks.
+        values:
+        - closed
+        - open
+        - resolved
+      issue_hold_days:
+        type: INTEGER
+        description: Days the issue was on hold. Empty in this database, 0 in every row, so a filter on
+          it returns nothing. Do not use it to answer a question; say the data is not held instead.
+      issue_assigned_user_id:
+        type: INTEGER
+        description: User the issue is assigned to. Joins to tms_user_flat.user_id.
+      issue_resolved_by_user_id:
+        type: BIGINT
+        description: User who resolved the issue. Joins to tms_user_flat.user_id. NULL while the issue
+          is unresolved.
+      issue_closed_by_user_id:
+        type: BIGINT
+        description: User who closed the issue. Joins to tms_user_flat.user_id. NULL while the issue is
+          unclosed.
+      issue_created_by_user_id:
+        type: BIGINT
+        description: User who raised the issue. Joins to tms_user_flat.user_id.
+      issue_updated_by_user_id:
+        type: BIGINT
+        description: User who last updated the issue. Joins to tms_user_flat.user_id.
+      issue_created_at:
+        type: TIMESTAMP
+        description: When the issue was raised.
+      issue_updated_at:
+        type: TIMESTAMP
+        description: When the issue was last updated.
+      issue_resolved_at:
+        type: TIMESTAMP
+        description: When the issue was resolved. NULL for 21 of the 25 issues, so an average over it
+          covers only the four that were resolved.
+      issue_closed_at:
+        type: TIMESTAMP
+        description: When the issue was closed. NULL for 22 of the 25 issues.
+      comment_count:
+        type: BIGINT
+        description: Number of comments on the issue, pre-aggregated. Only 7 of the 25 issues have any
+          comment at all, so an average across all issues is mostly zeroes.
+      last_comment:
+        type: VARCHAR
+        description: Text of the most recent comment, or NULL where there are none.
+        values:
+        - Attaching the details of products
+        - Attaching the product details
+        - Fixed the incorrect formatting
+        - cde
+        - resolved
+        - test comment
+      last_comment_at:
+        type: TIMESTAMP
+        description: When the most recent comment was posted. NULL for the 18 issues with no comments.
 relationships:
 - name: task_initiative
   from: tms_task_flat.initiative_id
@@ -618,10 +848,29 @@ relationships:
   to: tms_initiative_flat.initiative_id
   join_type: ONE_TO_ONE
   description: Attributes for an initiative.
+- name: attachment_initiative
+  from: tms_attachment_flat.initiative_id
+  to: tms_initiative_flat.initiative_id
+  join_type: MANY_TO_ONE
+  description: An attachment belongs to an Initiative.
+- name: attachment_task
+  from: tms_attachment_flat.task_id
+  to: tms_task_flat.task_id
+  join_type: ONE_TO_ONE
+  description: An attachment belongs to a task. One attachment per task in this data.
+- name: task_issue_task
+  from: tms_task_issue_flat.task_id
+  to: tms_task_flat.task_id
+  join_type: MANY_TO_ONE
+  description: An issue is raised against a task. Join through here to reach the Initiative, which the
+    issue view does not carry.
 terminology:
   initiative: Also known as Business Object, Order, or BO. Represents a workflow process.
   delayed task: A task whose elapsed duration exceeds its SLA buffer.
   my tasks: Tasks assigned to the current user that are open and meant to be displayed.
+  attachment: A file uploaded against an Initiative or one of its tasks. Only active attachments are held.
+  issue: A problem raised against a task. Issues have their own status vocabulary and may be 'resolved',
+    which tasks never are.
 ambiguities:
 - subject: initiative synonyms
   note: Initiative, Order, BO, and Business Object all refer to tms_initiative_flat.
