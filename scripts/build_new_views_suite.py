@@ -25,7 +25,7 @@ q("A10", "Join", "How many attachments did each user upload, by user name?", f"S
 q("A11", "Join", "How many attachments belong to active initiatives?", f"SELECT COUNT(*) FROM {A} a JOIN tms_initiative_flat i ON i.initiative_id = a.initiative_id WHERE i.initiative_status = 'Active'")
 q("A12", "Join", "How many attachments are on AR_YD_Suiting initiatives?", f"SELECT COUNT(*) FROM {A} a JOIN tms_initiative_flat i ON i.initiative_id = a.initiative_id WHERE i.initiative_type = 'AR_YD_Suiting'")
 q("A13", "Aggregation", "What is the average attached file size?", f"SELECT AVG(file_size) FROM {A}")
-q("A14", "Ranking", "Which five initiatives have the most attachments?", f"SELECT initiative_id, COUNT(*) FROM {A} GROUP BY initiative_id ORDER BY COUNT(*) DESC LIMIT 5")
+q("A14", "Ranking", "Which four initiatives have the most attachments, by initiative id?", f"SELECT initiative_id, COUNT(*) FROM {A} GROUP BY initiative_id ORDER BY COUNT(*) DESC LIMIT 4")
 q("A15", "Distinct", "How many distinct files are attached?", f"SELECT COUNT(DISTINCT file_name) FROM {A}")
 q("A16", "Dimension Filter", "Show the attachments tagged EPI PPI Sheet", f"SELECT file_name, initiative_id, task_id FROM {A} WHERE tag_name = 'EPI PPI Sheet'")
 q("A17", "Task Filter", "Which attachment is on task 30?", f"SELECT tag_name, file_name FROM {A} WHERE task_id = 30")

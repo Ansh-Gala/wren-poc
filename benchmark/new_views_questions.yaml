@@ -77,9 +77,9 @@ questions:
   expected_sql: SELECT AVG(file_size) FROM tms_attachment_flat
 - id: A14
   category: Ranking
-  question: Which five initiatives have the most attachments?
+  question: Which four initiatives have the most attachments, by initiative id?
   expected_sql: SELECT initiative_id, COUNT(*) FROM tms_attachment_flat GROUP BY initiative_id ORDER BY
-    COUNT(*) DESC LIMIT 5
+    COUNT(*) DESC LIMIT 4
 - id: A15
   category: Distinct
   question: How many distinct files are attached?

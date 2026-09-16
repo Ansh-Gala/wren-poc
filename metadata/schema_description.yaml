@@ -822,8 +822,10 @@ tables:
         description: When the issue was closed. NULL for 22 of the 25 issues.
       comment_count:
         type: BIGINT
-        description: Number of comments on the issue, pre-aggregated. Only 7 of the 25 issues have any
-          comment at all, so an average across all issues is mostly zeroes.
+        description: 'Number of comments on this one issue, pre-aggregated. To total the comments across
+          issues use SUM(comment_count): COUNT(*) counts issues, not comments, and the two differ sharply
+          here because only 7 of the 25 issues have any comment at all -- 25 against 12. For the same
+          reason an average across all issues is mostly zeroes.'
       last_comment:
         type: VARCHAR
         description: Text of the most recent comment, or NULL where there are none.
