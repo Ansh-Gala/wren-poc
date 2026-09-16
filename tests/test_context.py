@@ -13,12 +13,12 @@ GAZ = [
 ]
 
 SQL_LIST = (
-    "SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat "
-    "WHERE business_object_type = 'AR_YD_Suiting'"
+    "SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat "
+    "WHERE initiative_type = 'AR_YD_Suiting'"
 )
 SQL_ACTIVE = (
-    "SELECT business_object_id FROM tms_business_object_flat "
-    "WHERE business_object_type = 'AR_YD_Suiting' AND business_object_status = 'Active'"
+    "SELECT initiative_id FROM tms_initiative_flat "
+    "WHERE initiative_type = 'AR_YD_Suiting' AND initiative_status = 'Active'"
 )
 
 
@@ -85,7 +85,7 @@ def test_an_elliptical_subject_change_rebases_rather_than_resetting():
     """
     state, _ = _state_after(
         "Show delayed tasks in AR_NPD_Suiting",
-        "SELECT task_id FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting' "
+        "SELECT task_id FROM tms_task_flat WHERE initiative_type = 'AR_NPD_Suiting' "
         "AND task_sla_status = 'Delayed'", 4)
     decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
     assert decision == "rebase"
@@ -95,7 +95,7 @@ def test_an_elliptical_subject_change_rebases_rather_than_resetting():
 def test_a_rebase_keeps_the_other_filters_but_drops_the_subject():
     state, _ = _state_after(
         "Show delayed tasks in AR_NPD_Suiting",
-        "SELECT task_id FROM tms_task_flat WHERE business_object_type = 'AR_NPD_Suiting' "
+        "SELECT task_id FROM tms_task_flat WHERE initiative_type = 'AR_NPD_Suiting' "
         "AND task_sla_status = 'Delayed'", 4)
     decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
     update_state(state, "What about AR_PD_Suiting?", None, None, entity, decision)
@@ -128,12 +128,12 @@ def test_a_long_self_contained_question_is_not_a_follow_up():
 
 def test_parse_sql_state_extracts_the_shape():
     parsed = parse_sql_state(
-        "SELECT business_unit, COUNT(*) FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "SELECT business_unit, COUNT(*) FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting' "
         "GROUP BY business_unit ORDER BY business_unit DESC LIMIT 5"
     )
-    assert parsed["tables"] == ["tms_business_object_flat"]
-    assert "business_object_type" in parsed["filters"]
+    assert parsed["tables"] == ["tms_initiative_flat"]
+    assert "initiative_type" in parsed["filters"]
     assert parsed["grouping"] == ["business_unit"]
     assert parsed["limit"] == 5
     assert parsed["intent"] == "breakdown"
@@ -153,8 +153,8 @@ def test_parse_sql_state_survives_unparseable_sql():
 def test_follow_up_filters_accumulate():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     state, _ = _state_after("only the active ones", SQL_ACTIVE, 19, state=state)
-    assert "business_object_type" in state.active_filters
-    assert "business_object_status" in state.active_filters
+    assert "initiative_type" in state.active_filters
+    assert "initiative_status" in state.active_filters
 
 
 def test_a_filter_can_be_removed():
@@ -164,8 +164,8 @@ def test_a_filter_can_be_removed():
     still claim PVH is in force, or turn 4 is told to re-apply it.
     """
     with_pvh = (
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' AND business_unit = 'PVH'"
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting' AND business_unit = 'PVH'"
     )
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     state, _ = _state_after("only PVH", with_pvh, 1, state=state)
@@ -173,7 +173,7 @@ def test_a_filter_can_be_removed():
 
     state, _ = _state_after("drop the business unit filter", SQL_LIST, 22, state=state)
     assert "business_unit" not in state.active_filters
-    assert "business_object_type" in state.active_filters
+    assert "initiative_type" in state.active_filters
     assert "PVH" not in render_context(state)
 
 
@@ -183,8 +183,8 @@ def test_switching_subject_drops_the_old_filters():
     state, _ = _state_after("only the active ones", SQL_ACTIVE, 19, state=state)
     state, decision = _state_after(
         "Show AR_NPD_Shirting items",
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_NPD_Shirting'",
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_NPD_Shirting'",
         10, state=state)
     assert decision == "switch"
     assert state.active_entity == "AR_NPD_Shirting"
@@ -202,7 +202,7 @@ def test_render_carries_what_a_follow_up_needs():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     text = render_context(state)
     assert "AR_YD_Suiting" in text
-    assert "tms_business_object_flat" in text
+    assert "tms_initiative_flat" in text
     assert "previous query" in text
 
 
@@ -226,13 +226,13 @@ def _thread_about_business_objects():
     state = ConversationState()
     update_state(
         state, "Show delayed AR_YD_Suiting items",
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
         14, "AR_YD_Suiting", "new_block")
     update_state(
         state, "Only those above 10 days",
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 0 "
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 0 "
         "AND days_to_due_date > 10",
         6, "AR_YD_Suiting", "follow_up")
     return state
@@ -243,7 +243,7 @@ def test_a_complete_request_about_another_entity_starts_a_new_block():
 
     It names its own subject and its own verb, so nothing about the business
     object thread applies to it. Classified as a follow-up it inherited
-    business_object_type, delayed_task_count and days_to_due_date -- three
+    initiative_type, delayed_task_count and days_to_due_date -- three
     filters from a different entity -- which is the state leakage the brief
     describes.
     """

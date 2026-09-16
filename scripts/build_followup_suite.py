@@ -43,9 +43,9 @@ from database.connection import run_readonly
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "benchmark" / "followup_questions.yaml"
 
-BO = "tms_business_object_flat"
+BO = "tms_initiative_flat"
 TK = "tms_task_flat"
-AT = "tms_business_object_attributes_flat"
+AT = "tms_initiative_attributes_flat"
 UD = "tms_user_department_flat"
 
 # ---------------------------------------------------------------- A. repair --
@@ -62,68 +62,68 @@ REPAIR = [
      f"SELECT COUNT(*) FROM {TK} WHERE task_status = 'open'"),
     ("F03", "Repair - Typo", "show clsoed AR_YD_Suiting items",
      "show closed AR_YD_Suiting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting' AND business_object_status = 'Closed'"),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting' AND initiative_status = 'Closed'"),
     ("F04", "Repair - Typo", "list activ AR_NPD_Shirting items",
      "list active AR_NPD_Shirting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_NPD_Shirting' AND business_object_status = 'Active'"),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_NPD_Shirting' AND initiative_status = 'Active'"),
     ("F05", "Repair - Transposition", "show the AR_YD_Suiting itmes",
      "show the AR_YD_Suiting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting'"),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting'"),
     ("F06", "Repair - Typo", "how many AR_YD_Suiting items are there by staus?",
      "how many AR_YD_Suiting items are there by status?",
-     f"SELECT business_object_status, COUNT(*) FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting' GROUP BY business_object_status"),
+     f"SELECT initiative_status, COUNT(*) FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting' GROUP BY initiative_status"),
     ("F07", "Repair - Typo", "how many bussiness objects are there",
      "how many business objects are there",
      f"SELECT COUNT(*) FROM {BO}"),
     ("F08", "Repair - Typo", "which AR_PD_Suiting tasks are delayd",
      "which AR_PD_Suiting tasks are delayed",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_PD_Suiting' AND task_sla_status = 'Delayed'"),
+     "WHERE initiative_type = 'AR_PD_Suiting' AND task_sla_status = 'Delayed'"),
     ("F09", "Repair - Typo", "how many items have no workfow name",
      "how many items have no workflow name",
      f"SELECT COUNT(*) FROM {BO} WHERE workflow_name IS NULL"),
     ("F10", "Repair - Typo", "how many sutiing items are active?",
      "how many suiting items are active?",
-     f"SELECT COUNT(*) FROM {BO} WHERE business_object_type LIKE '%Suiting' "
-     "AND business_object_status = 'Active'"),
+     f"SELECT COUNT(*) FROM {BO} WHERE initiative_type LIKE '%Suiting' "
+     "AND initiative_status = 'Active'"),
     ("F11", "Repair - Typo", "show AR_YD_Suiting items with satus Closed",
      "show AR_YD_Suiting items with status Closed",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting' AND business_object_status = 'Closed'"),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting' AND initiative_status = 'Closed'"),
     ("F12", "Repair - Typo", "list the delaied AR_NPD_Suiting tasks",
      "list the delayed AR_NPD_Suiting tasks",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_NPD_Suiting' AND task_sla_status = 'Delayed'"),
+     "WHERE initiative_type = 'AR_NPD_Suiting' AND task_sla_status = 'Delayed'"),
     ("F13", "Repair - Typo", "how many items are in buisness unit unit1",
      "how many items are in business unit unit1",
      f"SELECT COUNT(*) FROM {BO} WHERE business_unit = 'unit1'"),
     ("F14", "Repair - Transposition", "how many objets are active",
      "how many objects are active",
-     f"SELECT COUNT(*) FROM {BO} WHERE business_object_status = 'Active'"),
+     f"SELECT COUNT(*) FROM {BO} WHERE initiative_status = 'Active'"),
     ("F15", "Repair - Transposition", "show open tsaks in AR_YD_Suiting",
      "show open tasks in AR_YD_Suiting",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_YD_Suiting' AND task_status = 'open'"),
+     "WHERE initiative_type = 'AR_YD_Suiting' AND task_status = 'open'"),
     ("F16", "Repair - Transposition", "how many usres are there",
      "how many users are there",
      "SELECT COUNT(*) FROM tms_user_flat"),
     ("F17", "Repair - Spelling Variant", "how many AR_YD_Shirting items are there by colur?",
      "how many AR_YD_Shirting items are there by color?",
-     f"SELECT business_object_color, COUNT(*) FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Shirting' GROUP BY business_object_color"),
+     f"SELECT initiative_color, COUNT(*) FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Shirting' GROUP BY initiative_color"),
     ("F18", "Repair - Typo", "show the seasosn on record", "show the season on record",
      f"SELECT DISTINCT season FROM {AT} WHERE season IS NOT NULL"),
     ("F19", "Repair - Typo", "how many AR_PD_Shirting items are shirtng",
      "how many AR_PD_Shirting items are shirting",
-     f"SELECT COUNT(*) FROM {BO} WHERE business_object_type = 'AR_PD_Shirting'"),
+     f"SELECT COUNT(*) FROM {BO} WHERE initiative_type = 'AR_PD_Shirting'"),
     ("F20", "Repair - Typo", "show the assigend user for each open AR_NPD_Suiting task",
      "show the assigned user for each open AR_NPD_Suiting task",
      f"SELECT task_id, assigned_user_name FROM {TK} "
-     "WHERE business_object_type = 'AR_NPD_Suiting' AND task_status = 'open'"),
+     "WHERE initiative_type = 'AR_NPD_Suiting' AND task_status = 'open'"),
 ]
 
 # --------------------------------------------------- B. clarification ------
@@ -159,9 +159,9 @@ UNKNOWN_VALUE = [
     ("F36", "Show tasks whose SLA status is Breached",
      f"SELECT task_id FROM {TK} WHERE task_sla_status = 'Breached'"),
     ("F37", "Show items whose status is Pending",
-     f"SELECT business_object_id FROM {BO} WHERE business_object_status = 'Pending'"),
+     f"SELECT initiative_id FROM {BO} WHERE initiative_status = 'Pending'"),
     ("F38", "Show items whose colour is Purple",
-     f"SELECT business_object_id FROM {BO} WHERE business_object_color = 'Purple'"),
+     f"SELECT initiative_id FROM {BO} WHERE initiative_color = 'Purple'"),
     ("F39", "How many items are in business unit unit7?",
      f"SELECT COUNT(*) FROM {BO} WHERE business_unit = 'unit7'"),
     ("F40", "Show tasks whose status is archived",
@@ -177,78 +177,78 @@ UNKNOWN_VALUE = [
 # (id, category, question, sql, expected_action)
 EXPLORATION = [
     ("F41", "Explore - Narrow a List", "Show the AR_YD_Suiting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F42", "Explore - Narrow a List", "Show the AR_YD_Shirting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Shirting'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Shirting'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F43", "Explore - Group a List", "Show the AR_NPD_YD_SHIRTING items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_NPD_YD_SHIRTING'",
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_NPD_YD_SHIRTING'",
      {"type": "add_group_by", "field": "business_unit"}),
     ("F44", "Explore - Sort a List", "Show the AR_PD_Shirting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_PD_Shirting'",
-     {"type": "set_sort", "field": "business_object_client_due_at"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_PD_Shirting'",
+     {"type": "set_sort", "field": "initiative_client_due_at"}),
     ("F45", "Explore - Count a List", "Show the AR_PD_Suiting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_PD_Suiting'",
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_PD_Suiting'",
      {"type": "set_aggregate"}),
     ("F46", "Explore - Narrow Tasks", "Show the tasks in AR_YD_Suiting",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_YD_Suiting'",
+     "WHERE initiative_type = 'AR_YD_Suiting'",
      {"type": "add_filter", "field": "task_status"}),
     ("F47", "Explore - Narrow Tasks", "Show the tasks in AR_PD_Shirting",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_PD_Shirting'",
+     "WHERE initiative_type = 'AR_PD_Shirting'",
      {"type": "add_filter", "field": "task_status"}),
     ("F48", "Explore - Drop a Filter", "Show active AR_YD_Suiting items in unit1",
-     f"SELECT business_object_id FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting' "
-     "AND business_object_status = 'Active' AND business_unit = 'unit1'",
+     f"SELECT initiative_id FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting' "
+     "AND initiative_status = 'Active' AND business_unit = 'unit1'",
      {"type": "remove_filter"}),
     ("F49", "Explore - Drop a Filter", "Show closed black AR_PD_Shirting items",
-     f"SELECT business_object_id FROM {BO} "
-     "WHERE business_object_type = 'AR_PD_Shirting' "
-     "AND business_object_status = 'Closed' AND business_object_color = 'Black'",
+     f"SELECT initiative_id FROM {BO} "
+     "WHERE initiative_type = 'AR_PD_Shirting' "
+     "AND initiative_status = 'Closed' AND initiative_color = 'Black'",
      {"type": "remove_filter"}),
     ("F50", "Explore - Drill Down", "How many AR_YD_Suiting items are there by status?",
-     f"SELECT business_object_status, COUNT(*) FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Suiting' GROUP BY business_object_status",
+     f"SELECT initiative_status, COUNT(*) FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Suiting' GROUP BY initiative_status",
      {"type": "drill_down"}),
     ("F51", "Explore - Drill Down", "How many AR_YD_Shirting items are there by colour?",
-     f"SELECT business_object_color, COUNT(*) FROM {BO} "
-     "WHERE business_object_type = 'AR_YD_Shirting' GROUP BY business_object_color",
+     f"SELECT initiative_color, COUNT(*) FROM {BO} "
+     "WHERE initiative_type = 'AR_YD_Shirting' GROUP BY initiative_color",
      {"type": "drill_down"}),
     ("F52", "Explore - Drill Down", "How many tasks are there by SLA status?",
      f"SELECT task_sla_status, COUNT(*) FROM {TK} GROUP BY task_sla_status",
      {"type": "drill_down"}),
     ("F53", "Explore - Narrow a List", "Show the AR_PRINT_Shirting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_PRINT_Shirting'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_PRINT_Shirting'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F54", "Explore - Narrow a List", "Show the TESTING_MG items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'TESTING_MG'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'TESTING_MG'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F55", "Explore - Narrow Tasks", "Show the delayed tasks in AR_NPD_YD_SHIRTING",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' AND task_sla_status = 'Delayed'",
+     "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' AND task_sla_status = 'Delayed'",
      {"type": "add_filter", "field": "task_status"}),
     ("F56", "Explore - Narrow Tasks", "Show the open tasks in AR_YD_Shirting",
      f"SELECT task_id, task_display_name FROM {TK} "
-     "WHERE business_object_type = 'AR_YD_Shirting' AND task_status = 'open'",
+     "WHERE initiative_type = 'AR_YD_Shirting' AND task_status = 'open'",
      {"type": "add_filter", "field": "task_sla_status"}),
     ("F57", "Explore - Group a List", "Show the items in business unit unit1",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
      "WHERE business_unit = 'unit1'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F58", "Explore - Sort a List", "Show the AR_SALESPLAN_Suiting items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_type = 'AR_SALESPLAN_Suiting'",
-     {"type": "set_sort", "field": "business_object_client_due_at"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_type = 'AR_SALESPLAN_Suiting'",
+     {"type": "set_sort", "field": "initiative_client_due_at"}),
     ("F59", "Explore - Drill Down", "How many items are there by business unit?",
      f"SELECT business_unit, COUNT(*) FROM {BO} GROUP BY business_unit",
      {"type": "drill_down"}),
@@ -256,18 +256,18 @@ EXPLORATION = [
      f"SELECT task_department, COUNT(*) FROM {TK} GROUP BY task_department",
      {"type": "drill_down"}),
     ("F61", "Explore - Narrow a List", "Show the black items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_color = 'Black'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_color = 'Black'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F62", "Explore - Narrow a List", "Show the green items",
-     f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-     "WHERE business_object_color = 'Green'",
-     {"type": "add_filter", "field": "business_object_status"}),
+     f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+     "WHERE initiative_color = 'Green'",
+     {"type": "add_filter", "field": "initiative_status"}),
     ("F63", "Explore - Narrow Tasks", "Show the tasks assigned to the sales team",
      f"SELECT task_id, task_display_name FROM {TK} WHERE assigned_role = 'sales_team'",
      {"type": "add_filter", "field": "task_status"}),
     ("F64", "Explore - Drop a Filter", "Show open delayed tasks in AR_YD_Suiting",
-     f"SELECT task_id FROM {TK} WHERE business_object_type = 'AR_YD_Suiting' "
+     f"SELECT task_id FROM {TK} WHERE initiative_type = 'AR_YD_Suiting' "
      "AND task_status = 'open' AND task_sla_status = 'Delayed'",
      {"type": "remove_filter"}),
     # Behaves as zero_or_clarify rather than sql: unit7 does not exist, so
@@ -286,76 +286,76 @@ EXPLORATION = [
 CONVERSATIONS = [
     ("G01", "Mutation - Filter then Sort", [
         ("G01.1", "Show the AR_YD_Suiting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting'", "new_block", None, None),
         ("G01.2", "only the active ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting' "
-         "AND business_object_status = 'Active'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting' "
+         "AND initiative_status = 'Active'", "follow_up", None, None),
         ("G01.3", "sort those by due date",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting' "
-         "AND business_object_status = 'Active' "
-         "ORDER BY business_object_client_due_at", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting' "
+         "AND initiative_status = 'Active' "
+         "ORDER BY initiative_client_due_at", "follow_up", None, None),
     ]),
     ("G02", "Mutation - Filter then Limit", [
         ("G02.1", "Show the AR_YD_Shirting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting'", "new_block", None, None),
         ("G02.2", "only black ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting' "
-         "AND business_object_color = 'Black'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting' "
+         "AND initiative_color = 'Black'", "follow_up", None, None),
         ("G02.3", "just the first 5",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting' "
-         "AND business_object_color = 'Black' LIMIT 5", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting' "
+         "AND initiative_color = 'Black' LIMIT 5", "follow_up", None, None),
     ]),
     ("G03", "Mutation - Group then Drill Down", [
         ("G03.1", "Show the AR_NPD_YD_SHIRTING items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
         ("G03.2", "group them by status",
-         f"SELECT business_object_status, COUNT(*) FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
-         "GROUP BY business_object_status", "follow_up", "exploration",
+         f"SELECT initiative_status, COUNT(*) FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
+         "GROUP BY initiative_status", "follow_up", "exploration",
          {"type": "drill_down"}),
         ("G03.3", "show me the individual rows",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING'", "follow_up", None, None),
     ]),
     ("G04", "Mutation - Remove a Filter", [
         ("G04.1", "Show active AR_NPD_Shirting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_Shirting' "
-         "AND business_object_status = 'Active'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_Shirting' "
+         "AND initiative_status = 'Active'", "new_block", None, None),
         ("G04.2", "remove that filter",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_Shirting'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_Shirting'", "follow_up", None, None),
         ("G04.3", "how many is that?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_type = 'AR_NPD_Shirting'",
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_type = 'AR_NPD_Shirting'",
          "follow_up", None, None),
     ]),
     ("G05", "Mutation - Date Range", [
         ("G05.1", "How many business objects were created in May 2026?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_created_at >= DATE '2026-05-01' "
-         "AND business_object_created_at < DATE '2026-06-01'", "new_block", None, None),
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_created_at >= DATE '2026-05-01' "
+         "AND initiative_created_at < DATE '2026-06-01'", "new_block", None, None),
         ("G05.2", "what about June?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_created_at >= DATE '2026-06-01' "
-         "AND business_object_created_at < DATE '2026-07-01'", "follow_up", None, None),
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_created_at >= DATE '2026-06-01' "
+         "AND initiative_created_at < DATE '2026-07-01'", "follow_up", None, None),
         ("G05.3", "and April?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_created_at >= DATE '2026-04-01' "
-         "AND business_object_created_at < DATE '2026-05-01'", "follow_up", None, None),
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_created_at >= DATE '2026-04-01' "
+         "AND initiative_created_at < DATE '2026-05-01'", "follow_up", None, None),
     ]),
     ("G06", "Analytical - Compare Subjects", [
         ("G06.1", "How many delayed tasks are in AR_YD_Suiting?",
-         f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_YD_Suiting' "
+         f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_YD_Suiting' "
          "AND task_sla_status = 'Delayed'", "new_block", None, None),
         ("G06.2", "what about AR_PD_Suiting?",
-         f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_PD_Suiting' "
+         f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_PD_Suiting' "
          "AND task_sla_status = 'Delayed'", "rebase", None, None),
         ("G06.3", "and AR_NPD_Shirting?",
-         f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_NPD_Shirting' "
+         f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_NPD_Shirting' "
          "AND task_sla_status = 'Delayed'", "rebase", None, None),
     ]),
     ("G07", "Analytical - Drill from Aggregate", [
@@ -371,100 +371,100 @@ CONVERSATIONS = [
     ]),
     ("G08", "Analytical - Break Down then Narrow", [
         ("G08.1", "How many items are there by colour?",
-         f"SELECT business_object_color, COUNT(*) FROM {BO} GROUP BY business_object_color",
+         f"SELECT initiative_color, COUNT(*) FROM {BO} GROUP BY initiative_color",
          "new_block", None, None),
         ("G08.2", "only the active ones",
-         f"SELECT business_object_color, COUNT(*) FROM {BO} "
-         "WHERE business_object_status = 'Active' GROUP BY business_object_color",
+         f"SELECT initiative_color, COUNT(*) FROM {BO} "
+         "WHERE initiative_status = 'Active' GROUP BY initiative_color",
          "follow_up", None, None),
         ("G08.3", "how many of those are black?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_status = 'Active' "
-         "AND business_object_color = 'Black'", "follow_up", None, None),
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_status = 'Active' "
+         "AND initiative_color = 'Black'", "follow_up", None, None),
     ]),
     ("G09", "New Topic - Different Entity", [
         ("G09.1", "Show delayed AR_YD_Suiting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
          "new_block", None, None),
         ("G09.2", "only those with more than one",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting' AND delayed_task_count > 1",
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 1",
          "follow_up", None, None),
         # The turn the brief describes. It must not inherit
-        # business_object_type or delayed_task_count from the thread above.
+        # initiative_type or delayed_task_count from the thread above.
         ("G09.3", "Show my open tasks",
          f"SELECT task_id, task_display_name FROM {TK} "
          "WHERE assigned_user_id = 1 AND task_status = 'open'", "new_block", None, None),
     ]),
     ("G10", "New Topic - Different Entity", [
         ("G10.1", "Show active AR_NPD_Shirting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_Shirting' "
-         "AND business_object_status = 'Active'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_Shirting' "
+         "AND initiative_status = 'Active'", "new_block", None, None),
         ("G10.2", "only the black ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_Shirting' "
-         "AND business_object_status = 'Active' AND business_object_color = 'Black'",
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_Shirting' "
+         "AND initiative_status = 'Active' AND initiative_color = 'Black'",
          "follow_up", None, None),
         ("G10.3", "List all users",
          "SELECT user_id, user_name FROM tms_user_flat", "new_block", None, None),
     ]),
     ("G11", "Multi-step - Filter Sort Group Count", [
         ("G11.1", "Show the AR_NPD_YD_SHIRTING items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
         ("G11.2", "only active",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
-         "AND business_object_status = 'Active'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
+         "AND initiative_status = 'Active'", "follow_up", None, None),
         ("G11.3", "group them by colour",
-         f"SELECT business_object_color, COUNT(*) FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
-         "AND business_object_status = 'Active' GROUP BY business_object_color",
+         f"SELECT initiative_color, COUNT(*) FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
+         "AND initiative_status = 'Active' GROUP BY initiative_color",
          "follow_up", None, None),
         ("G11.4", "show me the black ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
-         "AND business_object_status = 'Active' AND business_object_color = 'Black'",
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
+         "AND initiative_status = 'Active' AND initiative_color = 'Black'",
          "follow_up", None, None),
         ("G11.5", "how many?",
-         f"SELECT COUNT(*) FROM {BO} WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
-         "AND business_object_status = 'Active' AND business_object_color = 'Black'",
+         f"SELECT COUNT(*) FROM {BO} WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
+         "AND initiative_status = 'Active' AND initiative_color = 'Black'",
          "follow_up", None, None),
     ]),
     ("G12", "Multi-step - Stack then Unstack", [
         ("G12.1", "Show the AR_YD_Shirting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting'", "new_block", None, None),
         ("G12.2", "only active ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting' "
-         "AND business_object_status = 'Active'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting' "
+         "AND initiative_status = 'Active'", "follow_up", None, None),
         ("G12.3", "and only black",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting' "
-         "AND business_object_status = 'Active' AND business_object_color = 'Black'",
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting' "
+         "AND initiative_status = 'Active' AND initiative_color = 'Black'",
          "follow_up", None, None),
         ("G12.4", "drop the colour filter",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting' "
-         "AND business_object_status = 'Active'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting' "
+         "AND initiative_status = 'Active'", "follow_up", None, None),
         ("G12.5", "drop the status one too",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Shirting'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Shirting'", "follow_up", None, None),
     ]),
     ("G13", "Multi-step - Typo mid-thread", [
         ("G13.1", "Show the AR_PD_Shirting items",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_PD_Shirting'", "new_block", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_PD_Shirting'", "new_block", None, None),
         ("G13.2", "only the activ ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_PD_Shirting' "
-         "AND business_object_status = 'Active'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_PD_Shirting' "
+         "AND initiative_status = 'Active'", "follow_up", None, None),
         ("G13.3", "group them by colur",
-         f"SELECT business_object_color, COUNT(*) FROM {BO} "
-         "WHERE business_object_type = 'AR_PD_Shirting' "
-         "AND business_object_status = 'Active' GROUP BY business_object_color",
+         f"SELECT initiative_color, COUNT(*) FROM {BO} "
+         "WHERE initiative_type = 'AR_PD_Shirting' "
+         "AND initiative_status = 'Active' GROUP BY initiative_color",
          "follow_up", None, None),
     ]),
     ("G14", "Multi-step - Ambiguity then Resolution", [
@@ -473,27 +473,27 @@ CONVERSATIONS = [
         ("G14.1", "Show the AR_YD items", None, "new_block", "clarification",
          {"type": "set_entity", "value": "AR_YD_Suiting"}),
         ("G14.2", "AR_YD_Suiting",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting'", "clarification_response", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting'", "clarification_response", None, None),
         ("G14.3", "only the closed ones",
-         f"SELECT business_object_id, business_object_ref_id FROM {BO} "
-         "WHERE business_object_type = 'AR_YD_Suiting' "
-         "AND business_object_status = 'Closed'", "follow_up", None, None),
+         f"SELECT initiative_id, initiative_ref_id FROM {BO} "
+         "WHERE initiative_type = 'AR_YD_Suiting' "
+         "AND initiative_status = 'Closed'", "follow_up", None, None),
     ]),
     ("G15", "Multi-step - Task Thread", [
         ("G15.1", "Show the tasks in AR_NPD_YD_SHIRTING",
          f"SELECT task_id, task_display_name FROM {TK} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING'", "new_block", None, None),
         ("G15.2", "only open ones",
          f"SELECT task_id, task_display_name FROM {TK} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' AND task_status = 'open'",
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' AND task_status = 'open'",
          "follow_up", None, None),
         ("G15.3", "and only delayed",
          f"SELECT task_id, task_display_name FROM {TK} "
-         "WHERE business_object_type = 'AR_NPD_YD_SHIRTING' AND task_status = 'open' "
+         "WHERE initiative_type = 'AR_NPD_YD_SHIRTING' AND task_status = 'open' "
          "AND task_sla_status = 'Delayed'", "follow_up", None, None),
         ("G15.4", "how many?",
-         f"SELECT COUNT(*) FROM {TK} WHERE business_object_type = 'AR_NPD_YD_SHIRTING' "
+         f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_NPD_YD_SHIRTING' "
          "AND task_status = 'open' AND task_sla_status = 'Delayed'",
          "follow_up", None, None),
     ]),

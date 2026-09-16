@@ -94,7 +94,7 @@ class TurnResult:
     failure_category: str = ""
 
     # Result matching alone lets a query pass for the wrong reason -- filtering
-    # workflow_code instead of business_object_type returns the same rows here
+    # workflow_code instead of initiative_type returns the same rows here
     # and is still wrong. These record the SQL's meaning independently, so the
     # gap between "right rows" and "right query" stays visible.
     semantic_match: bool | None = False

@@ -10,14 +10,14 @@ from pipeline.labels import column_label, column_labels
 @pytest.mark.parametrize("name,expected", [
     ("task_name", "Task Name"),
     ("task_start_at", "Task Start At"),
-    ("business_object_ref_id", "Initiative Ref Id"),
+    ("initiative_ref_id", "Initiative Ref Id"),
 ])
 def test_the_stated_cases(name, expected):
     assert column_label(name) == expected
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("business_object_client_due_at", "Initiative Client Due At"),
+    ("initiative_client_due_at", "Initiative Client Due At"),
     # One word.
     ("count", "Count"),
     ("role", "Role"),
@@ -32,7 +32,7 @@ def test_the_stated_cases(name, expected):
     # A generated alias, which no registry has ever seen. This is why the
     # transformation has to be a rule rather than a lookup table.
     ("avg_delay_days", "Avg Delay Days"),
-    ("business_object_count", "Initiative Count"),
+    ("initiative_count", "Initiative Count"),
     # Already-readable input is left readable rather than mangled.
     ("Total Tasks", "Total Tasks"),
 ])
@@ -134,7 +134,7 @@ def test_labels_are_always_present_when_columns_are():
     """The console falls back to raw column names when labels are absent.
 
     That fallback is why a stale server showed task_id, task_display_name and
-    business_object_ref_id as headings: the page was current, the process was
+    initiative_ref_id as headings: the page was current, the process was
     not. So the invariant worth asserting is that a result carrying columns
     always carries labels of the same length.
     """

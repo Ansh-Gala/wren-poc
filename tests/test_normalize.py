@@ -30,7 +30,12 @@ def test_repairs_a_single_transposed_or_dropped_letter():
         ("show open tsaks", "tasks"),
         ("how many usres are there", "users"),
         ("show items by colur", "color"),
-        ("how many objets are active", "objects"),
+        # Was "objets" -> "objects" until the 2026-09-16 rename. The
+        # vocabulary is built from the database's own column names, and
+        # "object" left it with business_object_*. "BO" and "Business
+        # Object" remain declared synonyms in business_rules.yaml, which
+        # is a different mechanism -- entity aliasing, not typo repair.
+        ("how many initatives are active", "initiatives"),
     ]:
         result = normalize(typed)
         assert meant in result.question, f"{typed!r} -> {result.question!r}"

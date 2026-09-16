@@ -32,7 +32,7 @@ def test_the_default_names_both_status_columns_that_exist():
     """
     rule = _rule("default_to_active")
     text = rule["definition"] + rule["scope"]
-    assert "business_object_status = 'Active'" in text
+    assert "initiative_status = 'Active'" in text
     assert "task_status = 'open'" in text
     assert "user_status" not in text
 
@@ -89,5 +89,5 @@ def test_the_default_reaches_the_model_in_the_built_prompt():
 
     prompt = build_lean_system_prompt()
     assert "default_to_active" in prompt
-    assert "business_object_status = 'Active'" in prompt
+    assert "initiative_status = 'Active'" in prompt
     assert "task_status = 'open'" in prompt

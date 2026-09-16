@@ -37,7 +37,7 @@ _ACRONYMS = {
 # Domain terms, applied to the underscore-delimited name before it is split
 # into words. A phrase rather than a word, because "business" and "object"
 # only mean Initiative together -- a per-word entry mapping "business" would
-# turn business_object_id into "Initiative Object Id" and business_unit into
+# turn initiative_id into "Initiative Object Id" and business_unit into
 # "Initiative Unit". The database keeps its own names; this is the word the
 # people reading the grid use.
 _PHRASES = (("business_object", "initiative"),)
@@ -55,7 +55,7 @@ def _words(name: str) -> list[str]:
 
 
 def column_label(name: str | None) -> str:
-    """One column name as a heading. ``business_object_ref_id`` -> ``Initiative Ref Id``."""
+    """One column name as a heading. ``initiative_ref_id`` -> ``Initiative Ref Id``."""
     if not name:
         return ""
     return " ".join(_ACRONYMS.get(w.lower(), w[:1].upper() + w[1:])
@@ -65,7 +65,7 @@ def column_label(name: str | None) -> str:
 def column_phrase(name: str | None) -> str:
     """One column name as ordinary words, to sit inside a sentence.
 
-    ``business_object_status`` -> ``initiative status``, for "Group by
+    ``initiative_status`` -> ``initiative status``, for "Group by
     initiative status". Shared with the follow-up layer rather than left to
     `column.replace("_", " ")` at each call site: those labels are built from
     column names too, so the domain terms have to be applied in one place or

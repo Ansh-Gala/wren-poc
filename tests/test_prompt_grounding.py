@@ -29,8 +29,8 @@ def test_lean_prompt_names_every_business_object_type_in_the_database(settings):
 
     result = run_readonly(
         settings,
-        "SELECT DISTINCT business_object_type FROM tms_business_object_flat "
-        "WHERE business_object_type IS NOT NULL",
+        "SELECT DISTINCT initiative_type FROM tms_initiative_flat "
+        "WHERE initiative_type IS NOT NULL",
         15000,
     )
     assert result.error is None, result.error

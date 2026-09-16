@@ -91,7 +91,7 @@ def load_vocabulary() -> frozenset[str]:
     """Every word the database itself uses, lowercased.
 
     Table names, column names and enum values, each also split on underscores
-    so that ``business_object_status`` contributes "business", "object" and
+    so that ``initiative_status`` contributes "business", "object" and
     "status" -- the words a person actually types.
     """
     doc = yaml.safe_load((META_DIR / "schema_description.yaml").read_text(encoding="utf-8")) or {}
@@ -136,7 +136,7 @@ def _morphs(token: str) -> list[str]:
     """The token and its obvious singular/plural variants.
 
     The vocabulary is built from column names, which are inconsistent about
-    number -- ``business_object_type`` is singular, ``open_tasks_list`` is
+    number -- ``initiative_type`` is singular, ``open_tasks_list`` is
     plural. Without this, "items" is one edit from the known word "item" and
     gets "repaired" into it, silently rewriting half the benchmark.
 

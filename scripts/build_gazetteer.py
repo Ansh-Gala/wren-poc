@@ -28,10 +28,10 @@ OUT = ROOT / "metadata" / "entity_gazetteer.yaml"
 # (table, column, role). "entity" values name the subject of a question and so
 # can end a conversational block; "dimension" values only ever narrow it.
 GAZETTEER_COLUMNS = [
-    ("tms_business_object_flat", "business_object_type", "entity"),
-    ("tms_business_object_flat", "business_unit", "dimension"),
-    ("tms_business_object_flat", "business_object_status", "dimension"),
-    ("tms_business_object_flat", "business_object_color", "dimension"),
+    ("tms_initiative_flat", "initiative_type", "entity"),
+    ("tms_initiative_flat", "business_unit", "dimension"),
+    ("tms_initiative_flat", "initiative_status", "dimension"),
+    ("tms_initiative_flat", "initiative_color", "dimension"),
     ("tms_task_flat", "task_status", "dimension"),
     ("tms_task_flat", "task_sla_status", "dimension"),
 ]

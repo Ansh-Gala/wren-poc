@@ -19,10 +19,10 @@ def _state_after(sql: str, rows: int = 5) -> ConversationState:
 
 
 _DEFAULTED = (
-    "SELECT business_object_id, business_object_status "
-    "FROM tms_business_object_flat "
-    "WHERE business_object_type = 'AR_NPD_Shirting' "
-    "AND business_object_status = 'Active'"
+    "SELECT initiative_id, initiative_status "
+    "FROM tms_initiative_flat "
+    "WHERE initiative_type = 'AR_NPD_Shirting' "
+    "AND initiative_status = 'Active'"
 )
 
 
@@ -44,7 +44,7 @@ def test_escaping_the_default_is_offered_as_seeing_every_status():
     followup = explore(_state_after(_DEFAULTED), row_count=5)
     escape = [s for s in followup.suggestions
               if s.action.type == "remove_filter"
-              and s.action.field == "business_object_status"]
+              and s.action.field == "initiative_status"]
     assert len(escape) == 1, "no way offered to see the other statuses"
     label = escape[0].label.lower()
     assert "remove" not in label, f"still described as removing a filter: {label!r}"
@@ -58,8 +58,8 @@ def test_a_filter_the_user_did_state_is_still_offered_as_a_removal():
     every business unit" would be putting words in their mouth.
     """
     followup = explore(_state_after(
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_NPD_Shirting' "
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_NPD_Shirting' "
         "AND business_unit = 'unit1'"), row_count=3)
     removals = [s for s in followup.suggestions if s.action.type == "remove_filter"]
     assert removals
@@ -69,11 +69,11 @@ def test_a_filter_the_user_did_state_is_still_offered_as_a_removal():
 def test_a_closed_status_the_user_asked_for_is_not_treated_as_a_default():
     """Closed is a status the default never adds, so it is the user's."""
     followup = explore(_state_after(
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_NPD_Shirting' "
-        "AND business_object_status = 'Closed'"), row_count=5)
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_NPD_Shirting' "
+        "AND initiative_status = 'Closed'"), row_count=5)
     escape = [s for s in followup.suggestions
-              if s.action.field == "business_object_status"]
+              if s.action.field == "initiative_status"]
     assert all("remove" in s.label.lower() for s in escape)
 
 
@@ -81,7 +81,7 @@ def test_an_open_task_filter_is_also_recognised_as_the_default():
     """The default covers two entities, so the relabelling must too."""
     followup = explore(_state_after(
         "SELECT task_id, task_status FROM tms_task_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "WHERE initiative_type = 'AR_YD_Suiting' "
         "AND task_status = 'open'"), row_count=32)
     escape = [s for s in (followup.suggestions if followup else [])
               if s.action.type == "remove_filter" and s.action.field == "task_status"]
@@ -135,11 +135,11 @@ def test_suggestion_ids_are_unique_within_a_turn():
 # --------------------------------------------- reflecting the rows returned --
 
 _ONE_UNIT = {
-    "columns": ["business_object_id", "business_unit"],
+    "columns": ["initiative_id", "business_unit"],
     "rows": [[1, "unit1"], [2, "unit1"], [3, "unit1"]],
 }
 _TWO_UNITS = {
-    "columns": ["business_object_id", "business_unit"],
+    "columns": ["initiative_id", "business_unit"],
     "rows": [[1, "unit1"], [2, "unit2"], [3, "unit1"]],
 }
 
@@ -205,7 +205,7 @@ def test_a_column_the_hierarchy_hides_is_never_offered_as_a_grouping():
     """
     followup = explore(_state_after(
         "SELECT task_id, task_status FROM tms_task_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "WHERE initiative_type = 'AR_YD_Suiting' "
         "AND task_status = 'open'"), row_count=32)
     fields = [s.action.field for s in (followup.suggestions if followup else [])]
     assert "task_display_status" not in fields
@@ -219,7 +219,7 @@ def test_a_boolean_flag_is_never_offered_as_a_sort():
     """
     followup = explore(_state_after(
         "SELECT task_id, task_status FROM tms_task_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting' "
+        "WHERE initiative_type = 'AR_YD_Suiting' "
         "AND task_status = 'open'"), row_count=32)
     sorts = [s.action.field for s in (followup.suggestions if followup else [])
              if s.action.type == "set_sort"]

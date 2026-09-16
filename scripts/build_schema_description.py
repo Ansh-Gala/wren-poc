@@ -4,7 +4,7 @@
     python scripts/build_schema_description.py --check    # fail if stale
 
 The hand-written file documented 7 of the 33 columns in
-tms_business_object_flat. Since the prompt tells the model to use only the
+tms_initiative_flat. Since the prompt tells the model to use only the
 columns it can see and never to invent one, an undocumented column is
 unusable: asked to count rows with no workflow name, the model correctly
 refused to guess and emitted `WHERE FALSE`. Under-documenting the schema is
@@ -47,9 +47,23 @@ EMPTY_NOTE = (
     " a question; say the data is not held instead."
 )
 
+# Transitional duplicates. tms_task_flat and tms_issue_flat carry both
+# vocabularies while the 2026-09-16 Initiative rename lands, so that
+# un-converted benchmark SQL keeps running. The model must be told about the
+# Initiative names only -- describing columns that are about to be dropped
+# would invite it to generate SQL against them. Task 10 removes the columns
+# and this set stops matching anything.
+_OLD_NAMES = {"bo_id", "business_object_ref_id", "business_object_status",
+              "business_object_type", "business_object_color",
+              "is_business_object_delayed"}
+TRANSITIONAL_COLUMNS = {
+    "tms_task_flat": _OLD_NAMES,
+    "tms_issue_flat": _OLD_NAMES,
+}
+
 TABLES = [
-    "tms_business_object_flat",
-    "tms_business_object_attributes_flat",
+    "tms_initiative_flat",
+    "tms_initiative_attributes_flat",
     "tms_task_flat",
     "tms_user_flat",
     "tms_user_department_flat",
@@ -57,8 +71,8 @@ TABLES = [
 ]
 
 PRIMARY_KEYS = {
-    "tms_business_object_flat": "business_object_id",
-    "tms_business_object_attributes_flat": "business_object_id",
+    "tms_initiative_flat": "initiative_id",
+    "tms_initiative_attributes_flat": "initiative_id",
     "tms_task_flat": "task_id",
     "tms_user_flat": "user_id",
     "tms_role_flat": "role_dept_id",
@@ -78,14 +92,14 @@ MAX_ENUM_VALUES = 12
 # makes an answer imprecise. It is the wrong trade for the subject column,
 # where not knowing a value makes the question unanswerable and the model
 # cannot tell "this type does not exist" from "I was not told about it".
-# business_object_type has 17 values, so the cap dropped it, and the model
+# initiative_type has 17 values, so the cap dropped it, and the model
 # reconstructed the valid set from workflow_code -- which omits four of them,
 # including AR_NPD_YD_SHIRTING, the largest type in the database at 59 rows.
 # Two turns were scored as model failures for that.
 #
 # Raising the cap instead would have cost ~870 tokens and enumerated 24
 # free-text notes and a column of dates-as-strings. This costs ~116.
-ALWAYS_ENUMERATE = frozenset({"business_object_type"})
+ALWAYS_ENUMERATE = frozenset({"initiative_type"})
 
 SQL_TO_MDL = {
     "integer": "INTEGER", "bigint": "BIGINT", "smallint": "INTEGER",
@@ -176,6 +190,9 @@ def main() -> int:
         reg = reg_tables.get(table, {}) or {}
         reg_cols = reg.get("columns", {}) or {}
 
+        skip = TRANSITIONAL_COLUMNS.get(table, set())
+        if skip:
+            live[table] = [(c, t) for c, t in live[table] if c not in skip]
         cols: dict = {}
         empty = empty_columns(table, [c for c, _ in live[table]])
         for column, dtype in live[table]:
@@ -218,14 +235,14 @@ def main() -> int:
         "schema": existing.get("schema", "public"),
         "tables": tables_doc,
         "relationships": existing.get("relationships") or [
-            {"name": "task_business_object",
-             "from": "tms_task_flat.bo_id",
-             "to": "tms_business_object_flat.business_object_id",
+            {"name": "task_initiative",
+             "from": "tms_task_flat.initiative_id",
+             "to": "tms_initiative_flat.initiative_id",
              "join_type": "MANY_TO_ONE",
              "description": "A task belongs to an Initiative."},
-            {"name": "business_object_attributes",
-             "from": "tms_business_object_attributes_flat.business_object_id",
-             "to": "tms_business_object_flat.business_object_id",
+            {"name": "initiative_attributes",
+             "from": "tms_initiative_attributes_flat.initiative_id",
+             "to": "tms_initiative_flat.initiative_id",
              "join_type": "ONE_TO_ONE",
              "description": "Client-specific attributes for an initiative."},
         ],

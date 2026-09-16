@@ -2,7 +2,7 @@
 #
 # Presentation only. Nothing here reaches the model and nothing here changes a
 # query: a generic question can still project all 33 columns of
-# tms_business_object_flat, and this file decides the order they are shown in
+# tms_initiative_flat, and this file decides the order they are shown in
 # and which of them start hidden. Keeping it out of the prompt is deliberate --
 # the built system prompt is compared byte for byte against the PHP port, and
 # accuracy figures are only comparable while the prompt is unchanged.
@@ -31,27 +31,27 @@
 version: 1
 
 tables:
-  tms_business_object_flat:
+  tms_initiative_flat:
     priority:
-      - business_object_id
-      - business_object_status
-      - business_object_type
+      - initiative_id
+      - initiative_status
+      - initiative_type
       - business_unit
-      - business_object_color
-      - business_object_client_due_at
+      - initiative_color
+      - initiative_client_due_at
       - days_to_due_date
       - open_task_count
       - total_task_count
       # Demoted below the counts. The id is what opens the initiative and the
       # reference is long enough to crowd the columns a reader came for, so it
       # earns its place after them rather than second.
-      - business_object_ref_id
+      - initiative_ref_id
       - workflow_name
       - workflow_code
       - current_active_milestone
     hidden:
       # Free text, long enough to wreck a row height.
-      - business_object_note
+      - initiative_note
       # Identifiers the reader cannot act on; workflow_name is the readable one.
       - workflow_id
       # Only ever set on the one Short Closed row, so a column of blanks.
@@ -67,7 +67,7 @@ tables:
     # and the task counts are pre-aggregated, so summing them across a group
     # is the same arithmetic the database already did per row.
     row_groups:
-      - business_object_type
+      - initiative_type
     value_columns:
       - column: open_task_count
         aggFunc: sum
@@ -85,8 +85,8 @@ tables:
       - task_sla_status
       - task_elapsed_days
       - next_followup_at
-      - business_object_ref_id
-      - business_object_type
+      - initiative_ref_id
+      - initiative_type
     hidden:
       - task_machine_code
       # Booleans that restate task_status and task_sla_status.
@@ -96,7 +96,7 @@ tables:
       - is_not_started_task
       - is_delayed_open_task
       - is_delayed_closed_task
-      - is_business_object_delayed
+      - is_initiative_delayed
       - task_reopen_at
       # Presentation form of task_status; showing both is showing it twice.
       - task_display_status
@@ -109,9 +109,9 @@ tables:
       - column: task_elapsed_days
         aggFunc: avg
 
-  tms_business_object_attributes_flat:
+  tms_initiative_attributes_flat:
     priority:
-      - business_object_id
+      - initiative_id
       - category
       - season
       - program
