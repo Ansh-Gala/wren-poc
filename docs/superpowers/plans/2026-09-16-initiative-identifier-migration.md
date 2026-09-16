@@ -21,7 +21,12 @@
 - **`wren_ro` must hold `SELECT` on every new view and nothing more.** The read-only role is the only barrier preventing generated SQL from reading history tables. Re-grant explicitly; never `GRANT ALL`.
 - **Recorded accuracy figures in `results/` become non-comparable** once the benchmark is converted. Task 9 records that fact rather than hiding it.
 - Database `arvind_retail_chatbot_test_1` on `localhost:5432`; owner role `postgres`, read-only role `wren_ro`.
-- Known-good baseline before any work: **402 passed, 9 failed, 33 skipped**. Those 9 failures predate this work (they come from commit `438bafa` dropping `active_user` and the user/task rules) and are not this plan's to fix. "No new failures" means exactly those 9.
+- Known-good baseline before any work: **423 passed, 25 failed, 0 skipped**. All 25 predate this work and are not this plan's to fix. "No new failures" means exactly those 25. They split two ways:
+  - 9 in `tests/test_metadata.py` and `tests/test_ground_truth.py`, from commit `438bafa` dropping `active_user` and the user/task rules.
+  - 16 in `tests/test_database.py`, which asserts a generic demo schema (`users`, `workflows`, `tasks`) this database does not have — it holds the real `tms_*` TMS schema.
+  - **An earlier figure of 402 passed / 9 failed / 33 skipped is wrong and must not be used.** It was measured while the read-only database credential was broken, so 33 database-backed tests were silently skipping rather than passing. Found 16 Sep 2026 during Task 2.
+- **Subagents connect as `wren_sdd`, never `wren_ro` or `postgres`.** `.env`'s owner *and* read-only slots both point at `wren_sdd`: a SELECT-only role, refused DDL, blocked from `vf_sql_chat`/`vf_sql_chat_turn`, and unable to `ALTER` any other role. Postgres enforces this, not the prompt. The owner credential lives only in the controller's scratchpad and is used only for Task 3. Restore `.env` to its normal owner credentials when the migration finishes.
+- **Never run `database/setup.py:create_readonly_role()` against this database.** It issues a blanket `GRANT SELECT ON ALL TABLES IN SCHEMA public`, silently undoing the Drupal install hook's revoke on `vf_sql_chat` and `vf_sql_chat_turn` and re-exposing every user's chat history. It also resets `wren_ro`'s password to whatever `.env` holds, breaking the live Drupal chatbot — whose credential lives in Drupal's active config (`vf_config`, row `vf_sql_chatbot.settings`), not in `.env`. Both happened on 16 Sep 2026 and were repaired.
 
 ---
 
@@ -280,6 +285,19 @@ def test_a_broken_new_query_is_reported_not_raised():
     failures = verify_pairs([("SELECT 1", "SELECT * FROM tms_nope")])
     assert len(failures) == 1
     assert "new query failed" in failures[0]
+
+
+def test_null_is_not_confused_with_the_string_none():
+    """A NULL and the text 'None' are different data, however they print."""
+    failures = verify_pairs([("SELECT NULL AS a", "SELECT 'None' AS a")])
+    assert len(failures) == 1
+
+
+def test_row_order_does_not_matter():
+    """Neither query carries an ORDER BY unless its author wrote one."""
+    assert verify_pairs([
+        ("SELECT 1 AS a UNION ALL SELECT 2", "SELECT 2 AS a UNION ALL SELECT 1"),
+    ]) == []
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -311,7 +329,14 @@ from database.connection import connect
 
 def _rows(cur, sql: str) -> list[tuple[str, ...]]:
     cur.execute(sql)
-    return sorted(tuple(str(v) for v in row) for row in cur.fetchall())
+    return sorted(
+        # NULL is held distinct from every string a column could hold.
+        # Plain str() would collapse a SQL NULL and the text 'None' onto
+        # the same value, and this tool reporting agreement where the data
+        # actually differs is the one failure it must not have.
+        tuple("\x00NULL" if v is None else str(v) for v in row)
+        for row in cur.fetchall()
+    )
 
 
 def verify_pairs(pairs: list[tuple[str, str]]) -> list[str]:
@@ -346,7 +371,7 @@ def verify_pairs(pairs: list[tuple[str, str]]) -> list[str]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `./.venv/Scripts/pytest.exe tests/test_rename_equivalence.py -v`
-Expected: 4 passed
+Expected: 6 passed
 
 - [ ] **Step 5: Commit**
 
@@ -429,7 +454,7 @@ Expected: `ERROR: permission denied`. If this succeeds, the migration widened ac
 - [ ] **Step 6: Run the existing suite against the compatibility views**
 
 Run: `./.venv/Scripts/pytest.exe tests/ -q`
-Expected: 402 passed, 9 failed (the same pre-existing 9), 33 skipped. **No new failures** — the compatibility views are doing their job.
+Expected: 423 passed, 25 failed (the same pre-existing 25), 0 skipped. **No new failures** — the compatibility views are doing their job.
 
 - [ ] **Step 7: Record that the migration is applied**
 
@@ -715,7 +740,7 @@ if name in ("active_initiative", "open_task")
 - [ ] **Step 6: Run the full suite**
 
 Run: `./.venv/Scripts/pytest.exe tests/ -q`
-Expected: 402 passed, 9 failed (the same pre-existing 9), 33 skipped.
+Expected: 423 passed, 25 failed (the same pre-existing 25), 0 skipped.
 
 - [ ] **Step 7: Commit**
 
@@ -838,7 +863,7 @@ DROP VIEW IF EXISTS tms_business_object_attributes_flat;
 php /c/xampp/htdocs/dev-arvind-retail-chatbot/web/modules/custom/vf_sql_chatbot/tests/parity/check.php "$SCRATCH/parity"
 ```
 
-Expected: 402 passed / 9 pre-existing failures; parity exit 0.
+Expected: 423 passed / 25 pre-existing failures; parity exit 0.
 
 - [ ] **Step 4: Verify "BO 123" still answers correctly**
 
