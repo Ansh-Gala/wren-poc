@@ -34,6 +34,7 @@ from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
 from pipeline.initiative import with_initiative
+from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.models import Session
@@ -166,13 +167,15 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "error": safe_error(r.error, getattr(r, "sqlstate", None)),
         "raw_error": r.error,
         "failure_category": r.failure_category,
-        # with_initiative is innermost: it needs the real column names, and
-        # the two wrappers around it only add fields.
+        # with_initiative and with_links are innermost: both need the real
+        # column names, and every wrapper around them only adds fields.
         "result": with_presentation(
             with_column_labels(
-                with_initiative(r.actual_result,
-                                (r.actual_result or {}).get("columns"),
-                                settings)),
+                with_links(
+                    with_initiative(r.actual_result,
+                                    (r.actual_result or {}).get("columns"),
+                                    settings),
+                    (r.actual_result or {}).get("columns"))),
             after.get("tables")),
 
         "semantic_match": r.semantic_match,

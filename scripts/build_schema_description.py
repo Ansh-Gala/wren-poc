@@ -79,10 +79,8 @@ PRIMARY_KEYS = {
     "tms_user_flat": "user_id",
     "tms_role_flat": "role_dept_id",
     # tms_attachment_flat has one row per task_id (111 of 111 distinct).
-    # tms_task_issue_flat has no key of its own: the source groups by
-    # issue.id but never selects it, so nothing in the view identifies a
-    # single issue. Counting works; addressing one does not.
     "tms_attachment_flat": "task_id",
+    "tms_task_issue_flat": "issue_id",
 }
 
 # Below this many distinct values a column is an enumeration, and listing the
