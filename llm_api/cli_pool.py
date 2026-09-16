@@ -169,7 +169,9 @@ class ClaudePool:
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--verbose",
-            "--system-prompt", self._system_prompt,
+            # See system_prompt_file in cli_provider: Windows caps the whole
+            # command line at 32,767 characters and this prompt is past it.
+            "--system-prompt-file", system_prompt_file(self._system_prompt),
             "--tools", "",
             "--permission-mode", "bypassPermissions",
         ]
