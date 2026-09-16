@@ -20,6 +20,8 @@ away. What survives is the choice of column, value, operator and shape.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from dataclasses import dataclass, field
 
 import sqlglot
@@ -447,8 +449,16 @@ def compare(expected_sql: str | None, generated_sql: str | None,
 
 # ------------------------------------------------------------ hallucination --
 
-def _schema_index() -> tuple[set[str], dict[str, set[str]]]:
-    """(table names, table -> columns) from the generated schema description."""
+@lru_cache(maxsize=1)
+def _schema_index() -> tuple[frozenset[str], dict[str, frozenset[str]]]:
+    """(table names, table -> columns) from the generated schema description.
+
+    Cached: this re-parsed the same 25KB of YAML on every question that
+    produced SQL, which was the second-largest avoidable cost in a turn after
+    the system prompt. Frozen on the way out because the value is now shared
+    between callers -- a caller that mutated it would corrupt every later
+    schema check, and the failure would look like a hallucination report.
+    """
     from pathlib import Path
 
     import yaml
@@ -456,11 +466,11 @@ def _schema_index() -> tuple[set[str], dict[str, set[str]]]:
     path = Path(__file__).resolve().parents[1] / "metadata" / "schema_description.yaml"
     doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     tables: set[str] = set()
-    columns: dict[str, set[str]] = {}
+    columns: dict[str, frozenset[str]] = {}
     for table, spec in (doc.get("tables") or {}).items():
         tables.add(table)
-        columns[table] = set((spec.get("columns") or {}).keys())
-    return tables, columns
+        columns[table] = frozenset((spec.get("columns") or {}).keys())
+    return frozenset(tables), columns
 
 
 @dataclass

@@ -12,6 +12,8 @@ tolerates a tool being absent -- in `strict` mode dry_run is not registered.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from pipeline.models import Session
 
 SYSTEM_PROMPT = """You are generating SQL for a local, synthetic PostgreSQL database used in a
@@ -215,8 +217,21 @@ def _render_examples(doc: dict) -> str:
     return chr(10).join(out)
 
 
+@lru_cache(maxsize=1)
 def build_lean_system_prompt() -> str:
-    """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined, rendered compactly."""
+    """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined, rendered compactly.
+
+    Cached because it is deterministic and was being rebuilt on the hot path:
+    three YAML files totalling 32KB re-read and re-parsed to produce a
+    byte-identical 26KB string, once per question. Five other readers of the
+    same files already do this (normalize.load_vocabulary, followup._schema
+    and _rule_predicates, column_order._config); this one was missed.
+
+    The cost of caching is that editing metadata/*.yaml needs a restart to
+    take effect. That is already true of every other reader, and the built
+    prompt is compared byte for byte against the PHP port, so it is not a
+    file anyone edits casually.
+    """
     from pathlib import Path
 
     import yaml

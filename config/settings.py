@@ -44,6 +44,12 @@ class Settings:
     
     llm_provider: str = "cli" # 'cli' or 'openai'
     cli_lean: bool = False
+    # Warm Claude Code processes kept standing by, each serving one question.
+    # The CLI costs ~4s to boot and that was being paid on every query; this
+    # pays it in advance instead. 0 disables the pool and restores the plain
+    # one-shot subprocess, which is also the automatic fallback.
+    cli_pool_size: int = 4
+    cli_pool_warmup_seconds: float = 3.0
     openai_api_key: str = field(repr=False, default="")
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o"
@@ -126,6 +132,8 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         debug=_as_bool(g("DEBUG"), False),
         llm_provider=(g("LLM_PROVIDER") or "cli").strip().lower(),
         cli_lean=_as_bool(g("CLI_LEAN"), False),
+        cli_pool_size=int(g("CLI_POOL_SIZE") or 4),
+        cli_pool_warmup_seconds=float(g("CLI_POOL_WARMUP_SECONDS") or 3.0),
         # Each branch falls back to "" -- naming a provider whose key is absent
         # is a configuration mistake, and it should be reported as one rather
         # than raising AttributeError from inside the loader, before any code

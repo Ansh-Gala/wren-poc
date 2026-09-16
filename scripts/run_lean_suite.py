@@ -23,6 +23,15 @@ from config.settings import load_settings
 from wren_setup.mcp_config import write_mcp_config
 
 
+def _pct(values: list[float], p: float) -> float:
+    """Nearest-rank percentile. No interpolation: n is 50, not 50,000."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    k = max(0, min(len(ordered) - 1, int(round(p / 100 * len(ordered) + 0.5)) - 1))
+    return ordered[k]
+
+
 def summarise(results, out_dir: Path) -> dict:
     n = len(results)
     if not n:
@@ -62,6 +71,17 @@ def summarise(results, out_dir: Path) -> dict:
         ),
         "avg_tool_calls": avg(lambda r: r.tool_call_count),
         "avg_latency_s": avg(lambda r: r.latency_ms / 1000),
+        # An average hides the tail, and the tail is what a person notices.
+        # Everything below is already in the JSONL; only the reporting was
+        # missing.
+        "p50_latency_s": _pct([r.latency_ms for r in results], 50) / 1000,
+        "p95_latency_s": _pct([r.latency_ms for r in results], 95) / 1000,
+        "p99_latency_s": _pct([r.latency_ms for r in results], 99) / 1000,
+        "max_latency_s": max((r.latency_ms for r in results), default=0) / 1000,
+        # What the CLI says the model cost, and what the caller actually
+        # waited for it. The difference is process overhead.
+        "avg_llm_s": avg(lambda r: r.llm_ms / 1000),
+        "avg_llm_wall_s": avg(lambda r: r.llm_wall_ms / 1000),
         "avg_context_chars": avg(lambda r: r.context_chars),
         "sql_generated": sum(1 for r in results if r.generated_sql),
         "sql_executed": sum(1 for r in results if r.execution_success),
@@ -129,6 +149,11 @@ def summarise(results, out_dir: Path) -> dict:
     print(f"  avg effective tokens     {s['avg_effective_tokens']:>10,.0f}")
     print(f"  avg tool calls           {s['avg_tool_calls']:>10.1f}")
     print(f"  avg latency (s)          {s['avg_latency_s']:>10.1f}")
+    print(f"  p50 / p95 / p99 (s)      "
+          f"{s['p50_latency_s']:>4.1f} / {s['p95_latency_s']:.1f} / "
+          f"{s['p99_latency_s']:.1f}   max {s['max_latency_s']:.1f}")
+    print(f"  avg model (s)            {s['avg_llm_wall_s']:>10.1f}"
+          f"   (CLI reports {s['avg_llm_s']:.1f})")
     print(f"  avg context chars        {s['avg_context_chars']:>10.0f}")
 
     if repaired or typed or acted:

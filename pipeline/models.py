@@ -53,7 +53,16 @@ class ClaudeRun:
     ok: bool
     exit_code: int | None = None
     timed_out: bool = False
+    # What the CLI says it spent. Excludes its own boot, so it is NOT the
+    # cost of the call -- see wall_ms.
     duration_ms: float = 0.0
+    # Wall clock the caller actually waited: process start to usable answer.
+    # The gap between this and duration_ms is CLI startup, which was measured
+    # and then thrown away before, and is the single largest cost in a turn.
+    wall_ms: float = 0.0
+    # How long the process had been warming before the question was sent.
+    # Zero for a cold spawn; the pool fills it in.
+    warm_ms: float = 0.0
     result_text: str = ""
     tools_used: list[str] = field(default_factory=list)
     mcp_errors: list[str] = field(default_factory=list)

@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
 from config.settings import Settings
@@ -111,6 +112,37 @@ def build_command(
     return cmd
 
 
+def apply_result_event(run: ClaudeRun, event: dict) -> None:
+    """Read the CLI's terminating `result` event onto a run.
+
+    Shared with llm_api.cli_pool, which reads the same event off a live pipe
+    rather than a finished process's stdout. One implementation because the
+    usage accounting below is the kind of thing that drifts silently if it is
+    written twice.
+    """
+    run.result_text = event.get("result") or ""
+    run.duration_ms = float(event.get("duration_ms") or 0.0)
+    run.cost_usd = event.get("total_cost_usd")
+    run.session_id = event.get("session_id")
+    run.num_turns = event.get("num_turns")
+    # The CLI reports usage the way Anthropic bills it: fresh input, cache
+    # writes and cache reads are separate counters. Summing all three gives
+    # the prompt size the model actually saw, which is the number comparable
+    # to the API provider's prompt_tokens.
+    usage = event.get("usage") or {}
+    run.prompt_tokens = (
+        int(usage.get("input_tokens") or 0)
+        + int(usage.get("cache_creation_input_tokens") or 0)
+        + int(usage.get("cache_read_input_tokens") or 0)
+    )
+    run.completion_tokens = int(usage.get("output_tokens") or 0)
+    run.cache_read_tokens = int(usage.get("cache_read_input_tokens") or 0)
+    run.cache_write_tokens = int(usage.get("cache_creation_input_tokens") or 0)
+    run.ok = not event.get("is_error", False)
+    if event.get("is_error"):
+        run.error = event.get("subtype") or "claude reported an error"
+
+
 def parse_stream_json(stdout: str) -> ClaudeRun:
     """Read the stream-json event log.
 
@@ -151,31 +183,55 @@ def parse_stream_json(stdout: str) -> ClaudeRun:
                     mcp_errors.append(text[:500])
 
         elif etype == "result":
-            run.result_text = event.get("result") or ""
-            run.duration_ms = float(event.get("duration_ms") or 0.0)
-            run.cost_usd = event.get("total_cost_usd")
-            run.session_id = event.get("session_id")
-            run.num_turns = event.get("num_turns")
-            # The CLI reports usage the way Anthropic bills it: fresh input,
-            # cache writes and cache reads are separate counters. Summing all
-            # three gives the prompt size the model actually saw, which is the
-            # number comparable to the API provider's prompt_tokens.
-            usage = event.get("usage") or {}
-            run.prompt_tokens = (
-                int(usage.get("input_tokens") or 0)
-                + int(usage.get("cache_creation_input_tokens") or 0)
-                + int(usage.get("cache_read_input_tokens") or 0)
-            )
-            run.completion_tokens = int(usage.get("output_tokens") or 0)
-            run.cache_read_tokens = int(usage.get("cache_read_input_tokens") or 0)
-            run.cache_write_tokens = int(usage.get("cache_creation_input_tokens") or 0)
-            run.ok = not event.get("is_error", False)
-            if event.get("is_error"):
-                run.error = event.get("subtype") or "claude reported an error"
+            apply_result_event(run, event)
 
     run.tools_used = tools
     run.mcp_errors = mcp_errors
     return run
+
+
+# One pool per (command, model, system prompt). Module-level because the
+# whole point is to outlive a single request: get_provider() builds a new
+# CLILocalProvider every turn, so anything held on the instance would be
+# thrown away before it finished warming.
+_POOLS: dict[tuple, "ClaudePool"] = {}
+_POOLS_LOCK = threading.Lock()
+
+
+def _pool_for(settings: Settings, system_prompt: str) -> "ClaudePool | None":
+    """The warm pool for this configuration, or None when pooling is off.
+
+    Keyed on the system prompt as well as the command and model: a pooled
+    process is booted with `--system-prompt` already applied, so a process
+    warmed for one prompt cannot answer under another.
+    """
+    if settings.cli_pool_size <= 0:
+        return None
+    from llm_api.cli_pool import ClaudePool
+
+    key = (settings.claude_command, settings.claude_model, hash(system_prompt))
+    with _POOLS_LOCK:
+        pool = _POOLS.get(key)
+        if pool is None:
+            pool = ClaudePool(
+                command=settings.claude_command,
+                system_prompt=system_prompt,
+                model=settings.claude_model or None,
+                size=settings.cli_pool_size,
+                warmup=settings.cli_pool_warmup_seconds,
+                reply_timeout=min(90.0, float(settings.claude_timeout_seconds)),
+            )
+            _POOLS[key] = pool
+        return pool
+
+
+def shutdown_pools() -> None:
+    """Kill every warm process. For a clean exit, and for tests."""
+    with _POOLS_LOCK:
+        pools = list(_POOLS.values())
+        _POOLS.clear()
+    for pool in pools:
+        pool.close()
 
 
 class CLILocalProvider(LLMProvider):
@@ -187,6 +243,24 @@ class CLILocalProvider(LLMProvider):
         settings: Settings,
         session: Session | None = None,
     ) -> ClaudeRun:
+        # A warm process, when there is one. The lean path only: the MCP
+        # branch passes --mcp-config and a different tool set, and warming
+        # those has not been measured.
+        if settings.cli_lean:
+            from claude.prompts import build_lean_system_prompt
+            pool = _pool_for(settings, build_lean_system_prompt())
+            if pool is not None:
+                user_prompt = build_user_prompt(
+                    question, session,
+                    context=session.context_block if session else None,
+                    lean=True)
+                run = pool.ask(user_prompt)
+                if run is not None:
+                    return run
+                # Fell through: no warm process, or one died mid-answer. The
+                # one-shot path below is slower but always available, and an
+                # answer matters more than the four seconds.
+
         exe = detect_claude(settings.claude_command)
         if not exe:
             return ClaudeRun(
@@ -217,10 +291,12 @@ class CLILocalProvider(LLMProvider):
                 env=env,
             )
         except subprocess.TimeoutExpired:
+            waited = (time.perf_counter() - started) * 1000
             return ClaudeRun(
                 ok=False,
                 timed_out=True,
-                duration_ms=(time.perf_counter() - started) * 1000,
+                duration_ms=waited,
+                wall_ms=waited,
                 error=f"claude timed out after {settings.claude_timeout_seconds}s",
             )
         except OSError as exc:
@@ -231,7 +307,11 @@ class CLILocalProvider(LLMProvider):
         run.exit_code = proc.returncode
         run.stderr = (proc.stderr or "")[-4000:]
 
-        # Wall-clock is the honest number when the result event carried none.
+        # Both numbers, always. `duration_ms` is the CLI's own account of the
+        # query and excludes its startup; `wall_ms` is what the caller waited.
+        # Keeping only the first is how ~4.5s of process boot per query stayed
+        # invisible -- it was measured here and then discarded.
+        run.wall_ms = elapsed_ms
         if not run.duration_ms:
             run.duration_ms = elapsed_ms
 
