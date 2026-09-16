@@ -281,6 +281,15 @@ class Runtime:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_lock = threading.Lock()
 
+        # Boot the warm Claude processes now rather than on the first
+        # question. Each needs about three seconds before it can answer, and
+        # the server is normally started well before anyone types anything --
+        # so the cost lands in dead time instead of on the first arrival.
+        if self.settings.cli_lean and self.settings.cli_pool_size > 0:
+            from claude.prompts import build_lean_system_prompt
+            from llm_api.cli_provider import _pool_for
+            _pool_for(self.settings, build_lean_system_prompt())
+
     def record(self, result, question: str, state: dict) -> None:
         if self.log_path is None:
             return
@@ -481,6 +490,10 @@ def main() -> int:
         print("\nstopping")
     finally:
         server.server_close()
+        # Warm processes are children of this one; without this they outlive
+        # a Ctrl+C and sit holding memory.
+        from llm_api.cli_provider import shutdown_pools
+        shutdown_pools()
     return 0
 
 

@@ -141,7 +141,19 @@ class TurnResult:
     tool_call_count: int = 0
     tools_used: list[str] = field(default_factory=list)
     latency_ms: float = 0.0
+    # What the CLI says the query cost. Excludes its own startup.
     llm_ms: float = 0.0
+    # What the caller actually waited for the model leg, startup included.
+    # llm_wall_ms - llm_ms is process overhead, and it was the largest single
+    # cost in a turn before the pool existed.
+    llm_wall_ms: float = 0.0
+    # Per-stage wall clock, so a regression can be attributed rather than
+    # guessed at. Every one is measured; none is derived.
+    normalize_ms: float = 0.0
+    schema_check_ms: float = 0.0
+    safety_ms: float = 0.0
+    db_ms: float = 0.0
+    followup_ms: float = 0.0
     error: str | None = None
     # Carried from QueryResult so the HTTP layer can turn a failure into
     # something a person can act on without reading the raw message, which
@@ -286,7 +298,9 @@ def run_turn(
     #    costs no tokens and no round-trip.
     question = turn.question
     if followup_mode:
+        _t = time.perf_counter()
         repaired = normalize(turn.question)
+        r.normalize_ms = (time.perf_counter() - _t) * 1000
         question = repaired.question
         r.repairs = [asdict(x) for x in repaired.repairs]
     r.normalized_question = question
@@ -395,6 +409,7 @@ def run_turn(
     provider = get_provider(settings)
     run = provider.ask(question, mcp_config_path, privacy_mode, settings, session)
     r.llm_ms = run.duration_ms
+    r.llm_wall_ms = run.wall_ms or run.duration_ms
     r.tools_used = list(run.tools_used)
     r.tool_call_count = len(run.tools_used)
     r.prompt_tokens = run.prompt_tokens
@@ -435,16 +450,20 @@ def run_turn(
     # other error.
     if parsed.sql:
         from pipeline.sql_semantics import check_against_schema
+        _t = time.perf_counter()
         sc = check_against_schema(parsed.sql)
+        r.schema_check_ms = (time.perf_counter() - _t) * 1000
         r.schema_grounded = sc.grounded
         r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
 
     if parsed.sql:
+        _t = time.perf_counter()
         try:
             assert_read_only(parsed.sql)
             r.sql_valid = True
         except UnsafeSQLError as exc:
             r.error = r.error or f"unsafe SQL: {exc}"
+        r.safety_ms = (time.perf_counter() - _t) * 1000
 
     if turn.expect_behavior == "zero_or_clarify":
         if r.clarification is not None and parsed.sql is None:
@@ -494,11 +513,13 @@ def run_turn(
     expected = None
     if scoring:
         expected = run_readonly(settings, turn.expected_sql, settings.statement_timeout_ms)
+        r.db_ms += expected.duration_ms
         r.expected_result = result_summary(expected)
 
     actual = None
     if r.sql_valid and parsed.sql:
         actual = run_readonly(settings, parsed.sql, settings.statement_timeout_ms)
+        r.db_ms += actual.duration_ms
         r.actual_result = result_summary(actual)
         r.execution_success = actual.ok
         if actual.error:
@@ -573,11 +594,13 @@ def run_turn(
     session.turns.append(Turn(index=turn.turn_index, question=question,
                               generated_sql=parsed.sql))
 
+    _t = time.perf_counter()
     _attach_followup(
         r, turn, state,
         len(actual.rows) if actual is not None and actual.ok else None,
         followup_mode,
     )
+    r.followup_ms = (time.perf_counter() - _t) * 1000
     r.latency_ms = (time.perf_counter() - started) * 1000
     return r
 
