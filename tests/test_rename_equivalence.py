@@ -13,7 +13,7 @@ def test_differing_queries_are_reported():
 
 def test_a_column_rename_is_not_a_difference():
     """Values are compared positionally. The heading is meant to change."""
-    assert verify_pairs([("SELECT 1 AS business_object_id",
+    assert verify_pairs([("SELECT 1 AS initiative_id",
                           "SELECT 1 AS initiative_id")]) == []
 
 

@@ -1,18 +1,18 @@
 rules:
-  - name: active_business_object
+  - name: active_initiative
     definition: >-
-      An Active Initiative (Business Object, Order, BO) is one where business_object_status = 'Active'.
-    sql_fragment: "tms_business_object_flat.business_object_status = 'Active'"
+      An Active Initiative (Business Object, Order, BO) is one where initiative_status = 'Active'.
+    sql_fragment: "tms_initiative_flat.initiative_status = 'Active'"
 
-  - name: short_closed_business_object
+  - name: short_closed_initiative
     definition: >-
-      A Short Closed Initiative is one where business_object_status = 'Short Closed'.
-    sql_fragment: "tms_business_object_flat.business_object_status = 'Short Closed'"
+      A Short Closed Initiative is one where initiative_status = 'Short Closed'.
+    sql_fragment: "tms_initiative_flat.initiative_status = 'Short Closed'"
 
-  - name: closed_business_object
+  - name: closed_initiative
     definition: >-
-      A Closed Initiative is one where business_object_status = 'Closed'.
-    sql_fragment: "tms_business_object_flat.business_object_status = 'Closed'"
+      A Closed Initiative is one where initiative_status = 'Closed'.
+    sql_fragment: "tms_initiative_flat.initiative_status = 'Closed'"
 
   - name: open_task
     definition: >-
@@ -48,27 +48,27 @@ rules:
 
   - name: prefer_pre_aggregated_counts
     definition: >-
-      tms_business_object_flat already carries total_task_count, open_task_count,
+      tms_initiative_flat already carries total_task_count, open_task_count,
       closed_task_count and delayed_task_count. When a question is about a Business
       Object's task counts, read these columns rather than joining to tms_task_flat
       and re-aggregating: it is the same answer from one table, and it keeps the
       choice deterministic instead of leaving two equally reasonable shapes.
-    sql_fragment: "tms_business_object_flat.total_task_count"
+    sql_fragment: "tms_initiative_flat.total_task_count"
     caution: >-
       delayed_task_count counts delayed OPEN tasks only. If a question should also
       count closed tasks that breached SLA, join to tms_task_flat on
       task_sla_status = 'Delayed' instead.
 
-  - name: count_business_objects_from_tasks
+  - name: count_initiatives_from_tasks
     definition: >-
-      When counting Initiatives from task data, use COUNT(DISTINCT bo_id) rather than COUNT(*).
-    sql_fragment: "COUNT(DISTINCT tms_task_flat.bo_id)"
+      When counting Initiatives from task data, use COUNT(DISTINCT initiative_id) rather than COUNT(*).
+    sql_fragment: "COUNT(DISTINCT tms_task_flat.initiative_id)"
 
   - name: default_to_active
     definition: >-
       When a question asks for records, or for a count of records, and names no
       status of its own, answer about the active ones only. An Initiative
-      (Business Object) is active when business_object_status = 'Active'; a task
+      (Business Object) is active when initiative_status = 'Active'; a task
       is active when task_status = 'open'. Add that predicate even though the
       question did not ask for it: a user asking "show me my tasks" means the
       ones still to do, not every task they have ever been assigned.
@@ -100,5 +100,5 @@ rules:
 
   - name: entity_alias
     definition: >-
-      Initiative, Order, BO and Business Object are all the same TMS entity (tms_business_object_flat).
-    sql_fragment: "tms_business_object_flat"
+      Initiative, Order, BO and Business Object are all the same TMS entity (tms_initiative_flat).
+    sql_fragment: "tms_initiative_flat"

@@ -19,13 +19,13 @@ and CSS class codes. Neither names a column, a table or any SQL.
 
 from __future__ import annotations
 
-# The colour as tms_business_object_flat stores it, mapped to the CSS class
+# The colour as tms_initiative_flat stores it, mapped to the CSS class
 # the app's own renderers already use.
 #
 # This mapping is not derivable from the frontend. All four of its colour maps
 # run class -> name, and both e_wh and nocolor render as "White", so inverting
 # them is ambiguous. It was resolved from the data instead, by joining
-# tms_business_object_flat to tms_task_flat on the initiative id and reading
+# tms_initiative_flat to tms_task_flat on the initiative id and reading
 # the two spellings off the same row: Black/a_bl on 196 initiatives,
 # Green/d_gr on 95, White/e_wh on 9, Red/b_re on 1. Yellow is listed for
 # completeness -- no row carries it today, and a colour that appeared later
@@ -41,10 +41,10 @@ _CLASS_BY_NAME = {
 _CLASSES = frozenset(_CLASS_BY_NAME.values())
 
 # The columns that identify an initiative, in each of the two spellings the
-# two flat tables use. bo_id is tms_task_flat's name for business_object_id.
-_ID_COLUMNS = ("business_object_id", "bo_id")
-_REF_COLUMNS = ("business_object_ref_id",)
-_COLOUR_COLUMNS = ("business_object_color",)
+# two flat tables use. bo_id is tms_task_flat's name for initiative_id.
+_ID_COLUMNS = ("initiative_id", "bo_id")
+_REF_COLUMNS = ("initiative_ref_id",)
+_COLOUR_COLUMNS = ("initiative_color",)
 
 
 def colour_class(value) -> str | None:
@@ -140,9 +140,9 @@ def colours_by_lookup(result: dict, where: dict, settings) -> dict:
 
     from database.connection import run_readonly
 
-    sql = ("SELECT business_object_id, business_object_color "
-           "FROM tms_business_object_flat "
-           f"WHERE business_object_id IN ({', '.join(str(i) for i in ids)})")
+    sql = ("SELECT initiative_id, initiative_color "
+           "FROM tms_initiative_flat "
+           f"WHERE initiative_id IN ({', '.join(str(i) for i in ids)})")
     query = run_readonly(settings, sql, getattr(settings, "statement_timeout_ms", None))
     if query.error:
         return {}

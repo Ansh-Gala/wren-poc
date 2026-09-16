@@ -1,7 +1,7 @@
 """Which columns matter, for a result whose columns the user did not choose.
 
 Everything here is positional. A result may project the same name twice --
-COUNT(*) twice, or a join taking business_object_ref_id from both sides -- and
+COUNT(*) twice, or a join taking initiative_ref_id from both sides -- and
 the frontend keys its rows by position for exactly that reason, so a
 name-based answer would have to be re-resolved by the caller and would be
 wrong in the one case that matters.
@@ -13,20 +13,20 @@ from pipeline.column_order import presentation
 
 
 def test_named_columns_lead_in_the_order_the_file_gives_them():
-    columns = ["business_unit", "business_object_status", "business_object_id"]
-    out = presentation(columns, ["tms_business_object_flat"])
+    columns = ["business_unit", "initiative_status", "initiative_id"]
+    out = presentation(columns, ["tms_initiative_flat"])
     # File order, not result order: id, then status, then unit.
     assert [columns[i] for i in out["order"]] == [
-        "business_object_id", "business_object_status", "business_unit"]
+        "initiative_id", "initiative_status", "business_unit"]
 
 
 def test_unlisted_columns_keep_their_own_order_after_the_named_ones():
     """A generated alias has never appeared in any registry and still has to
     be shown somewhere predictable."""
-    columns = ["avg_delay_days", "business_object_id", "some_new_column"]
-    out = presentation(columns, ["tms_business_object_flat"])
+    columns = ["avg_delay_days", "initiative_id", "some_new_column"]
+    out = presentation(columns, ["tms_initiative_flat"])
     assert [columns[i] for i in out["order"]] == [
-        "business_object_id", "avg_delay_days", "some_new_column"]
+        "initiative_id", "avg_delay_days", "some_new_column"]
 
 
 def test_hidden_columns_are_positions_and_stay_inside_the_order():
@@ -36,15 +36,15 @@ def test_hidden_columns_are_positions_and_stay_inside_the_order():
     the frontend starts it collapsed. Dropping it from `order` would make the
     two lists disagree about how many columns there are.
     """
-    columns = ["business_object_id", "business_object_note"]
-    out = presentation(columns, ["tms_business_object_flat"])
+    columns = ["initiative_id", "initiative_note"]
+    out = presentation(columns, ["tms_initiative_flat"])
     assert out["hidden"] == [1]
     assert sorted(out["order"]) == [0, 1]
 
 
 def test_a_duplicated_column_name_gets_both_of_its_positions():
-    columns = ["business_object_id", "business_object_id"]
-    out = presentation(columns, ["tms_business_object_flat"])
+    columns = ["initiative_id", "initiative_id"]
+    out = presentation(columns, ["tms_initiative_flat"])
     assert sorted(out["order"]) == [0, 1], "a repeated name must not collapse"
 
 
@@ -63,9 +63,9 @@ def test_no_columns_is_not_an_error():
 
 def test_the_order_is_always_a_permutation_of_the_positions():
     """The invariant the frontend depends on: every column appears once."""
-    columns = ["business_object_id", "workflow_id", "avg_delay_days",
-               "business_object_status", "business_object_status"]
-    out = presentation(columns, ["tms_business_object_flat"])
+    columns = ["initiative_id", "workflow_id", "avg_delay_days",
+               "initiative_status", "initiative_status"]
+    out = presentation(columns, ["tms_initiative_flat"])
     assert sorted(out["order"]) == list(range(len(columns)))
     assert all(0 <= i < len(columns) for i in out["hidden"])
 
@@ -73,17 +73,17 @@ def test_the_order_is_always_a_permutation_of_the_positions():
 def test_the_first_configured_table_decides_for_a_join():
     """Not merged: a join's columns come from two tables, and merging their
     priority lists would invent an order neither file states."""
-    columns = ["task_id", "business_object_id"]
-    out = presentation(columns, ["tms_task_flat", "tms_business_object_flat"])
-    assert [columns[i] for i in out["order"]] == ["task_id", "business_object_id"]
+    columns = ["task_id", "initiative_id"]
+    out = presentation(columns, ["tms_task_flat", "tms_initiative_flat"])
+    assert [columns[i] for i in out["order"]] == ["task_id", "initiative_id"]
 
 
 def test_labels_attaches_presentation_without_disturbing_anything():
     from pipeline.labels import with_presentation
 
-    result = {"columns": ["business_object_note", "business_object_id"],
+    result = {"columns": ["initiative_note", "initiative_id"],
               "rows": [["n", 1]], "row_count": 1, "truncated": False}
-    out = with_presentation(result, ["tms_business_object_flat"])
+    out = with_presentation(result, ["tms_initiative_flat"])
 
     assert out["column_order"] == [1, 0]
     assert out["hidden_columns"] == [0]
@@ -104,7 +104,7 @@ def test_an_error_result_still_gets_a_consistent_shape():
     from pipeline.labels import with_presentation
 
     out = with_presentation({"error": "boom", "sqlstate": "42P01"},
-                            ["tms_business_object_flat"])
+                            ["tms_initiative_flat"])
     assert out["column_order"] == []
     assert out["hidden_columns"] == []
     assert out["error"] == "boom"
@@ -124,7 +124,7 @@ def test_the_presentation_fields_survive_debug_being_off():
         "question": "Show the AR_YD_Suiting items",
         "generated_sql": "SELECT ... -- must not survive",
         "result": {
-            "columns": ["business_object_note", "business_object_id"],
+            "columns": ["initiative_note", "initiative_id"],
             "column_labels": ["Business Object Note", "Business Object Id"],
             "rows": [["n", 1]],
             "row_count": 1,
@@ -182,7 +182,7 @@ def test_every_column_the_hierarchy_names_is_a_column_that_exists():
     This is how a typo becomes a no-op: `presentation` looks the name up in a
     rank map, misses, and treats the column as unlisted. The file reads as
     though it configured something and configures nothing. Caught once already
-    -- tms_business_object_attributes_flat listed business_object_ref_id, a
+    -- tms_initiative_attributes_flat listed initiative_ref_id, a
     column that table does not have.
     """
     schema = yaml.safe_load(
@@ -224,9 +224,9 @@ def test_the_two_copies_of_the_hierarchy_are_byte_identical():
 def test_a_nominated_group_and_its_aggregates_come_back_as_positions():
     from pipeline.column_order import grouping
 
-    columns = ["business_object_type", "open_task_count", "total_task_count",
+    columns = ["initiative_type", "open_task_count", "total_task_count",
                "business_unit"]
-    out = grouping(columns, ["tms_business_object_flat"])
+    out = grouping(columns, ["tms_initiative_flat"])
     assert out["row_groups"] == [0]
     assert out["value_columns"] == [{"index": 1, "aggFunc": "sum"},
                                     {"index": 2, "aggFunc": "sum"}]
@@ -240,8 +240,8 @@ def test_pivot_is_not_nominated_anywhere_yet():
     """
     from pipeline.column_order import grouping
 
-    for table in ("tms_business_object_flat", "tms_task_flat"):
-        assert grouping(["business_object_type", "task_department"],
+    for table in ("tms_initiative_flat", "tms_task_flat"):
+        assert grouping(["initiative_type", "task_department"],
                         [table])["pivot_columns"] == []
 
 
@@ -257,8 +257,8 @@ def test_a_nomination_the_result_did_not_project_is_simply_absent():
     """The nomination is per table; the result is per question."""
     from pipeline.column_order import grouping
 
-    out = grouping(["business_object_id", "business_object_status"],
-                   ["tms_business_object_flat"])
+    out = grouping(["initiative_id", "initiative_status"],
+                   ["tms_initiative_flat"])
     assert out["row_groups"] == []
     assert out["value_columns"] == []
 

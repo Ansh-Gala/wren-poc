@@ -137,8 +137,8 @@ def test_a_reset_expectation_never_carries_the_previous_filters():
     # one before, so finding one on both sides of a switch is not evidence of a
     # leak. What would be evidence is the *value* surviving, and C04.4 asserts
     # exactly that -- see test_context_leakage_case_is_present_and_discriminating.
-    entity_columns = {"business_object_type", "workflow_code", "workflow_name",
-                      "business_object_status", "task_status"}
+    entity_columns = {"initiative_type", "workflow_code", "workflow_name",
+                      "initiative_status", "task_status"}
 
     contradictions = []
     for suite in ("lean_questions.yaml", "targeted_questions.yaml",

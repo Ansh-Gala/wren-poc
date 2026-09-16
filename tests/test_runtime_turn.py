@@ -56,10 +56,10 @@ def test_a_turn_with_no_expected_sql_still_executes_the_query(monkeypatch, setti
     """The generated query must run and return rows, with nothing to compare to."""
     result, _ = _run(
         monkeypatch, settings,
-        '{"sql": "SELECT COUNT(*) FROM tms_business_object_flat"}',
+        '{"sql": "SELECT COUNT(*) FROM tms_initiative_flat"}',
     )
 
-    assert result.generated_sql == "SELECT COUNT(*) FROM tms_business_object_flat"
+    assert result.generated_sql == "SELECT COUNT(*) FROM tms_initiative_flat"
     assert result.sql_valid is True
     assert result.execution_success is True
     assert result.actual_result["row_count"] == 1
@@ -74,7 +74,7 @@ def test_scoring_is_not_applicable_rather_than_failed(monkeypatch, settings):
     """
     result, _ = _run(
         monkeypatch, settings,
-        '{"sql": "SELECT COUNT(*) FROM tms_business_object_flat"}',
+        '{"sql": "SELECT COUNT(*) FROM tms_initiative_flat"}',
     )
 
     assert result.result_match is None
@@ -86,7 +86,7 @@ def test_a_broken_query_is_still_reported_as_broken(monkeypatch, settings):
     """Absent ground truth must not mean absent error reporting."""
     result, _ = _run(
         monkeypatch, settings,
-        '{"sql": "SELECT nonexistent_column FROM tms_business_object_flat"}',
+        '{"sql": "SELECT nonexistent_column FROM tms_initiative_flat"}',
     )
 
     assert result.execution_success is False
@@ -98,8 +98,8 @@ def test_the_follow_up_layer_still_runs(monkeypatch, settings):
     """Repair, classification and suggestions do not depend on ground truth."""
     result, provider = _run(
         monkeypatch, settings,
-        '{"sql": "SELECT business_object_id FROM tms_business_object_flat '
-        "WHERE business_object_type = 'AR_YD_Suiting'\"}",
+        '{"sql": "SELECT initiative_id FROM tms_initiative_flat '
+        "WHERE initiative_type = 'AR_YD_Suiting'\"}",
         question="show the AR_YD_Suiting itmes",
     )
 

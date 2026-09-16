@@ -43,8 +43,8 @@ def test_exploration_offers_next_moves_grounded_in_the_schema():
     from pipeline.followup import explore
 
     state = _state_after(
-        "SELECT business_object_id, business_object_status "
-        "FROM tms_business_object_flat WHERE business_object_type = 'AR_YD_Suiting'"
+        "SELECT initiative_id, initiative_status "
+        "FROM tms_initiative_flat WHERE initiative_type = 'AR_YD_Suiting'"
     )
     followup = explore(state, row_count=22)
 
@@ -70,14 +70,14 @@ def test_applying_a_filter_suggestion_narrows_the_state_and_asks_for_it():
     from pipeline.followup import Action, apply_action
 
     state = _state_after(
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting'"
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting'"
     )
     question = apply_action(
-        state, Action("add_filter", "business_object_status", "=", "Active"))
+        state, Action("add_filter", "initiative_status", "=", "Active"))
 
-    assert "business_object_status" in state.active_filters
-    assert "Active" in state.active_filters["business_object_status"]
+    assert "initiative_status" in state.active_filters
+    assert "Active" in state.active_filters["initiative_status"]
     assert "Active" in question
     assert "SELECT" not in question.upper()
 
@@ -128,8 +128,8 @@ def test_suggestions_do_not_spend_every_slot_on_one_column():
     from pipeline.followup import explore
 
     state = _state_after(
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting'"
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting'"
     )
     followup = explore(state, row_count=22)
 
@@ -154,7 +154,7 @@ def test_the_wire_format_carries_everything_a_frontend_needs():
         suggestions=[Suggestion(
             id="filter_active",
             label="Only the active ones",
-            action=Action("add_filter", "business_object_status", "=", "Active"),
+            action=Action("add_filter", "initiative_status", "=", "Active"),
         )],
     ).to_dict()
 
@@ -167,7 +167,7 @@ def test_the_wire_format_carries_everything_a_frontend_needs():
     suggestion = payload["suggestions"][0]
     assert set(suggestion) == {"id", "label", "action"}
     assert suggestion["action"] == {
-        "type": "add_filter", "field": "business_object_status",
+        "type": "add_filter", "field": "initiative_status",
         "operator": "=", "value": "Active",
     }
 
@@ -193,15 +193,15 @@ def test_a_single_filter_can_still_be_dropped():
     from pipeline.followup import explore
 
     state = _state_after(
-        "SELECT COUNT(*) FROM tms_business_object_flat "
-        "WHERE business_object_status = 'Active'",
+        "SELECT COUNT(*) FROM tms_initiative_flat "
+        "WHERE initiative_status = 'Active'",
         question="How many items are active?", rows=258,
     )
     followup = explore(state, row_count=1)
 
     assert followup is not None, "offered nothing at all"
     assert any(s.action.type == "remove_filter"
-               and s.action.field == "business_object_status"
+               and s.action.field == "initiative_status"
                for s in followup.suggestions)
 
 
@@ -210,8 +210,8 @@ def test_the_subject_itself_is_never_offered_for_removal():
     from pipeline.followup import explore
 
     state = _state_after(
-        "SELECT business_object_id FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_YD_Suiting'"
+        "SELECT initiative_id FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_YD_Suiting'"
     )
     followup = explore(state, row_count=22)
     assert not any(s.action.type == "remove_filter" for s in followup.suggestions)
@@ -294,7 +294,7 @@ def test_an_unrelated_reply_is_not_treated_as_an_answer():
 def test_suggestion_ids_are_unique_within_a_follow_up():
     """The id is the frontend's handle on a choice. Two choices cannot share one.
 
-    business_object_type contains case-variant near-duplicates that are
+    initiative_type contains case-variant near-duplicates that are
     genuinely distinct values -- AR_YD_Shirting and AR_YD_SHIRTING, 52 rows
     and 2 rows. Lowercasing the value to build the id collapsed them, so a
     frontend sending back the id it was given would silently select the other

@@ -113,7 +113,7 @@ def _slug(text: str) -> str:
 def _value_id(value: str) -> str:
     """An id for a data value, keeping the case the database uses.
 
-    business_object_type holds case-variant near-duplicates that are genuinely
+    initiative_type holds case-variant near-duplicates that are genuinely
     distinct -- AR_YD_Shirting has 52 rows and AR_YD_SHIRTING has 2. Lowercasing
     to build the id collapsed them into one, so a frontend sending back the id
     it was given would silently select the other value.
@@ -189,7 +189,7 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
                     id=f"set_entity_{_value_id(value)}",
                     label=value,
                     action=Action(type="set_entity",
-                                  field="business_object_type",
+                                  field="initiative_type",
                                   operator="=",
                                   value=value),
                 )
@@ -204,13 +204,13 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
 META_DIR = Path(__file__).resolve().parents[1] / "metadata"
 
 # Columns worth sorting by, most interesting first. Name fragments rather than
-# literal columns so this stays true for both tms_business_object_flat and
+# literal columns so this stays true for both tms_initiative_flat and
 # tms_task_flat without listing either.
 _SORTABLE = ("due", "delay", "elapsed", "remaining", "created")
 
 # Never offered as a grouping: the entity column is what the user already
 # chose, and free-text columns produce one group per row.
-_NOT_GROUPABLE = frozenset({"business_object_type", "workflow_code", "workflow_name"})
+_NOT_GROUPABLE = frozenset({"initiative_type", "workflow_code", "workflow_name"})
 
 
 @lru_cache(maxsize=1)
@@ -257,7 +257,7 @@ def _default_values() -> dict[str, str]:
     return {
         column: value
         for name, _table, column, value in _rule_predicates()
-        if name in ("active_business_object", "open_task")
+        if name in ("active_initiative", "open_task")
     }
 
 
@@ -507,7 +507,7 @@ def apply_action(state, action: Action) -> str:
 def _enum_lookup() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Every enumerated column in the schema, longest name first.
 
-    Longest first so that "business_object_status" is recognised before the
+    Longest first so that "initiative_status" is recognised before the
     "status" inside it, which belongs to a different table.
     """
     found: dict[str, tuple[str, ...]] = {}

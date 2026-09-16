@@ -2,7 +2,7 @@
 
 Result comparison alone is not enough. Asked for closed AR_PD_Suiting items,
 the model filtered `workflow_code = 'AR_PD_Suiting'` rather than
-`business_object_type`. Those two columns happen to agree on this data, so the
+`initiative_type`. Those two columns happen to agree on this data, so the
 query returned the right four rows and scored as correct -- while resting on a
 column that means something else and will diverge the moment the data changes.
 

@@ -20,18 +20,18 @@ from pipeline.labels import column_label, column_phrase
 
 
 @pytest.mark.parametrize("name,heading", [
-    ("business_object_id", "Initiative Id"),
-    ("business_object_ref_id", "Initiative Ref Id"),
-    ("business_object_status", "Initiative Status"),
-    ("business_object_type", "Initiative Type"),
-    ("business_object_color", "Initiative Color"),
-    ("business_object_note", "Initiative Note"),
-    ("business_object_created_at", "Initiative Created At"),
-    ("business_object_updated_at", "Initiative Updated At"),
-    ("business_object_client_due_at", "Initiative Client Due At"),
+    ("initiative_id", "Initiative Id"),
+    ("initiative_ref_id", "Initiative Ref Id"),
+    ("initiative_status", "Initiative Status"),
+    ("initiative_type", "Initiative Type"),
+    ("initiative_color", "Initiative Color"),
+    ("initiative_note", "Initiative Note"),
+    ("initiative_created_at", "Initiative Created At"),
+    ("initiative_updated_at", "Initiative Updated At"),
+    ("initiative_client_due_at", "Initiative Client Due At"),
     # Generated aliases, which no registry has ever seen.
-    ("business_object_count", "Initiative Count"),
-    ("is_business_object_delayed", "Is Initiative Delayed"),
+    ("initiative_count", "Initiative Count"),
+    ("is_initiative_delayed", "Is Initiative Delayed"),
     # The only column with a bare `bo` segment.
     ("bo_id", "Initiative Id"),
 ])
@@ -49,8 +49,8 @@ def test_business_unit_is_a_different_thing_and_keeps_its_name(name, heading):
 
 
 @pytest.mark.parametrize("name,phrase", [
-    ("business_object_status", "initiative status"),
-    ("business_object_type", "initiative type"),
+    ("initiative_status", "initiative status"),
+    ("initiative_type", "initiative type"),
     ("business_unit", "business unit"),
 ])
 def test_the_sentence_form_says_the_same_word_as_the_heading(name, phrase):
@@ -69,10 +69,10 @@ def test_the_chips_say_initiative():
 
     state = ConversationState()
     assert apply_action(state, Action(type="add_group_by",
-                                      field="business_object_status")) \
+                                      field="initiative_status")) \
         == "Group them by initiative status"
     assert apply_action(state, Action(type="remove_filter",
-                                      field="business_object_status")) \
+                                      field="initiative_status")) \
         == "Remove the initiative status filter"
 
 
@@ -80,10 +80,10 @@ def test_no_column_name_is_altered_on_the_way_to_the_database():
     """Presentation only. `columns` is what PostgreSQL said, and stays so."""
     from pipeline.labels import with_column_labels
 
-    result = {"columns": ["business_object_id", "business_unit"],
+    result = {"columns": ["initiative_id", "business_unit"],
               "rows": [[1, "Shirting"]]}
     out = with_column_labels(result)
-    assert out["columns"] == ["business_object_id", "business_unit"]
+    assert out["columns"] == ["initiative_id", "business_unit"]
     assert out["column_labels"] == ["Initiative Id", "Business Unit"]
 
 

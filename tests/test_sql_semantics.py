@@ -12,10 +12,10 @@ from pipeline.sql_semantics import (
     PROJECTION_SUPERSET, compare, signature,
 )
 
-BASE = ("SELECT business_object_id, business_object_ref_id "
-        "FROM tms_business_object_flat "
-        "WHERE business_object_type = 'AR_PD_Suiting' "
-        "AND business_object_status = 'Closed'")
+BASE = ("SELECT initiative_id, initiative_ref_id "
+        "FROM tms_initiative_flat "
+        "WHERE initiative_type = 'AR_PD_Suiting' "
+        "AND initiative_status = 'Closed'")
 
 
 # ------------------------------------------------- equivalent, must pass ----
@@ -25,25 +25,25 @@ def test_identical_sql_is_correct():
 
 
 def test_formatting_and_case_are_ignored():
-    other = ("select business_object_id,   business_object_ref_id\n"
-             "from tms_business_object_flat\n"
-             "where business_object_type='AR_PD_Suiting' and business_object_status='Closed'")
+    other = ("select initiative_id,   initiative_ref_id\n"
+             "from tms_initiative_flat\n"
+             "where initiative_type='AR_PD_Suiting' and initiative_status='Closed'")
     assert compare(BASE, other).semantically_correct
 
 
 def test_predicate_order_is_ignored():
-    other = ("SELECT business_object_id, business_object_ref_id "
-             "FROM tms_business_object_flat "
-             "WHERE business_object_status = 'Closed' "
-             "AND business_object_type = 'AR_PD_Suiting'")
+    other = ("SELECT initiative_id, initiative_ref_id "
+             "FROM tms_initiative_flat "
+             "WHERE initiative_status = 'Closed' "
+             "AND initiative_type = 'AR_PD_Suiting'")
     assert compare(BASE, other).semantically_correct
 
 
 def test_table_aliases_are_ignored():
-    other = ("SELECT b.business_object_id, b.business_object_ref_id "
-             "FROM tms_business_object_flat b "
-             "WHERE b.business_object_type = 'AR_PD_Suiting' "
-             "AND b.business_object_status = 'Closed'")
+    other = ("SELECT b.initiative_id, b.initiative_ref_id "
+             "FROM tms_initiative_flat b "
+             "WHERE b.initiative_type = 'AR_PD_Suiting' "
+             "AND b.initiative_status = 'Closed'")
     assert compare(BASE, other).semantically_correct
 
 
@@ -60,12 +60,12 @@ def test_count_star_and_count_one_agree():
 
 
 def test_join_direction_is_ignored():
-    a = ("SELECT b.business_object_id FROM tms_business_object_flat b "
-         "JOIN tms_business_object_attributes_flat a "
-         "ON a.business_object_id = b.business_object_id")
-    b = ("SELECT b.business_object_id FROM tms_business_object_attributes_flat a "
-         "JOIN tms_business_object_flat b "
-         "ON b.business_object_id = a.business_object_id")
+    a = ("SELECT b.initiative_id FROM tms_initiative_flat b "
+         "JOIN tms_initiative_attributes_flat a "
+         "ON a.initiative_id = b.initiative_id")
+    b = ("SELECT b.initiative_id FROM tms_initiative_attributes_flat a "
+         "JOIN tms_initiative_flat b "
+         "ON b.initiative_id = a.initiative_id")
     assert compare(a, b).semantically_correct
 
 
@@ -75,10 +75,10 @@ def test_order_by_alias_resolves_to_what_it_names():
     Both alias COUNT(*); comparing the alias text made every alias choice read
     as an ordering difference.
     """
-    a = ("SELECT business_object_type, COUNT(*) AS n FROM tms_business_object_flat "
-         "GROUP BY business_object_type ORDER BY n DESC LIMIT 3")
-    b = ("SELECT business_object_type, COUNT(*) AS item_count FROM tms_business_object_flat "
-         "GROUP BY business_object_type ORDER BY item_count DESC LIMIT 3")
+    a = ("SELECT initiative_type, COUNT(*) AS n FROM tms_initiative_flat "
+         "GROUP BY initiative_type ORDER BY n DESC LIMIT 3")
+    b = ("SELECT initiative_type, COUNT(*) AS item_count FROM tms_initiative_flat "
+         "GROUP BY initiative_type ORDER BY item_count DESC LIMIT 3")
     assert compare(a, b, ordered=True).semantically_correct
 
 
@@ -104,14 +104,14 @@ def test_bare_boolean_predicate_equals_is_true():
 def test_a_different_filter_column_is_caught():
     """The E13 case: right rows, wrong column.
 
-    workflow_code and business_object_type agree on this data, so the query
+    workflow_code and initiative_type agree on this data, so the query
     returned the correct four rows and result comparison passed it. It is
     still wrong.
     """
-    wrong = ("SELECT business_object_id, business_object_ref_id "
-             "FROM tms_business_object_flat "
+    wrong = ("SELECT initiative_id, initiative_ref_id "
+             "FROM tms_initiative_flat "
              "WHERE workflow_code = 'AR_PD_Suiting' "
-             "AND business_object_status = 'Closed'")
+             "AND initiative_status = 'Closed'")
     c = compare(BASE, wrong)
     assert not c.semantically_correct
     assert not c.filters_match
@@ -126,8 +126,8 @@ def test_a_different_filter_value_is_caught():
 
 
 def test_a_missing_filter_is_caught():
-    wrong = ("SELECT business_object_id, business_object_ref_id "
-             "FROM tms_business_object_flat WHERE business_object_type = 'AR_PD_Suiting'")
+    wrong = ("SELECT initiative_id, initiative_ref_id "
+             "FROM tms_initiative_flat WHERE initiative_type = 'AR_PD_Suiting'")
     c = compare(BASE, wrong)
     assert not c.semantically_correct
     assert any("missing filter" in i for i in c.issues)
@@ -149,9 +149,9 @@ def test_a_different_aggregate_is_caught():
 
 
 def test_a_different_grouping_is_caught():
-    a = ("SELECT business_object_status, COUNT(*) FROM tms_business_object_flat "
-         "GROUP BY business_object_status")
-    b = ("SELECT business_unit, COUNT(*) FROM tms_business_object_flat "
+    a = ("SELECT initiative_status, COUNT(*) FROM tms_initiative_flat "
+         "GROUP BY initiative_status")
+    b = ("SELECT business_unit, COUNT(*) FROM tms_initiative_flat "
          "GROUP BY business_unit")
     c = compare(a, b)
     assert not c.semantically_correct
@@ -159,23 +159,23 @@ def test_a_different_grouping_is_caught():
 
 
 def test_a_different_limit_is_caught():
-    a = "SELECT business_object_id FROM tms_business_object_flat LIMIT 5"
-    b = "SELECT business_object_id FROM tms_business_object_flat LIMIT 10"
+    a = "SELECT initiative_id FROM tms_initiative_flat LIMIT 5"
+    b = "SELECT initiative_id FROM tms_initiative_flat LIMIT 10"
     assert not compare(a, b).semantically_correct
 
 
 def test_ordering_is_checked_only_when_the_question_asked_for_it():
-    a = "SELECT business_object_id FROM tms_business_object_flat ORDER BY business_object_id ASC"
-    b = "SELECT business_object_id FROM tms_business_object_flat ORDER BY business_object_id DESC"
+    a = "SELECT initiative_id FROM tms_initiative_flat ORDER BY initiative_id ASC"
+    b = "SELECT initiative_id FROM tms_initiative_flat ORDER BY initiative_id DESC"
     assert compare(a, b, ordered=False).semantically_correct
     assert not compare(a, b, ordered=True).semantically_correct
 
 
 def test_a_wrong_join_condition_is_caught():
-    a = ("SELECT t.task_id FROM tms_task_flat t JOIN tms_business_object_flat b "
-         "ON t.bo_id = b.business_object_id")
-    b = ("SELECT t.task_id FROM tms_task_flat t JOIN tms_business_object_flat b "
-         "ON t.assigned_user_id = b.business_object_id")
+    a = ("SELECT t.task_id FROM tms_task_flat t JOIN tms_initiative_flat b "
+         "ON t.bo_id = b.initiative_id")
+    b = ("SELECT t.task_id FROM tms_task_flat t JOIN tms_initiative_flat b "
+         "ON t.assigned_user_id = b.initiative_id")
     c = compare(a, b)
     assert not c.semantically_correct
     assert not c.joins_match
@@ -184,17 +184,17 @@ def test_a_wrong_join_condition_is_caught():
 # ----------------------------------------------------------- projection ----
 
 def test_projection_verdicts():
-    exact = "SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat"
+    exact = "SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat"
     assert compare(exact, exact).projection_verdict == PROJECTION_EXACT
 
-    superset = ("SELECT business_object_id, business_object_ref_id, business_unit "
-                "FROM tms_business_object_flat")
+    superset = ("SELECT initiative_id, initiative_ref_id, business_unit "
+                "FROM tms_initiative_flat")
     assert compare(exact, superset).projection_verdict == PROJECTION_SUPERSET
 
-    missing = "SELECT business_object_id FROM tms_business_object_flat"
+    missing = "SELECT initiative_id FROM tms_initiative_flat"
     assert compare(exact, missing).projection_verdict == PROJECTION_MISSING
 
-    substituted = "SELECT business_object_id, business_unit FROM tms_business_object_flat"
+    substituted = "SELECT initiative_id, business_unit FROM tms_initiative_flat"
     assert compare(exact, substituted).projection_verdict == PROJECTION_SUBSTITUTED
 
 
@@ -205,9 +205,9 @@ def test_projection_counts_only_when_the_question_named_its_columns():
     columns rather than the model, and moved with run-to-run variation. The
     verdict is still reported in both cases.
     """
-    exact = "SELECT business_object_id, business_object_ref_id FROM tms_business_object_flat"
-    missing = "SELECT business_object_id FROM tms_business_object_flat"
-    substituted = "SELECT business_object_id, business_unit FROM tms_business_object_flat"
+    exact = "SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat"
+    missing = "SELECT initiative_id FROM tms_initiative_flat"
+    substituted = "SELECT initiative_id, business_unit FROM tms_initiative_flat"
 
     for wrong in (missing, substituted):
         loose = compare(exact, wrong, strict_projection=False)
@@ -220,8 +220,8 @@ def test_projection_counts_only_when_the_question_named_its_columns():
 
 def test_a_superset_projection_is_tolerated_but_reported():
     """Extra columns are untidy, not wrong -- but they must still be visible."""
-    exact = "SELECT business_object_id FROM tms_business_object_flat"
-    superset = "SELECT business_object_id, business_unit FROM tms_business_object_flat"
+    exact = "SELECT initiative_id FROM tms_initiative_flat"
+    superset = "SELECT initiative_id, business_unit FROM tms_initiative_flat"
     c = compare(exact, superset)
     assert c.semantically_correct
     assert any("extra column" in i for i in c.issues)
@@ -241,13 +241,13 @@ def test_missing_sql_is_reported():
 
 def test_signature_extracts_the_pieces():
     s = signature(
-        "SELECT business_unit, COUNT(*) FROM tms_business_object_flat "
-        "WHERE business_object_status = 'Active' GROUP BY business_unit "
+        "SELECT business_unit, COUNT(*) FROM tms_initiative_flat "
+        "WHERE initiative_status = 'Active' GROUP BY business_unit "
         "ORDER BY business_unit DESC LIMIT 5"
     )
-    assert s.tables == {"tms_business_object_flat"}
+    assert s.tables == {"tms_initiative_flat"}
     assert ("count", "*") in s.aggregates
-    assert any(f[0].endswith("business_object_status") for f in s.filters)
+    assert any(f[0].endswith("initiative_status") for f in s.filters)
     assert any(g.endswith("business_unit") for g in s.grouping)
     assert s.limit == 5
 

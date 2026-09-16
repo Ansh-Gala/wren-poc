@@ -446,10 +446,13 @@ Expected: two counts matching the pre-migration figures (307 initiatives).
 
 ```bash
 psql -h localhost -U wren_ro -d arvind_retail_chatbot_test_1 \
-  -c "SELECT count(*) FROM vf_business_object_audit1"
+  -c "SELECT count(*) FROM vf_sql_chat" \
+  -c "SELECT count(*) FROM vf_sql_chat_turn"
 ```
 
-Expected: `ERROR: permission denied`. If this succeeds, the migration widened access — **roll back immediately**. That table holds 1.8M audit rows and `wren_ro` must never reach it.
+Expected: **both** `ERROR: permission denied` (SQLSTATE 42501). If either succeeds, generated SQL can read every user's questions — **roll back immediately** and re-revoke.
+
+These two tables are the barrier, and they are the only ones. An earlier draft of this step checked `vf_business_object_audit1` and expected it to be denied; that was wrong. `create_readonly_role()` grants `SELECT ON ALL TABLES` by design, so the business and audit tables are legitimately readable — the Drupal install hook then revokes exactly these two. `vf_sql_chat`/`vf_sql_chat_turn` is what `scripts/verify_readonly.php` checks, and it is what this step must check too.
 
 - [ ] **Step 6: Run the existing suite against the compatibility views**
 

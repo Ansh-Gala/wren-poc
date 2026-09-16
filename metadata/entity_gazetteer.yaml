@@ -4,7 +4,7 @@
 # ends the current conversational block. 'dimension' values only narrow
 # the current subject and never reset it.
 entity:
-  tms_business_object_flat.business_object_type:
+  tms_initiative_flat.initiative_type:
   - AR_NPD_Shirting
   - AR_NPD_Suiting
   - AR_NPD_YD_SALESPLAN
@@ -23,14 +23,14 @@ entity:
   - test
   - TESTING_MG
 dimension:
-  tms_business_object_flat.business_unit:
+  tms_initiative_flat.business_unit:
   - PVH
   - unit1
-  tms_business_object_flat.business_object_status:
+  tms_initiative_flat.initiative_status:
   - Active
   - Closed
   - Short Closed
-  tms_business_object_flat.business_object_color:
+  tms_initiative_flat.initiative_color:
   - Black
   - Green
   - Red

@@ -20,8 +20,8 @@ from pipeline.redact import public_response, safe_error
 # Real identifiers from this database. Any of these reaching a normal response
 # is the leak, whichever field it arrives in.
 SENSITIVE = [
-    "tms_task_flat", "tms_business_object_flat", "tms_user_flat",
-    "task_start_at", "business_object_ref_id", "current_milestone_delay_days",
+    "tms_task_flat", "tms_initiative_flat", "tms_user_flat",
+    "task_start_at", "initiative_ref_id", "current_milestone_delay_days",
     "SELECT", "FROM", "WHERE", "JOIN",
     "public", "psycopg", "Traceback",
 ]

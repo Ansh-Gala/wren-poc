@@ -53,7 +53,7 @@ _EXPLICIT_RESET = re.compile(
 
 
 # The words that name a subject rather than describe one. Taken from the table
-# names (tms_business_object_flat, tms_task_flat, tms_user_flat, tms_role_flat)
+# names (tms_initiative_flat, tms_task_flat, tms_user_flat, tms_role_flat)
 # and from the entity_alias business rule, which declares Initiative, Order, BO
 # and Business Object to be one entity. "item" is the word the benchmark and
 # the users actually use for a business object.
@@ -236,7 +236,7 @@ def detect_entity(question: str, gazetteer: list[str]) -> str | None:
     fire on the word "latest". AR_YD_Suiting, ar_yd_suiting and "AR YD
     Suiting" all tokenise the same, so any spelling of the value resolves.
 
-    An exact hit on the raw text wins first, because business_object_type
+    An exact hit on the raw text wins first, because initiative_type
     contains case-variant near-duplicates that are genuinely distinct values
     (AR_YD_Shirting and AR_YD_SHIRTING); when the user typed one of them
     verbatim that is the one they meant. Otherwise the longest token run wins,
