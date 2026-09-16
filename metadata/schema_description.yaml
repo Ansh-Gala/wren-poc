@@ -732,11 +732,15 @@ tables:
         description: User who uploaded the attachment. Joins to tms_user_flat.user_id.
   tms_task_issue_flat:
     description: Issues raised against a task, with a count of their comments and the most recent one.
-      25 issues across 8 tasks. It carries no issue identifier of its own, because the source groups by
-      the issue id but does not select it, so an individual issue cannot be addressed by id; count and
-      group instead. It has no Initiative column either, so to reach the Initiative join tms_task_flat
+      25 issues across 8 tasks. It has no Initiative column, so to reach the Initiative join tms_task_flat
       on task_id.
+    primary_key: issue_id
     columns:
+      issue_id:
+        type: INTEGER
+        description: The issue's own identifier, and the only thing that tells one issue from another
+          here -- issues 1 to 4 all carry the title 'test isue' on task 278. Project it whenever a person
+          is being shown individual issues rather than a count.
       task_id:
         type: INTEGER
         description: The task the issue was raised against. Joins to tms_task_flat.task_id. The 25 issues
