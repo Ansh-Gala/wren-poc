@@ -57,10 +57,10 @@ questions:
   question: Show attachments filed under ArvindRetail/Suiting
   expected_sql: SELECT tag_name, file_name FROM tms_attachment_flat WHERE folder_path = 'ArvindRetail/Suiting'
 - id: A10
-  category: Aggregation
-  question: How many attachments did each user upload?
-  expected_sql: SELECT attachment_created_by_user_id, COUNT(*) FROM tms_attachment_flat GROUP BY attachment_created_by_user_id
-    ORDER BY COUNT(*) DESC
+  category: Join
+  question: How many attachments did each user upload, by user name?
+  expected_sql: SELECT u.user_name, COUNT(*) FROM tms_attachment_flat a JOIN tms_user_flat u ON u.user_id
+    = a.attachment_created_by_user_id GROUP BY u.user_name ORDER BY COUNT(*) DESC
 - id: A11
   category: Join
   question: How many attachments belong to active initiatives?
@@ -105,8 +105,9 @@ questions:
     DESC LIMIT 5
 - id: A20
   category: Semantic Rule
-  question: What is the largest file size the costing tag allows?
-  expected_sql: SELECT MAX(max_file_size::bigint) FROM tms_attachment_flat WHERE tag_name ILIKE '%Costing%'
+  question: What file size does the tag Costing files from each vendor allow?
+  expected_sql: SELECT DISTINCT max_file_size FROM tms_attachment_flat WHERE tag_name = 'Costing files
+    from each vendor'
 - id: A21
   category: Join
   question: Which business units have attachments?
