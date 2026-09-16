@@ -68,6 +68,15 @@ class SuiteTurn:
     # True when the question names its output columns, so a different column
     # list is a real error rather than a different reasonable choice.
     strict_projection: bool = False
+    # The columns an answer must carry to be worth reading, as a list of
+    # alternatives: each entry is satisfied by any one of its names. This is a
+    # floor, not a ceiling -- extra columns are fine, and strict_projection is
+    # the separate question of whether the wrong ones were chosen.
+    #
+    # It exists because "show me tasks which have issues" answered with eight
+    # task ids is the right rows and tells the reader nothing they asked. Rows
+    # alone cannot catch that; the projection has to be checked directly.
+    expect_columns: list[list[str]] = field(default_factory=list)
     note: str | None = None
 
     # -------------------------------------------------- follow-up layer --

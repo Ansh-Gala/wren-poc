@@ -47,6 +47,8 @@ def _turn(raw: dict, conv_id: str, index: int, default_category: str) -> SuiteTu
         expect_decision=decision,
         expect_behavior=behavior,
         strict_projection=bool(raw.get("strict_projection", False)),
+        expect_columns=[list(group) if isinstance(group, (list, tuple)) else [group]
+                        for group in (raw.get("expect_columns") or [])],
         note=raw.get("note"),
         expect_normalized=" ".join(normalized.split()) if normalized else None,
         expect_followup=followup,
