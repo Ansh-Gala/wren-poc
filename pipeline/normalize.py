@@ -64,6 +64,8 @@ are were was been being have has had does did doing
 can could will would shall should may might must
 about per versus mine yours ours everything something anything nothing
 overdue urgent pending done outstanding
+email attachment attachments file files comment comments issue issues
+closing opening raising raised uploaded uploading
 """.split())
 
 

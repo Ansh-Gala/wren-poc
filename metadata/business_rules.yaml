@@ -1,104 +1,107 @@
 rules:
-  - name: active_initiative
-    definition: >-
-      An Active Initiative (Business Object, Order, BO) is one where initiative_status = 'Active'.
-    sql_fragment: "tms_initiative_flat.initiative_status = 'Active'"
-
-  - name: short_closed_initiative
-    definition: >-
-      A Short Closed Initiative is one where initiative_status = 'Short Closed'.
-    sql_fragment: "tms_initiative_flat.initiative_status = 'Short Closed'"
-
-  - name: closed_initiative
-    definition: >-
-      A Closed Initiative is one where initiative_status = 'Closed'.
-    sql_fragment: "tms_initiative_flat.initiative_status = 'Closed'"
-
-  - name: open_task
-    definition: >-
-      An open task is one where task_status = 'open'.
-    sql_fragment: "tms_task_flat.task_status = 'open'"
-
-  - name: closed_task
-    definition: >-
-      A closed task is one where task_status = 'closed'.
-    sql_fragment: "tms_task_flat.task_status = 'closed'"
-
-  - name: delayed_task
-    definition: >-
-      A task is delayed when calculated elapsed duration exceeds its SLA buffer.
-    sql_fragment: "tms_task_flat.task_sla_status = 'Delayed'"
-
-  - name: my_tasks
-    definition: >-
-      My tasks means tasks assigned to the current signed-in user, still open, and
-      flagged for display. In this benchmark the signed-in user is user id 1
-      ('Admin'); use that literal id, never a bind placeholder.
-    sql_fragment: "tms_task_flat.assigned_user_id = 1 AND tms_task_flat.task_status = 'open' AND tms_task_flat.display_flag = 1"
-    scope: >-
-      The open + display_flag conditions apply only to the bare concept "my tasks".
-      Do NOT add them when the question supplies its own status or asks for a
-      distribution across statuses -- they would contradict or empty the answer.
-      "my closed tasks" is assigned_user_id = 1 AND task_status = 'closed'.
-      "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = 'Delayed'
-      AND task_status = 'open': delayed is not a lifecycle status, so the
-      active-first default still applies on top of it.
-      "my task status breakdown" is assigned_user_id = 1 GROUP BY task_status.
-      The only invariant across all of them is assigned_user_id = 1.
-
-  - name: prefer_pre_aggregated_counts
-    definition: >-
-      tms_initiative_flat already carries total_task_count, open_task_count,
-      closed_task_count and delayed_task_count. When a question is about a Business
-      Object's task counts, read these columns rather than joining to tms_task_flat
-      and re-aggregating: it is the same answer from one table, and it keeps the
-      choice deterministic instead of leaving two equally reasonable shapes.
-    sql_fragment: "tms_initiative_flat.total_task_count"
-    caution: >-
-      delayed_task_count counts delayed OPEN tasks only. If a question should also
-      count closed tasks that breached SLA, join to tms_task_flat on
-      task_sla_status = 'Delayed' instead.
-
-  - name: count_initiatives_from_tasks
-    definition: >-
-      When counting Initiatives from task data, use COUNT(DISTINCT initiative_id) rather than COUNT(*).
-    sql_fragment: "COUNT(DISTINCT tms_task_flat.initiative_id)"
-
-  - name: default_to_active
-    definition: >-
-      When a question asks for records, or for a count of records, and names no
-      status of its own, answer about the active ones only. An Initiative
-      (Business Object) is active when initiative_status = 'Active'; a task
-      is active when task_status = 'open'. Add that predicate even though the
-      question did not ask for it: a user asking "show me my tasks" means the
-      ones still to do, not every task they have ever been assigned.
-    scope: >-
-      This default applies only to questions about the records themselves --
-      "show the AR_YD_Suiting items", "how many tasks are in it". It does not
-      apply, and the query must see every row, in any of these cases. When the
-      question states a status, that status decides and this default is not
-      added on top of it: "closed initiatives", "short closed items", "my
-      closed tasks". When the question explicitly asks for every status, or for
-      history: "whatever the status", "including the closed ones", "active and
-      closed". The word "all" on its own is NOT such a request -- people say
-      "show me all my tasks" when they mean the ones still to do -- so "all"
-      alone does not switch the default off. When the
-      question asks how records are distributed across statuses -- "how many by
-      status", "the status breakdown" -- because adding the filter would empty
-      the answer. When the question counts distinct values of a column rather
-      than counting records: "how many distinct initiative types are
-      there". And when the question is about missing or malformed data, such as
-      "how many initiatives have no workflow name recorded", because an
-      answer that saw only the active rows would not be an answer about the
-      data. When the conversation already carries a status filter, that filter
-      decides. Never use task_display_status for any of this; task_status is
-      the column to filter on. And task_sla_status is NOT a status for the
-      purposes of this rule: "delayed" describes how a task is running, not
-      where it is in its life, so "how many tasks are delayed" still means the
-      open ones -- task_sla_status = 'Delayed' AND task_status = 'open'. The
-      same holds for "my delayed tasks".
-
-  - name: entity_alias
-    definition: >-
-      Initiative, Order, BO and Business Object are all the same TMS entity (tms_initiative_flat).
-    sql_fragment: "tms_initiative_flat"
+- name: active_initiative
+  definition: An Active Initiative (Business Object, Order, BO) is one where initiative_status = 'Active'.
+  sql_fragment: tms_initiative_flat.initiative_status = 'Active'
+- name: short_closed_initiative
+  definition: A Short Closed Initiative is one where initiative_status = 'Short Closed'.
+  sql_fragment: tms_initiative_flat.initiative_status = 'Short Closed'
+- name: closed_initiative
+  definition: A Closed Initiative is one where initiative_status = 'Closed'.
+  sql_fragment: tms_initiative_flat.initiative_status = 'Closed'
+- name: open_task
+  definition: An open task is one where task_status = 'open'.
+  sql_fragment: tms_task_flat.task_status = 'open'
+- name: closed_task
+  definition: A closed task is one where task_status = 'closed'.
+  sql_fragment: tms_task_flat.task_status = 'closed'
+- name: delayed_task
+  definition: A task is delayed when calculated elapsed duration exceeds its SLA buffer.
+  sql_fragment: tms_task_flat.task_sla_status = 'Delayed'
+- name: my_tasks
+  definition: My tasks means tasks assigned to the current signed-in user, still open, and flagged for
+    display. In this benchmark the signed-in user is user id 1 ('Admin'); use that literal id, never a
+    bind placeholder.
+  sql_fragment: tms_task_flat.assigned_user_id = 1 AND tms_task_flat.task_status = 'open' AND tms_task_flat.display_flag
+    = 1
+  scope: 'The open + display_flag conditions apply only to the bare concept "my tasks". Do NOT add them
+    when the question supplies its own status or asks for a distribution across statuses -- they would
+    contradict or empty the answer. "my closed tasks" is assigned_user_id = 1 AND task_status = ''closed''.
+    "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = ''Delayed'' AND task_status = ''open'':
+    delayed is not a lifecycle status, so the active-first default still applies on top of it. "my task
+    status breakdown" is assigned_user_id = 1 GROUP BY task_status. The only invariant across all of them
+    is assigned_user_id = 1.'
+- name: prefer_pre_aggregated_counts
+  definition: 'tms_initiative_flat already carries total_task_count, open_task_count, closed_task_count
+    and delayed_task_count. When a question is about a Business Object''s task counts, read these columns
+    rather than joining to tms_task_flat and re-aggregating: it is the same answer from one table, and
+    it keeps the choice deterministic instead of leaving two equally reasonable shapes.'
+  sql_fragment: tms_initiative_flat.total_task_count
+  caution: delayed_task_count counts delayed OPEN tasks only. If a question should also count closed tasks
+    that breached SLA, join to tms_task_flat on task_sla_status = 'Delayed' instead.
+- name: count_initiatives_from_tasks
+  definition: When counting Initiatives from task data, use COUNT(DISTINCT initiative_id) rather than
+    COUNT(*).
+  sql_fragment: COUNT(DISTINCT tms_task_flat.initiative_id)
+- name: default_to_active
+  definition: 'When a question asks for records, or for a count of records, and names no status of its
+    own, answer about the active ones only. An Initiative (Business Object) is active when initiative_status
+    = ''Active''; a task is active when task_status = ''open''. Add that predicate even though the question
+    did not ask for it: a user asking "show me my tasks" means the ones still to do, not every task they
+    have ever been assigned.'
+  scope: 'This default applies only to questions about the records themselves -- "show the AR_YD_Suiting
+    items", "how many tasks are in it". It does not apply, and the query must see every row, in any of
+    these cases. When the question states a status, that status decides and this default is not added
+    on top of it: "closed initiatives", "short closed items", "my closed tasks". When the question explicitly
+    asks for every status, or for history: "whatever the status", "including the closed ones", "active
+    and closed". The word "all" on its own is NOT such a request -- people say "show me all my tasks"
+    when they mean the ones still to do -- so "all" alone does not switch the default off. When the question
+    asks how records are distributed across statuses -- "how many by status", "the status breakdown" --
+    because adding the filter would empty the answer. When the question counts distinct values of a column
+    rather than counting records: "how many distinct initiative types are there". And when the question
+    is about missing or malformed data, such as "how many initiatives have no workflow name recorded",
+    because an answer that saw only the active rows would not be an answer about the data. When the conversation
+    already carries a status filter, that filter decides. Never use task_display_status for any of this;
+    task_status is the column to filter on. And task_sla_status is NOT a status for the purposes of this
+    rule: "delayed" describes how a task is running, not where it is in its life, so "how many tasks are
+    delayed" still means the open ones -- task_sla_status = ''Delayed'' AND task_status = ''open''. The
+    same holds for "my delayed tasks".'
+- name: entity_alias
+  definition: Initiative, Order, BO and Business Object are all the same TMS entity (tms_initiative_flat).
+  sql_fragment: tms_initiative_flat
+- name: open_issue
+  definition: An open issue is one where issue_status = 'open' in tms_task_issue_flat.
+  sql_fragment: tms_task_issue_flat.issue_status = 'open'
+- name: resolved_issue
+  definition: A resolved issue is one where issue_status = 'resolved'. Only issues are ever resolved;
+    tms_task_flat.task_status has no such value, so a question about resolved work is about issues.
+  sql_fragment: tms_task_issue_flat.issue_status = 'resolved'
+- name: closed_issue
+  definition: A closed issue is one where issue_status = 'closed' in tms_task_issue_flat.
+  sql_fragment: tms_task_issue_flat.issue_status = 'closed'
+- name: never_confuse_issue_status_with_task_status
+  definition: Issues and tasks have different status vocabularies. tms_task_issue_flat.issue_status is
+    'open', 'resolved' or 'closed'; tms_task_flat.task_status is only 'open' or 'closed'. Filter issue
+    questions on issue_status and task questions on task_status, and never answer a question about resolved
+    items from the task table.
+- name: issues_reach_an_initiative_through_the_task
+  definition: tms_task_issue_flat has no Initiative column. To answer an issue question that names an
+    Initiative, a business unit or an Initiative type, join tms_task_flat on task_id and then tms_initiative_flat
+    on initiative_id.
+  sql_fragment: tms_task_issue_flat JOIN tms_task_flat ON tms_task_flat.task_id = tms_task_issue_flat.task_id
+- name: count_issues_not_tasks
+  definition: The 25 issues fall on only 8 distinct tasks. Count issues with COUNT(*) and tasks that have
+    issues with COUNT(DISTINCT task_id); the two answers differ and the question decides which is wanted.
+- name: attachments_are_active_only
+  definition: tms_attachment_flat holds only active attachments -- status is 'active' in every row. A
+    count of active attachments is a plain count of rows, and questions about deleted or inactive attachments
+    cannot be answered from this data.
+- name: attachment_initiative_name_is_a_type
+  definition: tms_attachment_flat.initiative_name holds Initiative TYPE values such as AR_YD_Shirting,
+    and it describes the tag's configuration rather than any one Initiative. To filter attachments by
+    the type of the Initiative they belong to, join tms_initiative_flat on initiative_id and filter initiative_type
+    there.
+  sql_fragment: tms_attachment_flat JOIN tms_initiative_flat ON tms_initiative_flat.initiative_id = tms_attachment_flat.initiative_id
+- name: tag_configuration_is_not_file_fact
+  definition: In tms_attachment_flat, extensions and max_file_size describe what the tag permits, not
+    what this file is. The file's own facts are file_name and file_size. Answer 'how big is the file'
+    from file_size, never from max_file_size.

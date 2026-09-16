@@ -22,6 +22,37 @@ entity:
   - AR_YD_Suiting
   - test
   - TESTING_MG
+  tms_task_issue_flat.issue_category_name:
+  - Delay due to internal training
+  - Delay from Vendor
+  - Delay in Manufacturing
+  - Incorrect format used
+  - Mail not received
+  - Other Issues
+  - Stock Mismatch
+  tms_attachment_flat.tag_name:
+  - Attach email from sales team
+  - Blend and Merchants final selection
+  - Costing details and mail copied to Sales
+  - Costing files from each vendor
+  - Data base and CAD number
+  - EPI PPI Sheet
+  - Final Excel with EPI PPI
+  - Final sourcing plan
+  - Generated PO
+  - Generated PR
+  - Mail containing updates
+  - Mail to vendors
+  - Mail with- Region, Blends, Variety , Shade
+  - Mail with Merchants and MOQs
+  - Mail/Suggestion sheet
+  - 'Penelope copy of Color pallet '
+  - Priority list
+  - SO number, tech sheet and CAD number
+  - SO number, tech sheet and CAD numbers
+  - Tech sheet
+  - test attachment 3
+  - Vendor to merchant list
 dimension:
   tms_initiative_flat.business_unit:
   - PVH
@@ -41,3 +72,29 @@ dimension:
   tms_task_flat.task_sla_status:
   - Delayed
   - On Time
+  tms_task_issue_flat.issue_status:
+  - closed
+  - open
+  - resolved
+  tms_task_issue_flat.issue_sub_department:
+  - Arvind Retail QA Team
+  - Central Sales Team
+  - Design Team
+  - QA and Design Team
+  - Sales team
+  - Sourcing Team
+  - User Management
+  tms_attachment_flat.folder_path:
+  - ArvindRetail/Sales
+  - ArvindRetail/Shirting
+  - ArvindRetail/Suiting
+  - bo_files
+  tms_attachment_flat.initiative_name:
+  - AR_NPD_Shirting
+  - AR_PD_Shirting
+  - AR_PD_Suiting
+  - AR_SALESPLAN_Shirting
+  - AR_SALESPLAN_Suiting
+  - AR_YD_Shirting
+  - AR_YD_Suiting
+  - TESTING_MG

@@ -68,6 +68,8 @@ TABLES = [
     "tms_user_flat",
     "tms_user_department_flat",
     "tms_role_flat",
+    "tms_attachment_flat",
+    "tms_task_issue_flat",
 ]
 
 PRIMARY_KEYS = {
@@ -76,6 +78,11 @@ PRIMARY_KEYS = {
     "tms_task_flat": "task_id",
     "tms_user_flat": "user_id",
     "tms_role_flat": "role_dept_id",
+    # tms_attachment_flat has one row per task_id (111 of 111 distinct).
+    # tms_task_issue_flat has no key of its own: the source groups by
+    # issue.id but never selects it, so nothing in the view identifies a
+    # single issue. Counting works; addressing one does not.
+    "tms_attachment_flat": "task_id",
 }
 
 # Below this many distinct values a column is an enumeration, and listing the
@@ -99,7 +106,12 @@ MAX_ENUM_VALUES = 12
 #
 # Raising the cap instead would have cost ~870 tokens and enumerated 24
 # free-text notes and a column of dates-as-strings. This costs ~116.
-ALWAYS_ENUMERATE = frozenset({"initiative_type"})
+# tag_name joined this set on 16 September 2026 for the same reason. It has
+# 22 values, the cap dropped it, and the first suite run showed the model
+# inventing 'Costing details and mail copy' for the real 'Costing details
+# and mail copied to Sales'. A filter on an invented tag returns nothing,
+# and nothing is indistinguishable from a true empty answer.
+ALWAYS_ENUMERATE = frozenset({"initiative_type", "tag_name"})
 
 SQL_TO_MDL = {
     "integer": "INTEGER", "bigint": "BIGINT", "smallint": "INTEGER",

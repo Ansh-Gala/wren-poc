@@ -29,107 +29,130 @@
 # metadata/schema_description.yaml, not from memory.
 
 version: 1
-
 tables:
   tms_initiative_flat:
     priority:
-      - initiative_id
-      - initiative_status
-      - initiative_type
-      - business_unit
-      - initiative_color
-      - initiative_client_due_at
-      - days_to_due_date
-      - open_task_count
-      - total_task_count
-      # Demoted below the counts. The id is what opens the initiative and the
-      # reference is long enough to crowd the columns a reader came for, so it
-      # earns its place after them rather than second.
-      - initiative_ref_id
-      - workflow_name
-      - workflow_code
-      - current_active_milestone
+    - initiative_id
+    - initiative_status
+    - initiative_type
+    - business_unit
+    - initiative_color
+    - initiative_client_due_at
+    - days_to_due_date
+    - open_task_count
+    - total_task_count
+    - initiative_ref_id
+    - workflow_name
+    - workflow_code
+    - current_active_milestone
     hidden:
-      # Free text, long enough to wreck a row height.
-      - initiative_note
-      # Identifiers the reader cannot act on; workflow_name is the readable one.
-      - workflow_id
-      # Only ever set on the one Short Closed row, so a column of blanks.
-      - short_closed_by
-      - short_closed_on
-      # A list inside a cell.
-      - open_tasks_list
-      # Buffer internals: meaningful to the scheduler, noise in an answer.
-      - common_buffer
-      - buff_penetration_prcnt
-      - buff_penetration_days
-    # Type is the dimension a question about initiatives almost always means,
-    # and the task counts are pre-aggregated, so summing them across a group
-    # is the same arithmetic the database already did per row.
+    - initiative_note
+    - workflow_id
+    - short_closed_by
+    - short_closed_on
+    - open_tasks_list
+    - common_buffer
+    - buff_penetration_prcnt
+    - buff_penetration_days
     row_groups:
-      - initiative_type
+    - initiative_type
     value_columns:
-      - column: open_task_count
-        aggFunc: sum
-      - column: total_task_count
-        aggFunc: sum
-
+    - column: open_task_count
+      aggFunc: sum
+    - column: total_task_count
+      aggFunc: sum
   tms_task_flat:
     priority:
-      - task_id
-      - task_code
-      - task_display_name
-      - task_status
-      - assigned_user_name
-      - task_department
-      - task_sla_status
-      - task_elapsed_days
-      - next_followup_at
-      - initiative_ref_id
-      - initiative_type
+    - task_id
+    - task_code
+    - task_display_name
+    - task_status
+    - assigned_user_name
+    - task_department
+    - task_sla_status
+    - task_elapsed_days
+    - next_followup_at
+    - initiative_ref_id
+    - initiative_type
     hidden:
-      - task_machine_code
-      # Booleans that restate task_status and task_sla_status.
-      - display_flag
-      - is_open_task
-      - is_closed_task
-      - is_not_started_task
-      - is_delayed_open_task
-      - is_delayed_closed_task
-      - is_initiative_delayed
-      - task_reopen_at
-      # Presentation form of task_status; showing both is showing it twice.
-      - task_display_status
-    # Department is the grouping a task list is usually read by. Elapsed days
-    # averages rather than sums: a total of elapsed days across a department
-    # is a number with no meaning.
+    - task_machine_code
+    - display_flag
+    - is_open_task
+    - is_closed_task
+    - is_not_started_task
+    - is_delayed_open_task
+    - is_delayed_closed_task
+    - is_initiative_delayed
+    - task_reopen_at
+    - task_display_status
     row_groups:
-      - task_department
+    - task_department
     value_columns:
-      - column: task_elapsed_days
-        aggFunc: avg
-
+    - column: task_elapsed_days
+      aggFunc: avg
   tms_initiative_attributes_flat:
     priority:
-      - initiative_id
-      - category
-      - season
-      - program
-      - stage
+    - initiative_id
+    - category
+    - season
+    - program
+    - stage
     hidden: []
-
   tms_user_flat:
     priority:
-      - user_id
-      - user_name
-      - role_count
-      - department_count
+    - user_id
+    - user_name
+    - role_count
+    - department_count
     hidden: []
-
   tms_user_department_flat:
     priority:
-      - user_id
-      - user_name
-      - department
-      - sub_department
+    - user_id
+    - user_name
+    - department
+    - sub_department
     hidden: []
+  tms_attachment_flat:
+    priority:
+    - tag_name
+    - file_name
+    - initiative_id
+    - task_id
+    - attachment_created_at
+    - file_size
+    - folder_path
+    hidden:
+    - file_uri
+    - entity_type
+    - entity_id
+    - status
+    - sequence
+    - tag_desc
+    - extensions
+    - max_file_size
+    - task_names
+    row_groups:
+    - tag_name
+    value_columns:
+    - column: file_size
+      aggFunc: sum
+  tms_task_issue_flat:
+    priority:
+    - issue_title
+    - issue_status
+    - issue_category_name
+    - issue_sub_department
+    - task_id
+    - comment_count
+    - issue_created_at
+    hidden:
+    - issue_description
+    - last_comment
+    - issue_hold_days
+    - issue_updated_by_user_id
+    - issue_created_by_user_id
+    row_groups:
+    - issue_status
+    value_columns:
+    - column: comment_count
+      aggFunc: sum

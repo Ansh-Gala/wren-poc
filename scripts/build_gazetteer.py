@@ -34,6 +34,12 @@ GAZETTEER_COLUMNS = [
     ("tms_initiative_flat", "initiative_color", "dimension"),
     ("tms_task_flat", "task_status", "dimension"),
     ("tms_task_flat", "task_sla_status", "dimension"),
+    ("tms_task_issue_flat", "issue_status", "dimension"),
+    ("tms_task_issue_flat", "issue_category_name", "entity"),
+    ("tms_task_issue_flat", "issue_sub_department", "dimension"),
+    ("tms_attachment_flat", "tag_name", "entity"),
+    ("tms_attachment_flat", "folder_path", "dimension"),
+    ("tms_attachment_flat", "initiative_name", "dimension"),
 ]
 
 # Above this a column is free text, not a set of identifiers.

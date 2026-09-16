@@ -1,0 +1,229 @@
+# Attachments and task issues: a targeted suite for the two views added on
+# 16 September 2026.
+#
+# 23 questions against tms_attachment_flat and 23 against tms_task_issue_flat.
+# Every expected result below was executed against the live database before the
+# question was accepted; nothing here is assumed.
+#
+# The suite deliberately carries the confusions these two views invite:
+#   A12      initiative_name holds a TYPE and describes the tag, so a question
+#            about the Initiative's own type must join tms_initiative_flat
+#   A20      max_file_size is the tag's limit, file_size is the file itself
+#   A23      status is 'active' in every row, so there are no inactive ones
+#   I03      only issues are ever 'resolved'; tms_task_flat has no such status
+#   I11      25 issues fall on 8 tasks, so COUNT(*) and COUNT(DISTINCT task_id)
+#            answer different questions
+#   I19/I20  the issue view carries no Initiative column and must reach one
+#            through tms_task_flat
+version: 1
+questions:
+- id: A01
+  category: Count
+  question: How many attachments are there?
+  expected_sql: SELECT COUNT(*) FROM tms_attachment_flat
+- id: A02
+  category: Distinct
+  question: How many initiatives have at least one attachment?
+  expected_sql: SELECT COUNT(DISTINCT initiative_id) FROM tms_attachment_flat
+- id: A03
+  category: Basic List
+  question: Show the attachments with their file names and tags
+  expected_sql: SELECT tag_name, file_name, initiative_id, task_id FROM tms_attachment_flat
+- id: A04
+  category: Aggregation
+  question: How many attachments are there for each tag?
+  expected_sql: SELECT tag_name, COUNT(*) FROM tms_attachment_flat GROUP BY tag_name ORDER BY COUNT(*)
+    DESC
+- id: A05
+  category: Ranking
+  question: Which attachment tag is used most often?
+  expected_sql: SELECT tag_name, COUNT(*) FROM tms_attachment_flat GROUP BY tag_name ORDER BY COUNT(*)
+    DESC LIMIT 1
+- id: A06
+  category: Aggregation
+  question: What is the total size of all attached files?
+  expected_sql: SELECT SUM(file_size) FROM tms_attachment_flat
+- id: A07
+  category: Sort + Limit
+  question: Which is the largest attached file?
+  expected_sql: SELECT file_name, file_size FROM tms_attachment_flat ORDER BY file_size DESC LIMIT 1
+- id: A08
+  category: Aggregation
+  question: How many attachments are in each folder?
+  expected_sql: SELECT folder_path, COUNT(*) FROM tms_attachment_flat GROUP BY folder_path ORDER BY COUNT(*)
+    DESC
+- id: A09
+  category: Dimension Filter
+  question: Show attachments filed under ArvindRetail/Suiting
+  expected_sql: SELECT tag_name, file_name FROM tms_attachment_flat WHERE folder_path = 'ArvindRetail/Suiting'
+- id: A10
+  category: Aggregation
+  question: How many attachments did each user upload?
+  expected_sql: SELECT attachment_created_by_user_id, COUNT(*) FROM tms_attachment_flat GROUP BY attachment_created_by_user_id
+    ORDER BY COUNT(*) DESC
+- id: A11
+  category: Join
+  question: How many attachments belong to active initiatives?
+  expected_sql: SELECT COUNT(*) FROM tms_attachment_flat a JOIN tms_initiative_flat i ON i.initiative_id
+    = a.initiative_id WHERE i.initiative_status = 'Active'
+- id: A12
+  category: Join
+  question: How many attachments are on AR_YD_Suiting initiatives?
+  expected_sql: SELECT COUNT(*) FROM tms_attachment_flat a JOIN tms_initiative_flat i ON i.initiative_id
+    = a.initiative_id WHERE i.initiative_type = 'AR_YD_Suiting'
+- id: A13
+  category: Aggregation
+  question: What is the average attached file size?
+  expected_sql: SELECT AVG(file_size) FROM tms_attachment_flat
+- id: A14
+  category: Ranking
+  question: Which five initiatives have the most attachments?
+  expected_sql: SELECT initiative_id, COUNT(*) FROM tms_attachment_flat GROUP BY initiative_id ORDER BY
+    COUNT(*) DESC LIMIT 5
+- id: A15
+  category: Distinct
+  question: How many distinct files are attached?
+  expected_sql: SELECT COUNT(DISTINCT file_name) FROM tms_attachment_flat
+- id: A16
+  category: Dimension Filter
+  question: Show the attachments tagged EPI PPI Sheet
+  expected_sql: SELECT file_name, initiative_id, task_id FROM tms_attachment_flat WHERE tag_name = 'EPI
+    PPI Sheet'
+- id: A17
+  category: Task Filter
+  question: Which attachment is on task 30?
+  expected_sql: SELECT tag_name, file_name FROM tms_attachment_flat WHERE task_id = 30
+- id: A18
+  category: Date Filter
+  question: How many attachments were uploaded in 2026?
+  expected_sql: SELECT COUNT(*) FROM tms_attachment_flat WHERE attachment_created_at >= '2026-01-01' AND
+    attachment_created_at < '2027-01-01'
+- id: A19
+  category: Sort
+  question: Show the five most recently uploaded attachments
+  expected_sql: SELECT file_name, attachment_created_at FROM tms_attachment_flat ORDER BY attachment_created_at
+    DESC LIMIT 5
+- id: A20
+  category: Semantic Rule
+  question: What is the largest file size the costing tag allows?
+  expected_sql: SELECT MAX(max_file_size::bigint) FROM tms_attachment_flat WHERE tag_name ILIKE '%Costing%'
+- id: A21
+  category: Join
+  question: Which business units have attachments?
+  expected_sql: SELECT DISTINCT i.business_unit FROM tms_attachment_flat a JOIN tms_initiative_flat i
+    ON i.initiative_id = a.initiative_id
+- id: A22
+  category: Aggregation
+  question: How many attachments are there for each initiative type the tag applies to?
+  expected_sql: SELECT initiative_name, COUNT(*) FROM tms_attachment_flat GROUP BY initiative_name ORDER
+    BY COUNT(*) DESC
+- id: A23
+  category: Null Handling
+  question: Are there any attachments that are not active?
+  expected_sql: SELECT COUNT(*) FROM tms_attachment_flat WHERE status <> 'active'
+  expect_behavior: zero_or_clarify
+- id: I01
+  category: Count
+  question: How many task issues are there?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat
+- id: I02
+  category: Status Filter
+  question: How many issues are open?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE issue_status = 'open'
+- id: I03
+  category: Status Filter
+  question: How many issues are resolved?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE issue_status = 'resolved'
+- id: I04
+  category: Status Filter
+  question: How many issues are closed?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE issue_status = 'closed'
+- id: I05
+  category: Aggregation
+  question: Break the issues down by status
+  expected_sql: SELECT issue_status, COUNT(*) FROM tms_task_issue_flat GROUP BY issue_status ORDER BY
+    COUNT(*) DESC
+- id: I06
+  category: Aggregation
+  question: How many issues are there in each category?
+  expected_sql: SELECT issue_category_name, COUNT(*) FROM tms_task_issue_flat GROUP BY issue_category_name
+    ORDER BY COUNT(*) DESC
+- id: I07
+  category: Aggregation
+  question: How many issues has each sub-department raised?
+  expected_sql: SELECT issue_sub_department, COUNT(*) FROM tms_task_issue_flat GROUP BY issue_sub_department
+    ORDER BY COUNT(*) DESC
+- id: I08
+  category: Count
+  question: How many issues have at least one comment?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE comment_count > 0
+- id: I09
+  category: Aggregation
+  question: How many comments are there on issues in total?
+  expected_sql: SELECT SUM(comment_count) FROM tms_task_issue_flat
+- id: I10
+  category: Sort + Limit
+  question: Which issue has the most comments?
+  expected_sql: SELECT issue_title, comment_count FROM tms_task_issue_flat ORDER BY comment_count DESC
+    LIMIT 1
+- id: I11
+  category: Distinct
+  question: How many tasks have issues raised against them?
+  expected_sql: SELECT COUNT(DISTINCT task_id) FROM tms_task_issue_flat
+- id: I12
+  category: Task Filter
+  question: Show the issues raised on task 2
+  expected_sql: SELECT issue_title, issue_status, issue_category_name FROM tms_task_issue_flat WHERE task_id
+    = 2
+- id: I13
+  category: Null Handling
+  question: How many issues have not been resolved yet?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE issue_resolved_at IS NULL
+- id: I14
+  category: Null Handling
+  question: How many issues have never been commented on?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE comment_count = 0
+- id: I15
+  category: Dimension Filter
+  question: Show the issues caused by a delay from the vendor
+  expected_sql: SELECT issue_title, issue_status FROM tms_task_issue_flat WHERE issue_category_name =
+    'Delay from Vendor'
+- id: I16
+  category: Dimension Filter
+  question: Which issues did the Design Team raise?
+  expected_sql: SELECT issue_title, issue_status FROM tms_task_issue_flat WHERE issue_sub_department =
+    'Design Team'
+- id: I17
+  category: Aggregation
+  question: How many issues is each user assigned?
+  expected_sql: SELECT issue_assigned_user_id, COUNT(*) FROM tms_task_issue_flat GROUP BY issue_assigned_user_id
+    ORDER BY COUNT(*) DESC
+- id: I18
+  category: Join
+  question: How many issues are on open tasks?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat i JOIN tms_task_flat t ON t.task_id = i.task_id
+    WHERE t.task_status = 'open'
+- id: I19
+  category: Join
+  question: Which initiatives have issues raised against their tasks?
+  expected_sql: SELECT DISTINCT t.initiative_id FROM tms_task_issue_flat i JOIN tms_task_flat t ON t.task_id
+    = i.task_id
+- id: I20
+  category: Join
+  question: How many issues are on AR_NPD_YD_SHIRTING initiatives?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat i JOIN tms_task_flat t ON t.task_id = i.task_id
+    WHERE t.initiative_type = 'AR_NPD_YD_SHIRTING'
+- id: I21
+  category: Sort
+  question: Show the five most recently raised issues
+  expected_sql: SELECT issue_title, issue_created_at FROM tms_task_issue_flat ORDER BY issue_created_at
+    DESC LIMIT 5
+- id: I22
+  category: Aggregation
+  question: What is the average number of comments per issue?
+  expected_sql: SELECT AVG(comment_count) FROM tms_task_issue_flat
+- id: I23
+  category: Date Filter
+  question: How many issues were raised in March 2026?
+  expected_sql: SELECT COUNT(*) FROM tms_task_issue_flat WHERE issue_created_at >= '2026-03-01' AND issue_created_at
+    < '2026-04-01'
