@@ -164,6 +164,7 @@ class ClaudePool:
     # ------------------------------------------------------------- spawning --
 
     def _argv(self) -> list[str]:
+        from llm_api.cli_provider import system_prompt_file as _system_prompt_file
         cmd = [
             self._command, "-p",
             "--input-format", "stream-json",
@@ -171,7 +172,10 @@ class ClaudePool:
             "--verbose",
             # See system_prompt_file in cli_provider: Windows caps the whole
             # command line at 32,767 characters and this prompt is past it.
-            "--system-prompt-file", system_prompt_file(self._system_prompt),
+            # Imported here rather than at module scope -- cli_provider
+            # reaches into this module for ClaudePool, and a module-level
+            # import back would close the cycle.
+            "--system-prompt-file", _system_prompt_file(self._system_prompt),
             "--tools", "",
             "--permission-mode", "bypassPermissions",
         ]
