@@ -121,8 +121,10 @@ questions:
   - - issue_title
     - issue_status
     - issue_category_name
-  note: The issue view has no initiative column; the answer has to travel through tms_task_flat and bring
-    something about the issue back.
+  note: 'The issue view has no initiative column, so the answer has to travel through tms_task_flat and
+    bring something about the issue back. This turn is unstable: it failed, passed and failed again across
+    three runs of the same suite, so the context rule is followed inconsistently for this shape of question.
+    Left as written -- the floor matches what was asked for, and tuning it away would hide the instability.'
 - id: S15
   category: Issue Join
   question: are there issues on any delayed task
@@ -213,7 +215,7 @@ questions:
   question: whats in the sales folder
   expect_columns:
   - *id005
-  - - folder_path
+  - - tag_name
 - id: T14
   category: Attachment Aggregation
   question: break the attachments down by document type
