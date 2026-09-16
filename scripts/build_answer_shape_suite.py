@@ -83,8 +83,12 @@ q("S13", "Issue Listing", "issue details for task 278",
   [["issue_title"], ["issue_status"], ["issue_category_name"]])
 q("S14", "Issue Join", "which initiatives have issues on their tasks",
   [INITIATIVE, ["issue_title", "issue_status", "issue_category_name"]],
-  note="The issue view has no initiative column; the answer has to travel "
-       "through tms_task_flat and bring something about the issue back.")
+  note="The issue view has no initiative column, so the answer has to travel "
+       "through tms_task_flat and bring something about the issue back. This "
+       "turn is unstable: it failed, passed and failed again across three runs "
+       "of the same suite, so the context rule is followed inconsistently for "
+       "this shape of question. Left as written -- the floor matches what was "
+       "asked for, and tuning it away would hide the instability.")
 q("S15", "Issue Join", "are there issues on any delayed task",
   [TASK, ["issue_title"]])
 
@@ -117,7 +121,7 @@ q("T11", "Attachment Join", "attachments for AR_YD_Suiting",
 q("T12", "Attachment Listing", "what excel files are there",
   [["file_name"]])
 q("T13", "Attachment Listing", "whats in the sales folder",
-  [FILE, ["folder_path"]])
+  [FILE, ["tag_name"]])
 q("T14", "Attachment Aggregation", "break the attachments down by document type",
   [["tag_name"], COUNT])
 q("T15", "Attachment Listing", "show me attachment details for initiative 292",
