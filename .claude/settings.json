@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git switch *)",
+      "Bash(php tests/outcome/check.php)",
+      "Bash(echo \"EXIT: $?\")"
+    ]
+  }
+}
