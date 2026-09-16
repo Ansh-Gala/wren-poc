@@ -16,10 +16,10 @@
 #   AR_YD_Suiting         208 tasks: 32 open, 176 closed
 #   AR_NPD_YD_SHIRTING    59 initiatives: 49 Active, 8 Closed, 1 Short Closed,
 #                         1 NULL
-#   whole table           17 distinct business_object_type values;
+#   whole table           17 distinct initiative_type values;
 #                         72 initiatives with no workflow_name
 #
-# ONE THING TO KNOW ABOUT THE DATA. business_object_status holds NULL in 6 rows
+# ONE THING TO KNOW ABOUT THE DATA. initiative_status holds NULL in 6 rows
 # across the table, and schema_description.yaml documents only Active, Closed
 # and Short Closed as its values. A NULL-status row is therefore invisible to
 # `= 'Active'` and invisible to `= 'Closed'`: the active-first default drops it,
@@ -39,19 +39,19 @@ questions:
   question: Show the AR_NPD_Shirting items
   note: No status named. Expect 5 rows, not 10.
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+      AND initiative_status = 'Active'
 
 - id: AF02
   category: Implicit Count
   question: How many AR_NPD_Shirting items are there?
   note: A count of records, so the default applies. Expect 5, not 10.
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-      AND business_object_status = 'Active'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+      AND initiative_status = 'Active'
 
 - id: AF03
   category: Implicit Task Status
@@ -60,7 +60,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, task_status
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 # ------------------------------------- an explicit status must always win ==
@@ -70,10 +70,10 @@ questions:
   question: Show the closed AR_NPD_Shirting items
   note: Stated status. Expect the 5 closed, and no Active predicate anywhere.
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-      AND business_object_status = 'Closed'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+      AND initiative_status = 'Closed'
 
 - id: AF05
   category: Explicit Status
@@ -83,10 +83,10 @@ questions:
     matches, so this turn is weak evidence on its own -- it is here for the
     quoting, not for the count.
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-      AND business_object_status = 'Short Closed'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+      AND initiative_status = 'Short Closed'
 
 - id: AF06
   category: Explicit Task Status
@@ -95,7 +95,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, task_status
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'closed'
 
 # --------------------------------------------- the carve-outs, one by one ==
@@ -105,9 +105,9 @@ questions:
   question: Show all AR_NPD_Shirting items, active and closed
   note: Asks for everything outright. Expect 10.
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
 
 - id: AF08
   category: Carve-out - Status Breakdown
@@ -116,17 +116,17 @@ questions:
     A distribution across statuses. The default would empty it -- one group of
     5 rather than Active 5 and Closed 5.
   expected_sql: |
-    SELECT business_object_status, COUNT(*)
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-    GROUP BY business_object_status
+    SELECT initiative_status, COUNT(*)
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+    GROUP BY initiative_status
 
 - id: AF09
   category: Carve-out - Distinct Values
   question: How many distinct business object types are there?
   note: Counts values of a column, not records. Expect 17, not the active subset.
   expected_sql: |
-    SELECT COUNT(DISTINCT business_object_type) FROM tms_business_object_flat
+    SELECT COUNT(DISTINCT initiative_type) FROM tms_initiative_flat
 
 - id: AF10
   category: Carve-out - Missing Data
@@ -135,7 +135,7 @@ questions:
     A data-quality question. Expect 72; restricting to active would answer a
     different question and look like the same one.
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
+    SELECT COUNT(*) FROM tms_initiative_flat
     WHERE workflow_name IS NULL
 
 - id: AF11
@@ -157,10 +157,10 @@ questions:
       note: Default fires. 5 rows.
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Active'
     - id: AFC01.2
       question: what about the closed ones?
       note: >-
@@ -169,15 +169,15 @@ questions:
         like a data problem rather than a bug. Expect 5.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Closed'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Closed'
     - id: AFC01.3
       question: show me all of them, whatever the status
       note: An explicit escape from the default. Expect 10.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'

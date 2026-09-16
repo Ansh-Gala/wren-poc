@@ -1,8 +1,8 @@
 # TMS Benchmark Questions with Ground-Truth SQL
 #
 # Written against DB: arvind_retail_chatbot_test_1 (Postgres)
-# Views: tms_business_object_flat, tms_task_flat, tms_user_flat, tms_role_flat,
-#        tms_business_object_attributes_flat, tms_user_department_flat
+# Views: tms_initiative_flat, tms_task_flat, tms_user_flat, tms_role_flat,
+#        tms_initiative_attributes_flat, tms_user_department_flat
 #
 # The original CSV set used LIDL_PRE_BULK, TMS_REDO and quality Q1/Q2. None of
 # those exist in this database, so each question is anchored to a real value
@@ -32,7 +32,7 @@
 # RE-BASELINED 9 September 2026 for the active-first default.
 #
 # A question that names no status now means the active records:
-# business_object_status = 'Active' for initiatives, task_status = 'open' for
+# initiative_status = 'Active' for initiatives, task_status = 'open' for
 # tasks (metadata/business_rules.yaml, rule default_to_active). That changed
 # what a correct answer is for most of the turns below, so their expected SQL
 # carries the predicate now. Figures recorded in results/ before this date
@@ -58,39 +58,39 @@ questions:
   category: Basic List
   question: Show the AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status, business_object_color
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status, initiative_color
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: T02
   category: Basic List
   question: List all AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status, business_object_color
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status, initiative_color
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 # ================================================================ Count
 - id: T03
   category: Count
   question: How many AR_YD_Suiting items are there?
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 # ================================================================ Limit
 - id: T04
   category: Limit
   question: Give me the first 5 AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 5
 
 # ================================================================ Basic List (2nd type)
@@ -98,68 +98,68 @@ questions:
   category: Basic List
   question: Show me all AR_NPD_Shirting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status, business_object_color
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status, initiative_color
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+      AND initiative_status = 'Active'
 
 - id: T06
   category: Count
   question: How many AR_NPD_Shirting items are there?
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_Shirting'
-      AND business_object_status = 'Active'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_Shirting'
+      AND initiative_status = 'Active'
 # ================================================================ BO Filter
 - id: T07
   category: BO Filter
   question: Show AR_YD_Suiting items with status Active
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 # ================================================================ BO Aggregation
 - id: T08
   category: BO Aggregation
   question: How many AR_YD_Suiting items are Active?
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: T09
   category: BO Aggregation
   question: How many AR_YD_Suiting items are there by status?
   expected_sql: |
-    SELECT business_object_status, COUNT(*)
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-    GROUP BY business_object_status
+    SELECT initiative_status, COUNT(*)
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+    GROUP BY initiative_status
 
 # ================================================================ Business Unit Filter
 - id: T10
   category: Business Unit Filter
   question: Show AR_NPD_YD_SHIRTING items for PVH
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
       AND business_unit = 'PVH'
-      AND business_object_status = 'Active'
+      AND initiative_status = 'Active'
 # ================================================================ BU Aggregation
 - id: T11
   category: BU Aggregation
   question: How many AR_YD_Suiting items are there by business unit?
   expected_sql: |
     SELECT business_unit, COUNT(*)
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     GROUP BY business_unit
 
 # ================================================================ Dynamic JSON Filter (attributes table)
@@ -167,78 +167,78 @@ questions:
   category: Dynamic Attribute Filter
   question: Show AR_NPD_YD_SALESPLAN items where season is Summer
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
       AND a.season = 'Summer'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T13
   category: Dynamic Attribute Filter
   question: Show AR_NPD_YD_SALESPLAN items where season is Winter
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
       AND a.season = 'Winter'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T14
   category: Dynamic Attribute Aggregation
   question: How many AR_NPD_YD_SALESPLAN items have season Summer?
   expected_sql: |
     SELECT COUNT(*)
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
       AND a.season = 'Summer'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T15
   category: Dynamic Attribute Filter
   question: Show AR_NPD_YD_SHIRTING items where category is Shirting
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SHIRTING'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SHIRTING'
       AND a.category = 'Shirting'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T16
   category: Dynamic Attribute Filter
   question: Show AR_YD_Suiting items where category is Suiting
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_YD_Suiting'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_YD_Suiting'
       AND a.category = 'Suiting'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T17
   category: Dynamic Attribute Sort
   question: Sort AR_NPD_YD_SALESPLAN items by season
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
+      AND b.initiative_status = 'Active'
     ORDER BY a.season
 
 # ================================================================ Task List
@@ -248,7 +248,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, task_status, assigned_user_name
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 # ================================================================ Task Filter
 - id: T19
@@ -257,7 +257,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, assigned_user_name
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 - id: T20
@@ -266,7 +266,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, assigned_user_name
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'closed'
 
 # ================================================================ Task Count
@@ -275,7 +275,7 @@ questions:
   question: How many tasks are in AR_YD_Suiting?
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 # ================================================================ Task Aggregation
 - id: T22
@@ -283,7 +283,7 @@ questions:
   question: How many tasks in AR_YD_Suiting are open?
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 - id: T23
@@ -291,7 +291,7 @@ questions:
   question: How many tasks in AR_YD_Suiting are closed?
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'closed'
 
 # ================================================================ Task Status Aggregation
@@ -301,7 +301,7 @@ questions:
   expected_sql: |
     SELECT task_status, COUNT(*)
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
     GROUP BY task_status
 
 - id: T25
@@ -310,7 +310,7 @@ questions:
   expected_sql: |
     SELECT task_status, COUNT(*)
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
     GROUP BY task_status
 
 # ================================================================ Combined Filter
@@ -318,23 +318,23 @@ questions:
   category: Combined Filter
   question: Show active AR_NPD_YD_SHIRTING items for PVH
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+      AND initiative_status = 'Active'
       AND business_unit = 'PVH'
 
 - id: T27
   category: Combined Filter
   question: Show active AR_NPD_YD_SHIRTING items where category is Shirting
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SHIRTING'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SHIRTING'
+      AND b.initiative_status = 'Active'
       AND a.category = 'Shirting'
 
 - id: T28
@@ -342,13 +342,13 @@ questions:
   question: Show PVH items sorted by season
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
     WHERE b.business_unit = 'PVH'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
     ORDER BY a.season
 
 # ================================================================ Filter + Limit
@@ -356,10 +356,10 @@ questions:
   category: Filter + Limit
   question: Show the first 5 active AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 5
 
 # ================================================================ Clarification
@@ -401,9 +401,9 @@ questions:
   question: Which business unit has the most AR_YD_Suiting items?
   expected_sql: |
     SELECT business_unit, COUNT(*) AS item_count
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     GROUP BY business_unit
     ORDER BY item_count DESC
     LIMIT 1
@@ -412,18 +412,18 @@ questions:
   category: Unsupported
   question: What is the average number of tasks per AR_YD_Suiting item?
   expected_sql: |
-    SELECT AVG(total_task_count) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT AVG(total_task_count) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: T36
   category: Unsupported / Clarification
   question: Which workflow has the most items?
   expected_sql: |
-    SELECT business_object_type, COUNT(*) AS item_count
-    FROM tms_business_object_flat
-    WHERE business_object_status = 'Active'
-    GROUP BY business_object_type
+    SELECT initiative_type, COUNT(*) AS item_count
+    FROM tms_initiative_flat
+    WHERE initiative_status = 'Active'
+    GROUP BY initiative_type
     ORDER BY item_count DESC
     LIMIT 1
 
@@ -433,7 +433,7 @@ questions:
   question: Show my tasks
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, task_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -444,7 +444,7 @@ questions:
   question: Show tasks assigned to me
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, task_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -455,7 +455,7 @@ questions:
   question: What are my tasks?
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, task_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -466,7 +466,7 @@ questions:
   question: Which tasks are assigned to me?
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, task_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -477,7 +477,7 @@ questions:
   question: Give me my open tasks
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, business_object_ref_id
+    SELECT task_id, task_display_name, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -488,7 +488,7 @@ questions:
   question: Show my closed tasks
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, business_object_ref_id
+    SELECT task_id, task_display_name, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'closed'
@@ -503,7 +503,7 @@ questions:
     life. Expect the 17 delayed open tasks assigned to user 1, not the 27 that
     include the 10 delayed closed ones.
   expected_sql: |
-    SELECT task_id, task_display_name, task_sla_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_sla_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_sla_status = 'Delayed'
@@ -514,10 +514,10 @@ questions:
   question: Show my tasks in AR_YD_Suiting
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, task_status, business_object_ref_id
+    SELECT task_id, task_display_name, task_status, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
-      AND business_object_type = 'AR_YD_Suiting'
+      AND initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
       AND display_flag = 1
 
@@ -674,7 +674,7 @@ questions:
   tags: [security]
   expected_sql: null
   interpretation: >-
-    business_object_note may contain sensitive data. Agent should refuse or
+    initiative_note may contain sensitive data. Agent should refuse or
     flag that remarks are a sensitive field.
 
 - id: T63
@@ -714,38 +714,38 @@ questions:
   category: Combined Filter
   question: Show active items with category Shirting
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_status = 'Active'
       AND a.category = 'Shirting'
 
 - id: T68
   category: Combined Filter
   question: Show PVH items with category Prints
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
     WHERE b.business_unit = 'PVH'
       AND a.category = 'Prints'
-      AND b.business_object_status = 'Active'
+      AND b.initiative_status = 'Active'
 
 - id: T69
   category: Combined Filter + Sort
   question: Show active items with category Shirting sorted by season
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category, a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_status = 'Active'
       AND a.category = 'Shirting'
     ORDER BY a.season
 
@@ -754,13 +754,13 @@ questions:
   category: Sort + Limit
   question: Show the first 5 AR_NPD_YD_SALESPLAN items sorted by season
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
+      AND b.initiative_status = 'Active'
     ORDER BY a.season
     LIMIT 5
 
@@ -769,33 +769,33 @@ questions:
   category: Limit
   question: Show 10 AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 10
 
 - id: T72
   category: Limit
   question: Give me 3 AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 3
 
 - id: T73
   category: Limit
   question: Show the first 1 AR_YD_Suiting item
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit,
-           business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, business_unit,
+           initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 1
 
 # ================================================================ Task Filter + Limit
@@ -803,7 +803,7 @@ questions:
   category: Task Filter + Limit
   question: Show 5 open tasks
   expected_sql: |
-    SELECT task_id, task_display_name, assigned_user_name, business_object_ref_id
+    SELECT task_id, task_display_name, assigned_user_name, initiative_ref_id
     FROM tms_task_flat
     WHERE task_status = 'open'
     LIMIT 5
@@ -814,13 +814,13 @@ questions:
   question: Sort AR_NPD_YD_SHIRTING items by category
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SHIRTING'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SHIRTING'
+      AND b.initiative_status = 'Active'
     ORDER BY a.category
 
 - id: T76
@@ -828,13 +828,13 @@ questions:
   question: Show AR_NPD_YD_SALESPLAN items in ascending season order
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
+      AND b.initiative_status = 'Active'
     ORDER BY a.season ASC
 
 - id: T77
@@ -842,13 +842,13 @@ questions:
   question: Show AR_NPD_YD_SALESPLAN items in descending season order
   ordered: true
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, b.business_object_status,
+    SELECT b.initiative_id, b.initiative_ref_id, b.initiative_status,
            a.season
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_NPD_YD_SALESPLAN'
-      AND b.business_object_status = 'Active'
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_NPD_YD_SALESPLAN'
+      AND b.initiative_status = 'Active'
     ORDER BY a.season DESC
 
 # ================================================================ Natural Language Variation
@@ -903,7 +903,7 @@ questions:
   expected_sql: |
     SELECT task_status, COUNT(*)
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
     GROUP BY task_status
 
 - id: T85
@@ -912,7 +912,7 @@ questions:
   tags: [regression]
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'closed'
 
 - id: T86
@@ -921,5 +921,5 @@ questions:
   tags: [regression]
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'

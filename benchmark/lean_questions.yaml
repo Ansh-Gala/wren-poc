@@ -19,7 +19,7 @@
 # RE-BASELINED 9 September 2026 for the active-first default.
 #
 # A question that names no status now means the active records:
-# business_object_status = 'Active' for initiatives, task_status = 'open' for
+# initiative_status = 'Active' for initiatives, task_status = 'open' for
 # tasks (metadata/business_rules.yaml, rule default_to_active). That changed
 # what a correct answer is for most of the turns below, so their expected SQL
 # carries the predicate now. Figures recorded in results/ before this date
@@ -46,85 +46,85 @@ questions:
   category: Basic List
   question: Show the AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: S02
   category: Count
   question: How many AR_YD_Suiting items are there?
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: S03
   category: Status Filter
   question: Show active AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
 
 - id: S04
   category: BO Aggregation
   question: How many AR_YD_Suiting items are there by status?
   expected_sql: |
-    SELECT business_object_status, COUNT(*)
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-    GROUP BY business_object_status
+    SELECT initiative_status, COUNT(*)
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+    GROUP BY initiative_status
 
 - id: S05
   category: Business Unit Filter
   question: Show AR_NPD_YD_SHIRTING items for PVH
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_unit
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+    SELECT initiative_id, initiative_ref_id, business_unit
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
       AND business_unit = 'PVH'
-      AND business_object_status = 'Active'
+      AND initiative_status = 'Active'
 
 - id: S06
   category: Multi Filter
   question: Show active AR_NPD_YD_SHIRTING items in business unit unit1
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status, business_unit
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status, business_unit
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+      AND initiative_status = 'Active'
       AND business_unit = 'unit1'
 
 - id: S07
   category: Dimension Filter
   question: Show the AR_YD_Suiting items whose priority colour is Black
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_color
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_color = 'Black'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_color
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_color = 'Black'
+      AND initiative_status = 'Active'
 
 - id: S08
   category: BO Aggregation
   question: How many AR_YD_Suiting items are there by priority colour?
   expected_sql: |
-    SELECT business_object_color, COUNT(*)
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
-    GROUP BY business_object_color
+    SELECT initiative_color, COUNT(*)
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
+    GROUP BY initiative_color
 
 - id: S09
   category: Limit
   question: Give me the first 5 AR_YD_Suiting items
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
     LIMIT 5
 
 - id: S10
@@ -132,22 +132,22 @@ questions:
   question: Show AR_YD_Suiting items ordered by their id
   ordered: true
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_status
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
-    ORDER BY business_object_id
+    SELECT initiative_id, initiative_ref_id, initiative_status
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
+    ORDER BY initiative_id
 
 - id: S11
   category: Sort + Limit
   question: Show the 3 most recently created AR_YD_Suiting items
   ordered: true
   expected_sql: |
-    SELECT business_object_id, business_object_ref_id, business_object_created_at
-    FROM tms_business_object_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
-      AND business_object_status = 'Active'
-    ORDER BY business_object_created_at DESC
+    SELECT initiative_id, initiative_ref_id, initiative_created_at
+    FROM tms_initiative_flat
+    WHERE initiative_type = 'AR_YD_Suiting'
+      AND initiative_status = 'Active'
+    ORDER BY initiative_created_at DESC
     LIMIT 3
 
 - id: S12
@@ -157,7 +157,7 @@ questions:
     CARVE-OUT from the active-first default: this counts distinct values of a
     column, not records. Expect 17.
   expected_sql: |
-    SELECT COUNT(DISTINCT business_object_type) FROM tms_business_object_flat
+    SELECT COUNT(DISTINCT initiative_type) FROM tms_initiative_flat
 
 - id: S13
   category: Task List
@@ -165,7 +165,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, task_status
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 - id: S14
@@ -174,7 +174,7 @@ questions:
   expected_sql: |
     SELECT task_id, task_display_name, task_status
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 - id: S15
@@ -182,7 +182,7 @@ questions:
   question: How many tasks are in AR_YD_Suiting?
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_status = 'open'
 
 - id: S16
@@ -191,7 +191,7 @@ questions:
   expected_sql: |
     SELECT task_status, COUNT(*)
     FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
     GROUP BY task_status
 
 - id: S17
@@ -205,7 +205,7 @@ questions:
     include the 3 delayed closed ones.
   expected_sql: |
     SELECT COUNT(*) FROM tms_task_flat
-    WHERE business_object_type = 'AR_YD_Suiting'
+    WHERE initiative_type = 'AR_YD_Suiting'
       AND task_sla_status = 'Delayed'
       AND task_status = 'open'
 
@@ -213,19 +213,19 @@ questions:
   category: Join
   question: Show the AR_YD_Suiting items together with their category attribute
   expected_sql: |
-    SELECT b.business_object_id, b.business_object_ref_id, a.category
-    FROM tms_business_object_flat b
-    JOIN tms_business_object_attributes_flat a
-      ON a.business_object_id = b.business_object_id
-    WHERE b.business_object_type = 'AR_YD_Suiting'
-      AND b.business_object_status = 'Active'
+    SELECT b.initiative_id, b.initiative_ref_id, a.category
+    FROM tms_initiative_flat b
+    JOIN tms_initiative_attributes_flat a
+      ON a.initiative_id = b.initiative_id
+    WHERE b.initiative_type = 'AR_YD_Suiting'
+      AND b.initiative_status = 'Active'
 
 - id: S19
   category: MY_TASK
   question: Show my tasks
   tags: [my_tasks]
   expected_sql: |
-    SELECT task_id, task_display_name, business_object_ref_id
+    SELECT task_id, task_display_name, initiative_ref_id
     FROM tms_task_flat
     WHERE assigned_user_id = 1
       AND task_status = 'open'
@@ -247,7 +247,7 @@ questions:
     CARVE-OUT from the active-first default: a question about missing data has
     to see every row or it answers a different question. Expect 72.
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
+    SELECT COUNT(*) FROM tms_initiative_flat
     WHERE workflow_name IS NULL
 
 - id: S22
@@ -260,19 +260,19 @@ questions:
     answer "how many created in July are still active", which is a different
     question wearing the same words.
   expected_sql: |
-    SELECT COUNT(*) FROM tms_business_object_flat
-    WHERE business_object_created_at >= DATE '2026-07-01'
-      AND business_object_created_at < DATE '2026-08-01'
+    SELECT COUNT(*) FROM tms_initiative_flat
+    WHERE initiative_created_at >= DATE '2026-07-01'
+      AND initiative_created_at < DATE '2026-08-01'
 
 - id: S23
   category: Ranking
   question: Which business object type has the most items?
   ordered: true
   expected_sql: |
-    SELECT business_object_type, COUNT(*) AS item_count
-    FROM tms_business_object_flat
-    WHERE business_object_status = 'Active'
-    GROUP BY business_object_type
+    SELECT initiative_type, COUNT(*) AS item_count
+    FROM tms_initiative_flat
+    WHERE initiative_status = 'Active'
+    GROUP BY initiative_type
     ORDER BY item_count DESC
     LIMIT 1
 
@@ -292,10 +292,10 @@ questions:
       question: Show AR_YD_Suiting items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
     - id: C01.2
       question: Only the active ones
       note: >-
@@ -307,18 +307,18 @@ questions:
         benchmark/active_first_questions.yaml.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
     - id: C01.3
       question: How many are there?
       note: Intent switches to a count; both filters must survive. Expect 19.
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
 
 - id: C02
   category: Conversation - Replace and Remove Filter
@@ -327,19 +327,19 @@ questions:
       question: Show active AR_NPD_Shirting items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Active'
     - id: C02.2
       question: Show the closed ones instead
       note: Replaces the status rather than adding to it. Expect 5, not 0.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Closed'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Closed'
     - id: C02.3
       question: Now show all statuses
       note: >-
@@ -349,9 +349,9 @@ questions:
         bare "all" would not be enough.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
 
 - id: C03
   category: Conversation - Group and Sort
@@ -360,28 +360,28 @@ questions:
       question: Show AR_NPD_YD_SHIRTING items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
     - id: C03.2
       question: Group those by status
       note: Adds a dimension and changes the shape of the answer. Expect 4 groups.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_status, COUNT(*)
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-        GROUP BY business_object_status
+        SELECT initiative_status, COUNT(*)
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+        GROUP BY initiative_status
     - id: C03.3
       question: Sort them by the count, largest first
       expect_decision: follow_up
       ordered: true
       expected_sql: |
-        SELECT business_object_status, COUNT(*) AS item_count
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-        GROUP BY business_object_status
+        SELECT initiative_status, COUNT(*) AS item_count
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+        GROUP BY initiative_status
         ORDER BY item_count DESC
 
 - id: C04
@@ -391,10 +391,10 @@ questions:
       question: Show AR_YD_Suiting items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
     - id: C04.2
       question: Only the closed ones
       note: >-
@@ -404,18 +404,18 @@ questions:
         leaked status was indistinguishable from a correct one. Expect 3.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Closed'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Closed'
     - id: C04.3
       question: How many?
       note: Intent switches to a count; the closed filter must survive. Expect 3.
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Closed'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Closed'
     - id: C04.4
       question: Show AR_NPD_YD_SHIRTING items
       note: >-
@@ -427,19 +427,19 @@ questions:
         answer both returned 5 and the count could no longer tell them apart.
       expect_decision: switch
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
     - id: C04.5
       question: Only the closed ones
       note: The filter now applies to the new subject. Expect 8.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Closed'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Closed'
 
 - id: C05
   category: Conversation - Explicit Reset
@@ -448,35 +448,35 @@ questions:
       question: Show AR_YD_Suiting items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
     - id: C05.2
       question: How many?
       note: Expect 22.
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
-          AND business_object_status = 'Active'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
+          AND initiative_status = 'Active'
     - id: C05.3
       question: 'New question: show AR_NPD_Shirting items'
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Active'
     - id: C05.4
       question: How many?
       note: >-
         Must count the new subject, 10, not the 22 from before the reset.
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_Shirting'
+          AND initiative_status = 'Active'
 
 - id: C06
   category: Conversation - Task Domain
@@ -487,7 +487,7 @@ questions:
       expected_sql: |
         SELECT task_id, task_display_name, task_status
         FROM tms_task_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
+        WHERE initiative_type = 'AR_YD_Suiting'
           AND task_status = 'open'
     - id: C06.2
       question: Only the open ones
@@ -496,7 +496,7 @@ questions:
       expected_sql: |
         SELECT task_id, task_display_name, task_status
         FROM tms_task_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
+        WHERE initiative_type = 'AR_YD_Suiting'
           AND task_status = 'open'
     - id: C06.3
       question: Group them by department
@@ -505,7 +505,7 @@ questions:
       expected_sql: |
         SELECT task_department, COUNT(*)
         FROM tms_task_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
+        WHERE initiative_type = 'AR_YD_Suiting'
           AND task_status = 'open'
         GROUP BY task_department
 
@@ -516,30 +516,30 @@ questions:
       question: Show the first 5 AR_YD_Shirting items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Shirting'
+          AND initiative_status = 'Active'
         LIMIT 5
     - id: C07.2
       question: Give me 10 instead
       note: Replaces the limit, keeps the subject.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Shirting'
+          AND initiative_status = 'Active'
         LIMIT 10
     - id: C07.3
       question: Show their status as well
       note: Widens the projection without disturbing the limit.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Shirting'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Shirting'
+          AND initiative_status = 'Active'
         LIMIT 10
 
 - id: C08
@@ -549,10 +549,10 @@ questions:
       question: Show AR_NPD_YD_SHIRTING items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_unit
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, business_unit
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
     - id: C08.2
       question: What about PVH?
       note: >-
@@ -560,8 +560,8 @@ questions:
         block rather than starting a new one. Expect 1.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_unit
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+        SELECT initiative_id, initiative_ref_id, business_unit
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
           AND business_unit = 'PVH'
-          AND business_object_status = 'Active'
+          AND initiative_status = 'Active'
