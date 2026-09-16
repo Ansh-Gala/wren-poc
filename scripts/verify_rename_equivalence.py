@@ -5,7 +5,10 @@ the migration is that the headings change. Row order is normalised by sorting,
 because neither query carries an ORDER BY unless its author wrote one, and
 Postgres is free to differ. Values are stringified before comparison so that a
 column whose type is unchanged but whose driver representation differs (a
-Decimal read through a renamed alias) does not read as a difference.
+Decimal read through a renamed alias) does not read as a difference. SQL NULL
+is held distinct from any string a column could contain -- a bare `str(v)`
+would collapse NULL and the literal text 'None' onto the same sentinel, which
+would read as agreement when the two queries genuinely disagree.
 
 Nothing here raises on SQL error. A failing query is a finding to report, in
 the same spirit as run_readonly.
@@ -19,7 +22,10 @@ from database.connection import connect
 
 def _rows(cur, sql: str) -> list[tuple[str, ...]]:
     cur.execute(sql)
-    return sorted(tuple(str(v) for v in row) for row in cur.fetchall())
+    return sorted(
+        tuple("\x00NULL" if v is None else str(v) for v in row)
+        for row in cur.fetchall()
+    )
 
 
 def verify_pairs(pairs: list[tuple[str, str]]) -> list[str]:
