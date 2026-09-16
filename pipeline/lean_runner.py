@@ -110,6 +110,8 @@ class TurnResult:
 
     expected_result: dict = field(default_factory=dict)
     actual_result: dict = field(default_factory=dict)
+    # Requirements from expect_columns the answer did not satisfy.
+    missing_columns: list[str] = field(default_factory=list)
 
     # ------------------------------------------------- follow-up layer --
     # Recorded separately from result_match on purpose. A turn can write a
@@ -216,8 +218,15 @@ def _has_expectations(turn: SuiteTurn) -> bool:
     when there is no valid SQL answer -- the behaviour it should choose
     instead. A question typed into the console states neither, and scoring it
     against the defaults would report defects nobody observed.
+
+    expect_columns counts as a statement of its own: a turn may name the
+    columns its answer must carry without naming the SQL, because more than
+    one query is often right and only the projection is really being asked
+    about.
     """
-    return turn.expected_sql is not None or turn.expect_behavior != "sql"
+    return (turn.expected_sql is not None
+            or turn.expect_behavior != "sql"
+            or bool(turn.expect_columns))
 
 
 def _action_matches(followup: FollowUp, expected: dict | None) -> bool | None:
@@ -508,10 +517,14 @@ def run_turn(
     # left as None rather than False -- "not applicable" and "wrong" must not
     # look alike, or every real question would read as a failure and be given a
     # failure_category naming a defect nobody observed.
-    scoring = turn.expected_sql is not None
+    # A turn may state only the columns its answer must carry, with no SQL to
+    # compare rows against. Row comparison is skipped for those; the column
+    # floor is still checked.
+    scoring = turn.expected_sql is not None or bool(turn.expect_columns)
+    comparing_rows = turn.expected_sql is not None
 
     expected = None
-    if scoring:
+    if comparing_rows:
         expected = run_readonly(settings, turn.expected_sql, settings.statement_timeout_ms)
         r.db_ms += expected.duration_ms
         r.expected_result = result_summary(expected)
@@ -525,13 +538,38 @@ def run_turn(
         if actual.error:
             r.error = r.error or actual.error
             r.sqlstate = r.sqlstate or actual.sqlstate
-        if actual.ok and scoring:
+        if actual.ok and comparing_rows:
             if compare_results(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "exact"
             elif compare_row_subset(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "superset"
             elif compare_projection_agnostic(expected, actual, turn.ordered):
                 r.result_match, r.match_mode = True, "projection"
+
+    if scoring and turn.expect_columns:
+        # The answer has to carry what the question asked about, whatever the
+        # rows say. A list of task ids is the right rows for "tasks which have
+        # issues" and none of the answer.
+        #
+        # A requirement is satisfied by a column that contains it, not only by
+        # one that equals it: the model names its aggregates itself, so
+        # "count" has to be met by file_count and issue_count alike. Listing
+        # every alias a model might invent is a losing game.
+        returned = [str(c).lower() for c in (r.actual_result.get("columns") or [])]
+        def _met(name: str) -> bool:
+            wanted = name.lower()
+            return any(wanted == col or wanted in col for col in returned)
+        missing = [group for group in turn.expect_columns
+                   if not any(_met(name) for name in group)]
+        if missing:
+            r.missing_columns = [" or ".join(group) for group in missing]
+            r.result_match = False
+            r.match_mode = "rows ok, answer too thin"
+            r.failure_category = r.failure_category or "THIN_ANSWER"
+        elif not comparing_rows:
+            # Nothing else is being compared for this turn, so meeting the
+            # floor is the whole test.
+            r.result_match, r.match_mode = True, "answer shape"
 
     if scoring:
         # A turn that answers correctly but misread the conversation is still a
@@ -540,7 +578,7 @@ def run_turn(
             r.result_match = False
             r.match_mode = "rows ok, context misread"
 
-        sem = compare_semantics(turn.expected_sql, parsed.sql, ordered=turn.ordered,
+        sem = compare_semantics(turn.expected_sql or parsed.sql, parsed.sql, ordered=turn.ordered,
                                 strict_projection=turn.strict_projection)
         r.semantic_match = sem.semantically_correct
         r.semantic_issues = list(sem.issues)
@@ -553,12 +591,17 @@ def run_turn(
         }
 
         if not r.result_match:
-            r.failure_category = _classify_failure(
-                r, expected, actual if actual is not None else expected
-            )
+            # A column-only turn has no expected result to classify against,
+            # and its failure is already named THIN_ANSWER.
+            if comparing_rows:
+                r.failure_category = _classify_failure(
+                    r, expected, actual if actual is not None else expected
+                )
+            else:
+                r.failure_category = r.failure_category or "THIN_ANSWER"
         elif not r.schema_grounded:
             r.failure_category = "HALLUCINATION"
-        elif not r.semantic_match:
+        elif not r.semantic_match and comparing_rows:
             # Right rows, wrong query. Not counted against result accuracy, but
             # named so it cannot hide behind a passing row comparison.
             r.failure_category = "SEMANTIC_MISMATCH"

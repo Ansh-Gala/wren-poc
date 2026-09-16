@@ -1,0 +1,228 @@
+# Answer shape: are these answers worth reading?
+#
+# 30 questions about issues and attachments, phrased the way people type them.
+# None of them states an expected SQL, because more than one query is usually
+# right and the query is not what is being tested. Each states a floor instead:
+# the columns the answer has to carry before it is any use to the person who
+# asked.
+#
+# Written after "show me task which have issues" came back as eight task ids.
+# Correct rows. Nothing about the issues, who raised them, or what they were.
+# Row comparison cannot see that, so the projection is checked directly.
+#
+# Each entry in expect_columns is satisfied by ANY of its names: a reader who
+# wanted to know where an issue came from is served by the department or by
+# the person, and the suite should not insist on which. Extra columns never
+# fail a turn -- this is a floor, not a ceiling.
+version: 1
+questions:
+- id: S01
+  category: Issue Listing
+  question: show me task which have issues
+  expect_columns:
+  - &id001
+    - task_display_name
+    - task_code
+    - task_id
+  - - issue_title
+  - - issue_status
+  - &id002
+    - issue_sub_department
+    - issue_assigned_user_id
+    - issue_created_by_user_id
+    - user_name
+    - issue_department
+  note: The question that started this. Eight task ids is the right rows and none of the answer.
+- id: S02
+  category: Issue Listing
+  question: which issues are still open
+  expect_columns:
+  - - issue_title
+  - *id001
+- id: S03
+  category: Issue Listing
+  question: show me the open issues and which task they are on
+  expect_columns:
+  - - issue_title
+  - *id001
+- id: S04
+  category: Issue Ranking
+  question: who raises the most issues
+  expect_columns:
+  - *id002
+  - &id003
+    - count
+    - total
+    - sum
+    - number
+- id: S05
+  category: Issue Aggregation
+  question: what are people complaining about the most
+  expect_columns:
+  - - issue_category_name
+  - *id003
+- id: S06
+  category: Issue Listing
+  question: show issues from the design team
+  expect_columns:
+  - - issue_title
+  - - issue_sub_department
+- id: S07
+  category: Issue Listing
+  question: whats the latest comment on our issues
+  expect_columns:
+  - - last_comment
+  - - issue_title
+- id: S08
+  category: Issue Listing
+  question: issues nobody has commented on
+  expect_columns:
+  - - issue_title
+- id: S09
+  category: Issue Aggregation
+  question: which department has the most problems
+  expect_columns:
+  - - issue_sub_department
+  - *id003
+- id: S10
+  category: Issue Listing
+  question: show me resolved issues and who resolved them
+  expect_columns:
+  - - issue_title
+  - - resolved_by
+    - resolver
+    - user_name
+- id: S11
+  category: Issue Listing
+  question: what issues came up in march
+  expect_columns:
+  - - issue_title
+  - - issue_created_at
+- id: S12
+  category: Issue Aggregation
+  question: what kind of issues do we get
+  expect_columns:
+  - - issue_category_name
+- id: S13
+  category: Issue Listing
+  question: issue details for task 278
+  expect_columns:
+  - - issue_title
+  - - issue_status
+  - - issue_category_name
+- id: S14
+  category: Issue Join
+  question: which initiatives have issues on their tasks
+  expect_columns:
+  - &id004
+    - initiative_ref_id
+    - initiative_id
+    - initiative_type
+  - - issue_title
+    - issue_status
+    - issue_category_name
+  note: The issue view has no initiative column; the answer has to travel through tms_task_flat and bring
+    something about the issue back.
+- id: S15
+  category: Issue Join
+  question: are there issues on any delayed task
+  expect_columns:
+  - *id001
+  - - issue_title
+- id: T01
+  category: Attachment Listing
+  question: what files are attached to our initiatives
+  expect_columns:
+  - &id005
+    - file_name
+    - file_uri
+  - *id004
+- id: T02
+  category: Attachment Listing
+  question: show me attachments with the task they belong to
+  expect_columns:
+  - *id005
+  - *id001
+- id: T03
+  category: Attachment Ranking
+  question: who uploads the most files
+  expect_columns:
+  - - attachment_created_by_user_id
+    - user_name
+  - *id003
+- id: T04
+  category: Attachment Listing
+  question: biggest files we have
+  expect_columns:
+  - - file_name
+  - - file_size
+- id: T05
+  category: Attachment Listing
+  question: what documents do we have for suiting
+  expect_columns:
+  - *id005
+  - - folder_path
+    - tag_name
+- id: T06
+  category: Attachment Join
+  question: attachments on active initiatives
+  expect_columns:
+  - *id005
+  - - initiative_status
+    - initiative_ref_id
+    - initiative_id
+- id: T07
+  category: Attachment Listing
+  question: which tags are actually used
+  expect_columns:
+  - - tag_name
+- id: T08
+  category: Attachment Listing
+  question: files uploaded recently
+  expect_columns:
+  - - file_name
+  - - attachment_created_at
+- id: T09
+  category: Attachment Listing
+  question: show me the costing documents
+  expect_columns:
+  - *id005
+  - - tag_name
+- id: T10
+  category: Attachment Aggregation
+  question: how many files does each initiative have
+  expect_columns:
+  - *id004
+  - *id003
+- id: T11
+  category: Attachment Join
+  question: attachments for AR_YD_Suiting
+  expect_columns:
+  - *id005
+  - - initiative_type
+    - initiative_ref_id
+    - initiative_id
+  note: initiative_name on the attachment is the tag's configuration, so the honest answer joins tms_initiative_flat.
+- id: T12
+  category: Attachment Listing
+  question: what excel files are there
+  expect_columns:
+  - - file_name
+- id: T13
+  category: Attachment Listing
+  question: whats in the sales folder
+  expect_columns:
+  - *id005
+  - - folder_path
+- id: T14
+  category: Attachment Aggregation
+  question: break the attachments down by document type
+  expect_columns:
+  - - tag_name
+  - *id003
+- id: T15
+  category: Attachment Listing
+  question: show me attachment details for initiative 292
+  expect_columns:
+  - *id005
+  - - tag_name

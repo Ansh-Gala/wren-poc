@@ -105,3 +105,12 @@ rules:
   definition: In tms_attachment_flat, extensions and max_file_size describe what the tag permits, not
     what this file is. The file's own facts are file_name and file_size. Answer 'how big is the file'
     from file_size, never from max_file_size.
+- name: answer_with_the_context_a_person_needs
+  definition: 'When a question asks to SEE records (show, list, which, give me) and the answer requires
+    more than one table, project the identifying and descriptive columns of BOTH sides, not only the side
+    the question names first. ''Show tasks which have issues'' is answered with the task''s name AND each
+    issue''s title, status and the department or person it came from -- a list of task ids is technically
+    the right rows and tells the reader nothing they asked to know. The same holds for attachments: show
+    the file and its tag alongside whatever identifies the Initiative or task it hangs from. This applies
+    to listings only. A count, a total or an average answers with the number, and adding columns to it
+    is noise.'
