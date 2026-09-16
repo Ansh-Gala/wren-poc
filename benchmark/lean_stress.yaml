@@ -22,28 +22,28 @@ questions:
       question: Show AR_NPD_YD_SHIRTING items
       expect_decision: new_block
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
 
     - id: L01.02
       question: Only the active ones
       note: add a filter -- 49
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
 
     - id: L01.03
       question: How many?
       note: change of intent -- 49
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
 
     - id: L01.04
       question: Group them by business unit
@@ -51,9 +51,9 @@ questions:
       expect_decision: follow_up
       expected_sql: |
         SELECT business_unit, COUNT(*)
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
         GROUP BY business_unit
 
     - id: L01.05
@@ -61,20 +61,20 @@ questions:
       note: drop the grouping, keep both filters -- 49
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
 
     - id: L01.06
       question: Only PVH
       note: add a dimension filter -- 1
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
           AND business_unit = 'PVH'
 
     - id: L01.07
@@ -87,31 +87,31 @@ questions:
         failure, so the question was reworded rather than the model blamed.
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
 
     - id: L01.08
       question: Only the black ones
       note: a different dimension -- 38
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_color
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
-          AND business_object_color = 'Black'
+        SELECT initiative_id, initiative_ref_id, initiative_color
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
+          AND initiative_color = 'Black'
 
     - id: L01.09
       question: How many?
       note: 38
       expect_decision: follow_up
       expected_sql: |
-        SELECT COUNT(*) FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
-          AND business_object_color = 'Black'
+        SELECT COUNT(*) FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
+          AND initiative_color = 'Black'
 
     - id: L01.10
       question: Sort them by id
@@ -119,12 +119,12 @@ questions:
       note: 38, ordered
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_color
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
-          AND business_object_color = 'Black'
-        ORDER BY business_object_id
+        SELECT initiative_id, initiative_ref_id, initiative_color
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
+          AND initiative_color = 'Black'
+        ORDER BY initiative_id
 
     - id: L01.11
       question: Just the first 10
@@ -132,12 +132,12 @@ questions:
       note: 10, keeping the sort and all three filters
       expect_decision: follow_up
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_color
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_NPD_YD_SHIRTING'
-          AND business_object_status = 'Active'
-          AND business_object_color = 'Black'
-        ORDER BY business_object_id
+        SELECT initiative_id, initiative_ref_id, initiative_color
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_NPD_YD_SHIRTING'
+          AND initiative_status = 'Active'
+          AND initiative_color = 'Black'
+        ORDER BY initiative_id
         LIMIT 10
 
     - id: L01.12
@@ -148,6 +148,6 @@ questions:
         correct, and any smaller number means a filter survived the switch.
       expect_decision: switch
       expected_sql: |
-        SELECT business_object_id, business_object_ref_id, business_object_status
-        FROM tms_business_object_flat
-        WHERE business_object_type = 'AR_YD_Suiting'
+        SELECT initiative_id, initiative_ref_id, initiative_status
+        FROM tms_initiative_flat
+        WHERE initiative_type = 'AR_YD_Suiting'
