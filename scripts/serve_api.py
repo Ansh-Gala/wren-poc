@@ -176,7 +176,7 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
                                     (r.actual_result or {}).get("columns"),
                                     settings),
                     (r.actual_result or {}).get("columns"))),
-            after.get("tables")),
+            after.get("tables"), r.grouped),
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,
