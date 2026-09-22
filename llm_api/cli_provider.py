@@ -81,8 +81,30 @@ def build_command(
     session: Session | None = None,
 ) -> list[str]:
     if settings.cli_lean:
-        # No MCP, no built-in tools, default system prompt replaced. One turn.
+        # One turn, and nothing of whoever set this machine up.
+        #
+        # --tools "" alone did not deliver that, despite what this comment
+        # used to claim. A run still attached every MCP server the operator
+        # had configured, listed their skills, and fired their plugins'
+        # SessionStart hooks -- measured at 3,472 bytes of plugin
+        # instructions prepended to a prompt that asks for one JSON object.
+        # Those are instructions, and they contradict the ones above them.
+        #
+        # Three flags and one environment variable close it:
+        #   --strict-mcp-config       no MCP server but one we name, and we
+        #                             name none
+        #   --disable-slash-commands  no skills
+        #   --settings                the effort level, so a global "xhigh"
+        #                             cannot make every question think before
+        #                             writing a SELECT
+        #   CLAUDE_CONFIG_DIR         set in ask(). The only thing that stops
+        #                             a plugin hook: --settings MERGES with
+        #                             the operator's settings rather than
+        #                             replacing them, so emptying
+        #                             enabledPlugins there does nothing.
+        #                             Measured, not assumed.
         from claude.prompts import build_lean_system_prompt
+        effort = settings.claude_effort_level
         cmd = [
             settings.claude_command,
             "-p",
@@ -98,6 +120,10 @@ def build_command(
             "",
             "--permission-mode",
             "bypassPermissions",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--settings",
+            json.dumps({"effortLevel": effort if effort in ("medium", "high") else "medium"}),
         ]
         if settings.claude_model:
             cmd += ["--model", settings.claude_model]
@@ -240,7 +266,8 @@ def _pool_for(settings: Settings, system_prompt: str) -> "ClaudePool | None":
         return None
     from llm_api.cli_pool import ClaudePool
 
-    key = (settings.claude_command, settings.claude_model, hash(system_prompt))
+    key = (settings.claude_command, settings.claude_model, hash(system_prompt),
+           settings.claude_effort_level, settings.claude_config_dir)
     with _POOLS_LOCK:
         pool = _POOLS.get(key)
         if pool is None:
@@ -251,6 +278,8 @@ def _pool_for(settings: Settings, system_prompt: str) -> "ClaudePool | None":
                 size=settings.cli_pool_size,
                 warmup=settings.cli_pool_warmup_seconds,
                 reply_timeout=min(90.0, float(settings.claude_timeout_seconds)),
+                effort_level=settings.claude_effort_level,
+                config_dir=settings.claude_config_dir,
             )
             _POOLS[key] = pool
         return pool
@@ -309,6 +338,12 @@ class CLILocalProvider(LLMProvider):
         # not add any secret of ours to it.
         env = os.environ.copy()
         env.pop("ANTHROPIC_API_KEY", None)  # force local Claude Code auth
+        # Our own Claude Code config directory: credentials, and nothing else.
+        # The CLI reads settings.json and the plugins it enables from here, so
+        # leaving it unset hands the run the operator's whole setup -- and a
+        # plugin's SessionStart hook is the one leak no flag can close.
+        if settings.claude_config_dir:
+            env["CLAUDE_CONFIG_DIR"] = settings.claude_config_dir
 
         started = time.perf_counter()
         try:

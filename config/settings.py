@@ -30,13 +30,30 @@ class Settings:
     pg_readonly_password: str = field(repr=False, default="")
     statement_timeout_ms: int = 15000
 
+    # Who the benchmark is run as. A real request resolves this from the
+    # Drupal session; a suite has no session, so it says so here.
+    #
+    # Defaulting to 1/'Admin' is deliberate rather than tidy: the question
+    # files carry golden SQL asserting assigned_user_id = 1, and every recorded
+    # accuracy figure was measured against it. Changing the default would
+    # invalidate the comparison rather than improve it.
+    benchmark_user_id: int = 1
+    benchmark_user_name: str = "Admin"
+
     wren_project_root: Path = ROOT / "wren_projects"
     wren_home: Path = ROOT / "wren_projects" / ".wren_home"
     wren_memory_backend: str = "lancedb"
 
     claude_command: str = "claude"
-    claude_model: str = ""
+    claude_model: str = "sonnet"
     claude_timeout_seconds: int = 180
+    # medium or high. Anything else is read as medium: a SELECT does not need
+    # extended reasoning, and this is the one setting that silently
+    # multiplies the bill.
+    claude_effort_level: str = "medium"
+    # The chatbot's own Claude Code config directory. Empty means inherit the
+    # operator's, which also inherits their plugins and their hooks.
+    claude_config_dir: str = ""
 
     benchmark_config: str = "D"
     benchmark_privacy_mode: str = "strict"
@@ -104,7 +121,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "WREN_MEMORY_BACKEND", "CLAUDE_CLI_COMMAND", "CLAUDE_MODEL",
         "CLAUDE_TIMEOUT_SECONDS", "BENCHMARK_CONFIG", "BENCHMARK_PRIVACY_MODE", "DEBUG",
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-        "CLI_LEAN",
+        "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -121,12 +138,16 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         pg_readonly_user=g("DATABASE_READONLY_USER") or "wren_ro",
         pg_readonly_password=g("DATABASE_READONLY_PASSWORD") or "",
         statement_timeout_ms=_as_int(g("DATABASE_STATEMENT_TIMEOUT_MS"), 15000),
+        benchmark_user_id=_as_int(g("BENCHMARK_USER_ID"), 1),
+        benchmark_user_name=g("BENCHMARK_USER_NAME") or "Admin",
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),
         claude_command=g("CLAUDE_CLI_COMMAND") or "claude",
-        claude_model=(g("CLAUDE_MODEL") or "").strip(),
+        claude_model=(g("CLAUDE_MODEL") or "sonnet").strip(),
         claude_timeout_seconds=_as_int(g("CLAUDE_TIMEOUT_SECONDS"), 180),
+        claude_effort_level=(g("CLAUDE_EFFORT_LEVEL") or "medium").strip().lower(),
+        claude_config_dir=(g("CLAUDE_CONFIG_DIR") or "").strip(),
         benchmark_config=(g("BENCHMARK_CONFIG") or "D").strip().upper(),
         benchmark_privacy_mode=(g("BENCHMARK_PRIVACY_MODE") or "strict").strip().lower(),
         debug=_as_bool(g("DEBUG"), False),
