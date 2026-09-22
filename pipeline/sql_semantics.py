@@ -513,13 +513,21 @@ def check_against_schema(sql: str | None) -> SchemaCheck:
         return check
 
     known_tables, known_columns = _schema_index()
-    used = {t.name for t in tree.find_all(exp.Table) if t.name}
-    check.unknown_tables = used - known_tables
 
-    # Names the query defines for itself are not schema references.
+    # Names the query defines for itself are not schema references. The CTE
+    # names have to come out before the table check, not only before the
+    # column check: "WITH x AS (...) SELECT FROM x" reads x as a table, and
+    # reporting it as missing made every WITH query look ungrounded. That was
+    # harmless while this was only a label; it stops being harmless the moment
+    # grounding decides whether the query runs.
+    cte_names = {c.alias_or_name for c in tree.find_all(exp.CTE)}
+
+    used = {t.name for t in tree.find_all(exp.Table) if t.name}
+    check.unknown_tables = used - known_tables - cte_names
+
     self_defined = {a.alias for a in tree.find_all(exp.Alias) if a.alias}
     self_defined |= {t.alias for t in tree.find_all(exp.Table) if t.alias}
-    self_defined |= {c.alias_or_name for c in tree.find_all(exp.CTE)}
+    self_defined |= cte_names
 
     allowed: set[str] = set()
     for table in used & known_tables:

@@ -64,6 +64,12 @@ def _strip_noise(sql: str) -> str:
     return _STRING_LITERAL.sub("''", sql)
 
 
+# Postgres exposes its own catalogue through these. Every role can read
+# them, so the read-only guarantee does not cover them at all.
+_SYSTEM_SCHEMAS = frozenset({"information_schema", "pg_catalog",
+                             "pg_toast", "pg_temp"})
+
+
 def assert_read_only(sql: str) -> None:
     if not sql or not sql.strip():
         raise UnsafeSQLError("empty SQL")
@@ -95,6 +101,26 @@ def assert_read_only(sql: str) -> None:
             raise UnsafeSQLError(
                 f"statement contains a {type(found).__name__} node"
             )
+
+    # The catalogue is readable by every role and is a SELECT like any other,
+    # so "read only" says nothing about it. Asked for the columns of a table,
+    # the model wrote a perfectly valid, perfectly safe query against
+    # information_schema and handed back the schema as rows -- which no filter
+    # on the wording could have caught, because the rows were the leak.
+    for table in statement.find_all(exp.Table):
+        schema = (table.db or "").lower()
+        name = (table.name or "").lower()
+        if schema in _SYSTEM_SCHEMAS or schema.startswith("pg_"):
+            raise UnsafeSQLError(f"statement reads the system catalogue: {schema}")
+        if name in _SYSTEM_SCHEMAS or name.startswith("pg_"):
+            raise UnsafeSQLError(f"statement reads the system catalogue: {name}")
+
+    # Same reasoning for the catalogue functions -- pg_read_file and friends
+    # are reads too.
+    for call in statement.find_all(exp.Anonymous):
+        called = (call.this or "")
+        if isinstance(called, str) and called.lower().startswith("pg_"):
+            raise UnsafeSQLError(f"statement calls a system function: {called}")
 
     screened = _strip_noise(sql)
     match = _KEYWORD_RE.search(screened)

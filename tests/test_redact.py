@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from pipeline.redact import public_response, safe_error
+from pipeline.redact import public_response, safe_clarification, safe_error
 
 # Real identifiers from this database. Any of these reaching a normal response
 # is the leak, whichever field it arrives in.
@@ -258,3 +258,81 @@ def test_a_turn_with_no_suggestions_still_has_a_followup_shape():
     turn = full_turn()
     turn["followup"] = {"type": "none", "suggestions": []}
     assert public_response(turn)["followup"] == {"type": "none", "suggestions": []}
+
+
+# --------------------------------------------------------- the clarification --
+#
+# The one public field that is model prose. Whitelisting it says nothing about
+# what is inside it, and the model writing it has the whole schema in view.
+
+
+def test_a_clarification_naming_a_table_is_replaced():
+    leak = "I searched tms_task_flat using user_name = 'NA'"
+    assert "tms_task_flat" not in (safe_clarification(leak) or "")
+
+
+def test_a_clarification_naming_two_columns_is_replaced():
+    leak = "initiative_ref_id was used instead of initiative_id"
+    out = safe_clarification(leak) or ""
+    assert "initiative_ref_id" not in out
+    assert "initiative_id" not in out
+
+
+def test_a_clarification_quoting_sql_is_replaced():
+    assert "SELECT" not in (safe_clarification("I ran a SELECT over tasks") or "")
+
+
+def test_the_word_sql_alone_is_enough():
+    assert safe_clarification("Did you mean the SQL version?") !=         "Did you mean the SQL version?"
+
+
+def test_a_question_written_for_a_person_is_left_alone():
+    clean = "Which department did you mean?"
+    assert safe_clarification(clean) == clean
+
+
+def test_an_ordinary_word_that_is_also_a_column_survives():
+    # status, department, role and season are columns AND ordinary English.
+    # Dropping these would drop nearly every question worth asking.
+    clean = "Did you mean the status of the task, or of the initiative?"
+    assert safe_clarification(clean) == clean
+
+
+def test_no_clarification_stays_no_clarification():
+    assert safe_clarification(None) is None
+    assert safe_clarification("   ") is None
+
+
+def test_the_replacement_still_reads_as_a_question():
+    # Replaced rather than dropped: the chips below it are the actual choices,
+    # and a set of chips under a blank space asks nothing.
+    out = safe_clarification("tms_task_flat has no such column")
+    assert out and out.strip().endswith("?")
+
+
+def test_a_leaking_clarification_is_scrubbed_on_the_way_out():
+    turn = full_turn()
+    turn["clarification"] = "initiative_ref_id does not match"
+    assert "initiative_ref_id" not in json.dumps(public_response(turn))
+
+
+def test_the_followup_question_is_scrubbed_too():
+    # The same sentence travels twice -- as `clarification` and again as the
+    # follow-up's question. Guarding one and not the other guards neither.
+    turn = full_turn()
+    turn["clarification"] = "tms_task_flat has no such column"
+    turn["followup"] = {"type": "clarification",
+                        "question": "tms_task_flat has no such column",
+                        "suggestions": [{"label": "Open tasks"}]}
+    out = public_response(turn)
+    assert "tms_task_flat" not in json.dumps(out)
+    assert out["followup"]["suggestions"] == [{"label": "Open tasks"}]
+
+
+def test_a_clean_followup_question_is_not_disturbed():
+    turn = full_turn()
+    turn["followup"] = {"type": "exploration",
+                        "question": "What would you like to know next?",
+                        "suggestions": [{"label": "Open tasks"}]}
+    out = public_response(turn)
+    assert out["followup"]["question"] == "What would you like to know next?"

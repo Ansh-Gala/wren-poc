@@ -15,6 +15,7 @@ round for a payload carrying SQL and schema names.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # Enough of the answer to act on, and no more. The nouns here are business
@@ -80,6 +81,57 @@ _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "trunca
 _PUBLIC_FOLLOWUP_FIELDS = frozenset({"type", "question", "suggestions"})
 _PUBLIC_SUGGESTION_FIELDS = frozenset({"label"})
 
+# Text that gives the game away: an identifier, or a query.
+#
+# Identifiers in this schema are snake_case -- tms_task_flat, task_sla_status,
+# is_initiative_delayed -- and prose written for a person is not. Testing the
+# shape rather than a list of known names is the stronger check: it catches a
+# column this file has never heard of, and a name the model invented, neither
+# of which a whitelist would.
+#
+# Matching against the schema's own names was tried and is wrong here. Some
+# columns are single ordinary words -- status, department, role, season -- and
+# a clarification is *supposed* to say "which department did you mean?". A
+# name-based scan would drop nearly every question worth asking.
+_TELLS = (
+    # An underscore joining two word characters: snake_case, so an identifier.
+    re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b"),
+    # A query, or a reference to one. Upper case deliberately: "select" is an
+    # ordinary verb, SELECT is a keyword.
+    re.compile(r"\b(?:SELECT|FROM|WHERE|JOIN|GROUP BY|ORDER BY)\b"),
+    re.compile(r"\bSQL\b", re.IGNORECASE),
+    # A column's type is a database detail like any other, and "what type
+    # is that field" is a question a person can ask in ordinary words.
+    # Only the unmistakable ones: "text", "date" and "time" are English
+    # before they are types, and blocking those would cost every sentence
+    # worth reading.
+    re.compile(r"\b(?:VARCHAR|NVARCHAR|BIGINT|SMALLINT|TINYINT|INTEGER|BOOLEAN|TIMESTAMP|DATETIME|NUMERIC|SERIAL|JSONB|UUID)\b", re.IGNORECASE),
+)
+
+
+def names_a_database_object(text: str | None) -> bool:
+    """Whether a piece of user-facing text gives a database detail away.
+
+    Shared, so the boundary and the chip builder cannot start disagreeing
+    about what counts. Shape rather than a list of real names: a list would
+    miss a column this file has never heard of, and it would also drop every
+    sentence containing "status" or "department", which are columns and
+    ordinary English at the same time.
+    """
+    flat = " ".join(str(text or "").split())
+    return bool(flat) and any(t.search(flat) for t in _TELLS)
+
+# What a clarification becomes when it trips a tell.
+#
+# Replaced rather than dropped, which is where this parts company with the
+# explanation guard on the PHP side. An explanation is a nicety and a turn
+# reads fine without one. A clarification is the entire turn: drop it and the
+# user is left with a set of chips under a blank space, with nothing saying
+# what is being asked. The chips carry the actual choices, so a generic
+# opening still leaves a question that can be answered.
+_CLARIFY_FALLBACK = ("Could you tell me a bit more about what you are looking "
+                     "for?")
+
 
 def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
     """A database error as something worth showing a user.
@@ -92,6 +144,18 @@ def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
     return _BY_SQLSTATE.get((sqlstate or "").strip(), _GENERIC)
 
 
+def safe_clarification(text: str | None) -> str | None:
+    """The model's question, if it is fit to show.
+
+    ``None`` in, ``None`` out: most turns are answers and have no
+    clarification, and inventing one would ask a question nobody meant.
+    """
+    if text is None or not str(text).strip():
+        return None
+    body = str(text).strip()
+    return _CLARIFY_FALLBACK if names_a_database_object(body) else body
+
+
 def public_response(response: dict[str, Any]) -> dict[str, Any]:
     """The debug-off view of a turn.
 
@@ -101,6 +165,11 @@ def public_response(response: dict[str, Any]) -> dict[str, Any]:
     """
     out = {k: v for k, v in response.items() if k in _PUBLIC_FIELDS}
 
+    # Whitelisting the field is not enough: its contents are model prose, and
+    # the model has the whole schema in front of it.
+    if "clarification" in out:
+        out["clarification"] = safe_clarification(out["clarification"])
+
     result = response.get("result")
     if isinstance(result, dict):
         out["result"] = {k: v for k, v in result.items() if k in _PUBLIC_RESULT_FIELDS}
@@ -108,6 +177,8 @@ def public_response(response: dict[str, Any]) -> dict[str, Any]:
     followup = response.get("followup")
     if isinstance(followup, dict):
         trimmed = {k: v for k, v in followup.items() if k in _PUBLIC_FOLLOWUP_FIELDS}
+        if trimmed.get("type") == "clarification":
+            trimmed["question"] = safe_clarification(trimmed.get("question")) or ""
         trimmed["suggestions"] = [
             {k: v for k, v in s.items() if k in _PUBLIC_SUGGESTION_FIELDS}
             for s in (followup.get("suggestions") or [])
