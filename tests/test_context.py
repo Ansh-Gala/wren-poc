@@ -3,6 +3,7 @@
 import pytest
 
 from pipeline.context import (
+    remember_question,
     ConversationState, classify_turn, detect_entity, parse_sql_state,
     render_context, update_state,
 )
@@ -199,11 +200,23 @@ def test_render_is_empty_before_anything_happens():
 
 
 def test_render_carries_what_a_follow_up_needs():
+    """What a follow-up needs is now the question, not this module's reading of it.
+
+    The block used to carry the entity, the table and the previous query --
+    this module's conclusions about what the last turn meant. It now carries
+    the user's own words and lets the model draw its own. The tracking behind
+    those conclusions is still there; it builds the suggestion chips. It just
+    does not reach the prompt.
+    """
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
+    remember_question(state, "Show AR_YD_Suiting items")
     text = render_context(state)
-    assert "AR_YD_Suiting" in text
-    assert "tms_initiative_flat" in text
-    assert "previous query" in text
+
+    assert "Show AR_YD_Suiting items" in text
+    # The database details that used to travel with it no longer do.
+    assert "tms_initiative_flat" not in text
+    assert "previous query" not in text
+    assert "SELECT" not in text
 
 
 def test_context_size_does_not_grow_with_turn_count():
