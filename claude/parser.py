@@ -180,3 +180,151 @@ def parse_clarification(text: str) -> str | None:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
+
+
+def _json_objects(text: str) -> list[dict]:
+    """The JSON objects in a reply, whole-reply first.
+
+    The whole reply is tried before the fragments because the fragment scan is
+    the non-greedy ``\\{.*?\\}`` that parse_clarification uses, which stops at
+    the first closing brace and so cannot read a nested object. The readers
+    below want flat fields, so that is sufficient for them -- but taking the
+    whole reply first means a well-formed answer is read correctly whatever it
+    nests.
+    """
+    objects: list[dict] = []
+    if not text:
+        return objects
+    try:
+        whole = json.loads(text.strip())
+    except Exception:
+        whole = None
+    if isinstance(whole, dict):
+        objects.append(whole)
+    for match in re.finditer(r"\{.*?\}", text, re.DOTALL):
+        try:
+            obj = json.loads(match.group(0))
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            objects.append(obj)
+    return objects
+
+
+def _parse_string(text: str, key: str) -> str | None:
+    """One non-empty string field, or nothing."""
+    for obj in _json_objects(text):
+        value = obj.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _parse_string_list(text: str, key: str) -> list[str]:
+    """A flat list of non-empty strings under one key, or nothing.
+
+    All-or-nothing on purpose. Dropping the malformed entries would offer a
+    list missing whichever choice the user was looking for, and a silently
+    short list is worse than no list: the schema-derived path can answer
+    instead, and does.
+    """
+    for obj in _json_objects(text):
+        raw = obj.get(key)
+        if not isinstance(raw, list):
+            continue
+        values = [v.strip() for v in raw if isinstance(v, str) and v.strip()]
+        if len(values) > 1 and len(values) == len(raw):
+            return values
+    return []
+
+
+def parse_explanation(text: str) -> str | None:
+    """The plain-English account the model gave of what it understood.
+
+    Separate from the SQL rather than derived from it, because the two answer
+    different questions: the statement says what will be selected, and this
+    says what the user asked for. A sentence generated from the parsed SQL
+    could only ever restate the query in words, which is the thing a
+    non-technical reader already could not read.
+    """
+    return _parse_string(text, "explanation")
+
+
+def parse_goal(text: str) -> str | None:
+    """The model's restatement of what the user is after, if it sent one.
+
+    The running goal is otherwise the question that opened the block, which is
+    right until a follow-up contradicts it: "open tasks for Sales" then
+    "forget the department" leaves a goal still naming Sales beside filters
+    that no longer do, and the model is handed a contradiction. Only the model
+    can tell that the aim moved, so it is allowed to say so.
+    """
+    return _parse_string(text, "goal")
+
+
+def parse_recap(text: str) -> str | None:
+    """The model's rewritten summary of the conversation, if it sent one.
+
+    Optional by design. The model is told to leave it out when the thread has
+    not moved on from what the recap already says, so most turns send nothing
+    and cost nothing -- the same bargain `goal` makes.
+    """
+    return _parse_string(text, "recap")
+
+
+def parse_clarify_about(text: str) -> str | None:
+    """The column a clarification is about, if the model named one.
+
+    The chips offered with a clarification are the real values of whichever
+    column the doubt is about, and until now the only way to find that column
+    was to look for its name inside the question the user is shown -- which
+    meant the feature could only work when the question leaked a schema name.
+    Asking for the column in its own key separates the two: the prose stays
+    written for a person, and the lookup gets the identifier it needs.
+
+    Never public. redact.public_response does not carry it, and nothing
+    renders it.
+    """
+    return _parse_string(text, "about")
+
+
+def parse_group(text: str) -> bool:
+    """Whether the model asked for this answer's rows to be collected.
+
+    A grouping is a claim about how an answer reads, and only the question and
+    the answer together decide that -- which is why the table-level nomination
+    in column_hierarchy.yaml could not: it fires on every answer off that
+    table, including the ones nobody asked to have grouped. The file still
+    says WHICH columns may head a group and which are totals, so the model
+    never sees or names a column; it only says whether to use them here.
+
+    False unless the model said otherwise. A plain list is the normal answer,
+    and an absent key is the model not asking for anything.
+    """
+    for obj in _json_objects(text):
+        value = obj.get("group")
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def parse_options(text: str) -> list[str]:
+    """The readings the model offered to choose between.
+
+    Only the model can produce these. When it says a question has five
+    possible meanings, those meanings exist nowhere in the schema -- they are
+    readings of the sentence, not values in a column -- so the gazetteer has
+    nothing to offer and the user is left retyping one of them by hand.
+    """
+    return _parse_string_list(text, "options")
+
+
+def parse_next(text: str) -> list[str]:
+    """Follow-up questions the model thinks are worth asking next.
+
+    The registry can only offer what the schema affords -- narrow by a status,
+    group by a column, count the rows -- and after "which departments are
+    performing poorly" it duly offers "Just count them", which answers nothing
+    anyone wanted. Relevance needs the question, and only the model has it.
+    """
+    return _parse_string_list(text, "next")

@@ -17,27 +17,65 @@ rules:
 - name: delayed_task
   definition: A task is delayed when calculated elapsed duration exceeds its SLA buffer.
   sql_fragment: tms_task_flat.task_sla_status = 'Delayed'
+- name: delayed_initiative
+  definition: 'A delayed Initiative (Order, BO, Business Object) is one where is_initiative_delayed =
+    ''Yes''. That column lives on tms_task_flat and describes the parent Initiative rather than the task
+    row it sits on, so count Initiatives from it with COUNT(DISTINCT initiative_id).'
+  sql_fragment: tms_task_flat.is_initiative_delayed = 'Yes'
+  scope: 'This is the rule for "delayed orders", "delayed initiatives", "delayed BOs" and "delayed business
+    objects" -- any question asking which Orders are delayed, or how many are. Never answer one of those
+    with delayed_task_count. That column counts delayed TASKS on an Initiative, which is a different
+    question: an Initiative can be delayed with no delayed task on it, and can carry delayed tasks without
+    being delayed itself, so neither stands in for the other. delayed_task_count answers "how much delayed
+    work is on this Order"; is_initiative_delayed answers "is this Order delayed". A delayed TASK is still
+    task_sla_status = ''Delayed'' -- that rule is unchanged and this one does not apply to it.'
 - name: my_tasks
-  definition: My tasks means tasks assigned to the current signed-in user, still open, and flagged for
-    display. In this benchmark the signed-in user is user id 1 ('Admin'); use that literal id, never a
-    bind placeholder.
-  sql_fragment: tms_task_flat.assigned_user_id = 1 AND tms_task_flat.task_status = 'open' AND tms_task_flat.display_flag
-    = 1
+  definition: 'My tasks means tasks assigned to the signed-in user, still open, and flagged for display.
+    The signed-in user is the one named in the SIGNED-IN USER block above the question: compare assigned_user_id
+    to the id given there, written into the query as a literal, never as a bind placeholder. If there
+    is no such block, do not guess a user and do not pick a default one -- reply with a clarification
+    saying you cannot tell who is asking.'
+  sql_fragment: tms_task_flat.assigned_user_id = <the id in the SIGNED-IN USER block> AND tms_task_flat.task_status
+    = 'open' AND tms_task_flat.display_flag = 1
   scope: 'The open + display_flag conditions apply only to the bare concept "my tasks". Do NOT add them
     when the question supplies its own status or asks for a distribution across statuses -- they would
-    contradict or empty the answer. "my closed tasks" is assigned_user_id = 1 AND task_status = ''closed''.
-    "my delayed tasks" is assigned_user_id = 1 AND task_sla_status = ''Delayed'' AND task_status = ''open'':
-    delayed is not a lifecycle status, so the active-first default still applies on top of it. "my task
-    status breakdown" is assigned_user_id = 1 GROUP BY task_status. The only invariant across all of them
-    is assigned_user_id = 1.'
+    contradict or empty the answer. "my closed tasks" is assigned_user_id = <that id> AND task_status
+    = ''closed''. "my delayed tasks" is assigned_user_id = <that id> AND task_sla_status = ''Delayed''
+    AND task_status = ''open'': delayed is not a lifecycle status, so the active-first default still applies
+    on top of it. "my task status breakdown" is assigned_user_id = <that id> GROUP BY task_status. The
+    only invariant across all of them is assigned_user_id = <that id>.'
+- name: my_department
+  definition: '"My department", "our department", "my team" and "our team" mean the departments listed
+    in the SIGNED-IN USER block above the question. Filter the department column of whichever table the
+    question is about -- task_department on tms_task_flat, issue_sub_department on tms_task_issue_flat
+    -- against those values as quoted literals. Most people belong to more than one department, so the
+    block usually lists several: use IN with every one of them, not just the first. When there is no
+    such block, or it lists no department, do not guess and do not fall back to that person''s own tasks
+    -- reply with a clarification.'
+  scope: 'This is about the asker''s own department, not a department named in the question. "open tasks
+    of my department" uses the block; "open tasks of the Sales team" uses the name the question gives.
+    The department wording differs between tables -- tms_task_flat.task_department reads "Design Team
+    block" where tms_task_issue_flat.issue_sub_department reads "Design Team" -- so match the spelling
+    listed for the column of the table being queried.'
+- name: unassigned_task
+  definition: 'A task nobody is assigned to is one where assigned_user_name = ''NA''. NA is a value the
+    TMS stores in that column when no user has been given the task; it is text that only looks like a
+    null. "unassigned", "not assigned", "not assigned to anyone", "no user assigned", "nobody" and "with
+    no one on it" all mean this. Never answer any of them with IS NULL: assigned_user_name is never null,
+    so an IS NULL test returns no rows at all.'
+- name: initiative_identifier
+  definition: 'A bare number after Initiative, Order, BO or Business Object -- "initiative 202", "show
+    202", "what is the status of initiative 202" -- means initiative_id, and initiative_id is an INTEGER
+    so the number is written unquoted. Use initiative_ref_id only when the question actually asks for
+    a reference, a ref id or a reference number.'
 - name: prefer_pre_aggregated_counts
   definition: 'tms_initiative_flat already carries total_task_count, open_task_count, closed_task_count
     and delayed_task_count. When a question is about a Business Object''s task counts, read these columns
     rather than joining to tms_task_flat and re-aggregating: it is the same answer from one table, and
     it keeps the choice deterministic instead of leaving two equally reasonable shapes.'
   sql_fragment: tms_initiative_flat.total_task_count
-  caution: delayed_task_count counts delayed OPEN tasks only. If a question should also count closed tasks
-    that breached SLA, join to tms_task_flat on task_sla_status = 'Delayed' instead.
+  scope: 'These are counts of TASKS. None of them says whether the Initiative itself is delayed:
+    for "delayed orders" and the like, see delayed_initiative and use is_initiative_delayed.'
 - name: count_initiatives_from_tasks
   definition: When counting Initiatives from task data, use COUNT(DISTINCT initiative_id) rather than
     COUNT(*).
@@ -63,8 +101,7 @@ rules:
     already carries a status filter, that filter decides. Never use task_display_status for any of this;
     task_status is the column to filter on. And task_sla_status is NOT a status for the purposes of this
     rule: "delayed" describes how a task is running, not where it is in its life, so "how many tasks are
-    delayed" still means the open ones -- task_sla_status = ''Delayed'' AND task_status = ''open''. The
-    same holds for "my delayed tasks".'
+    delayed" still means the open ones -- task_sla_status = ''Delayed'' AND task_status = ''open''.'
 - name: entity_alias
   definition: Initiative, Order, BO and Business Object are all the same TMS entity (tms_initiative_flat).
   sql_fragment: tms_initiative_flat
@@ -110,7 +147,5 @@ rules:
     more than one table, project the identifying and descriptive columns of BOTH sides, not only the side
     the question names first. ''Show tasks which have issues'' is answered with the task''s name AND each
     issue''s title, status and the department or person it came from -- a list of task ids is technically
-    the right rows and tells the reader nothing they asked to know. The same holds for attachments: show
-    the file and its tag alongside whatever identifies the Initiative or task it hangs from. This applies
-    to listings only. A count, a total or an average answers with the number, and adding columns to it
-    is noise.'
+    the right rows and tells the reader nothing they asked to know. The same holds for attachments. Listings
+    only: a count, a total or an average answers with the number.'
