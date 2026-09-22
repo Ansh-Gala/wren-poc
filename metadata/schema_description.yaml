@@ -14,10 +14,14 @@ tables:
     columns:
       initiative_id:
         type: INTEGER
-        description: Unique identifier of the Initiative / Business Object / Order / BO.
+        description: 'Unique identifier of the Initiative / Business Object / Order / BO. A bare number
+          after Initiative, Order, BO or Business Object means this column: "initiative 202" is initiative_id
+          = 202. INTEGER, so write the number unquoted.'
       initiative_ref_id:
         type: VARCHAR
-        description: Human-readable reference identifier of the Initiative.
+        description: 'Human-readable reference identifier of the Initiative. Use this only when the question
+          asks for a reference, a ref id or a reference number. A bare "initiative 202" is initiative_id,
+          not this. VARCHAR, so a value here is quoted.'
       business_unit:
         type: VARCHAR
         description: Business unit associated with the Initiative.
@@ -109,8 +113,8 @@ tables:
         - test
       workflow_name:
         type: VARCHAR
-        description: Name of the workflow attached to the Initiative. NULL for 72 of 307 rows. Like workflow_code,
-          not a substitute for initiative_type.
+        description: Name of the workflow attached to the Initiative. NULL for 72 of 307 rows, and like
+          workflow_code not a substitute for initiative_type.
         values:
         - AR_NPD_Shirting
         - AR_NPD_Suiting
@@ -152,38 +156,33 @@ tables:
         description: Timestamp when the Initiative was short-closed.
       current_active_milestone:
         type: VARCHAR
-        description: 'Current active milestone. Empty in this database: NULL in every row, so a filter
-          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Current active milestone. Empty in this database: NULL in every row, so it cannot
+          answer a question.'
       current_milestone_delay_days:
         type: INTEGER
         description: 'Days the current active milestone is delayed. Empty in this database: NULL in every
-          row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it
-          to answer a question; say the data is not held instead.'
+          row, so it cannot answer a question.'
       current_milestone_expected_completion:
         type: VARCHAR
         description: 'Expected completion of the current active milestone. Empty in this database: NULL
-          in every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not
-          use it to answer a question; say the data is not held instead.'
+          in every row, so it cannot answer a question.'
       total_task_count:
         type: BIGINT
-        description: 'Total number of tasks on this Initiative, pre-aggregated. Prefer it over counting
-          rows in tms_task_flat: same answer, one table.'
+        description: Total number of tasks on this Initiative, pre-aggregated. Prefer it over counting
+          tms_task_flat rows.
       open_task_count:
         type: BIGINT
         description: Number of open tasks on this Initiative, pre-aggregated. Prefer it over counting
-          tms_task_flat rows with task_status = 'open'.
+          tms_task_flat rows.
       closed_task_count:
         type: BIGINT
         description: Number of closed tasks on this Initiative, pre-aggregated. Prefer it over counting
-          tms_task_flat rows with task_status = 'closed'.
+          tms_task_flat rows.
       delayed_task_count:
         type: BIGINT
-        description: 'Number of currently delayed OPEN tasks on this Initiative. It does NOT include closed
-          tasks that breached SLA: across the database it sums to 481 while 635 tasks have task_sla_status
-          = ''Delayed'', the difference being 154 delayed closed tasks. Use this column for "has delayed
-          work outstanding"; join to tms_task_flat on task_sla_status = ''Delayed'' if closed breaches
-          should count too.'
+        description: Number of currently delayed OPEN tasks on this Initiative. It does NOT include closed
+          tasks that breached SLA. Use this column for "has delayed work outstanding"; join to tms_task_flat
+          on task_sla_status = 'Delayed' if closed breaches should count too.
       open_tasks_list:
         type: VARCHAR
         description: List of open task names associated with the Initiative.
@@ -199,9 +198,8 @@ tables:
         description: Category attribute for the Initiative.
       attribute_initiative_type:
         type: VARCHAR
-        description: 'Attribute initiative type. Empty in this database: NULL in every row, so a filter
-          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Attribute initiative type. Empty in this database: NULL in every row, so it cannot
+          answer a question.'
       end_date:
         type: VARCHAR
         description: End date attribute, stored as text.
@@ -219,47 +217,39 @@ tables:
         - Winter
       program:
         type: VARCHAR
-        description: 'Program attribute. Empty in this database: NULL in every row, so a filter on it
-          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
-          the data is not held instead.'
+        description: 'Program attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       request_receipt_date:
         type: VARCHAR
         description: 'Request receipt date attribute, stored as text. Empty in this database: NULL in
-          every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not use
-          it to answer a question; say the data is not held instead.'
+          every row, so it cannot answer a question.'
       pi_date:
         type: VARCHAR
         description: PI date attribute, stored as text.
       stage:
         type: VARCHAR
-        description: 'Stage attribute. Empty in this database: NULL in every row, so a filter on it returns
-          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
-          is not held instead.'
+        description: 'Stage attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       data_color:
         type: VARCHAR
         description: 'Colour attribute recorded on the Initiative data. Empty in this database: NULL in
-          every row, so a filter on it returns nothing and an aggregate over it returns NULL. Do not use
-          it to answer a question; say the data is not held instead.'
+          every row, so it cannot answer a question.'
       brandix_t_a:
         type: VARCHAR
-        description: 'Brandix T&A attribute. Empty in this database: NULL in every row, so a filter on
-          it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Brandix T&A attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       csbd_date:
         type: VARCHAR
         description: 'CSBD date attribute, stored as text. Empty in this database: NULL in every row,
-          so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
-          a question; say the data is not held instead.'
+          so it cannot answer a question.'
       batch_no:
         type: VARCHAR
-        description: 'Batch number attribute. Empty in this database: NULL in every row, so a filter on
-          it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Batch number attribute. Empty in this database: NULL in every row, so it cannot
+          answer a question.'
       item_code:
         type: VARCHAR
-        description: 'Item code attribute. Empty in this database: NULL in every row, so a filter on it
-          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
-          the data is not held instead.'
+        description: 'Item code attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       volume:
         type: VARCHAR
         description: Volume attribute.
@@ -310,63 +300,52 @@ tables:
         description: Assign date attribute, stored as text.
       quality:
         type: VARCHAR
-        description: Quality attribute for the Initiative. Present in the view but NULL for every row
-          in this database, so no filter on it can return results.
+        description: 'Quality attribute for the Initiative. Empty in this database: NULL in every row,
+          so it cannot answer a question.'
       buyer:
         type: VARCHAR
-        description: 'Buyer attribute. Empty in this database: NULL in every row, so a filter on it returns
-          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
-          is not held instead.'
+        description: 'Buyer attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       mcode_won_number:
         type: VARCHAR
-        description: 'MCode/WON number attribute. Empty in this database: NULL in every row, so a filter
-          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'MCode/WON number attribute. Empty in this database: NULL in every row, so it cannot
+          answer a question.'
       ex_mill_date:
         type: VARCHAR
         description: 'Ex-mill date attribute, stored as text. Empty in this database: NULL in every row,
-          so a filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
-          a question; say the data is not held instead.'
+          so it cannot answer a question.'
       garment_desc:
         type: VARCHAR
-        description: 'Garment description attribute. Empty in this database: NULL in every row, so a filter
-          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Garment description attribute. Empty in this database: NULL in every row, so it
+          cannot answer a question.'
       matching_instruction:
         type: VARCHAR
-        description: 'Matching instruction attribute. Empty in this database: NULL in every row, so a
-          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
-          a question; say the data is not held instead.'
+        description: 'Matching instruction attribute. Empty in this database: NULL in every row, so it
+          cannot answer a question.'
       fabric_description:
         type: VARCHAR
-        description: 'Fabric description attribute. Empty in this database: NULL in every row, so a filter
-          on it returns nothing and an aggregate over it returns NULL. Do not use it to answer a question;
-          say the data is not held instead.'
+        description: 'Fabric description attribute. Empty in this database: NULL in every row, so it cannot
+          answer a question.'
       dye_part:
         type: VARCHAR
-        description: 'Dye part attribute. Empty in this database: NULL in every row, so a filter on it
-          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
-          the data is not held instead.'
+        description: 'Dye part attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       shade:
         type: VARCHAR
-        description: 'Shade attribute. Empty in this database: NULL in every row, so a filter on it returns
-          nothing and an aggregate over it returns NULL. Do not use it to answer a question; say the data
-          is not held instead.'
+        description: 'Shade attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       internal_or_confirmed:
         type: VARCHAR
-        description: 'Internal-or-confirmed attribute. Empty in this database: NULL in every row, so a
-          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
-          a question; say the data is not held instead.'
+        description: 'Internal-or-confirmed attribute. Empty in this database: NULL in every row, so it
+          cannot answer a question.'
       division:
         type: VARCHAR
-        description: 'Division attribute. Empty in this database: NULL in every row, so a filter on it
-          returns nothing and an aggregate over it returns NULL. Do not use it to answer a question; say
-          the data is not held instead.'
+        description: 'Division attribute. Empty in this database: NULL in every row, so it cannot answer
+          a question.'
       style_or_garment_code:
         type: VARCHAR
-        description: 'Style or garment code attribute. Empty in this database: NULL in every row, so a
-          filter on it returns nothing and an aggregate over it returns NULL. Do not use it to answer
-          a question; say the data is not held instead.'
+        description: 'Style or garment code attribute. Empty in this database: NULL in every row, so it
+          cannot answer a question.'
   tms_task_flat:
     description: Flat TMS task table containing task identity, assignment, status, dates, SLA/buffer,
       workflow/process context, Initiative context, and task-related business fields.
@@ -421,7 +400,9 @@ tables:
         description: Unique identifier of the user assigned to the task.
       assigned_user_name:
         type: VARCHAR
-        description: Name of the user assigned to the task.
+        description: 'Name of the user assigned to the task. The literal text ''NA'' is a stored value
+          meaning nobody is assigned to the task -- it is not a null and not missing data. This column
+          is never null, so IS NULL matches nothing; test assigned_user_name = ''NA'' instead.'
       assigned_role:
         type: VARCHAR
         description: Role to which the task is assigned.
@@ -524,7 +505,9 @@ tables:
         - Short Closed
       initiative_type:
         type: VARCHAR
-        description: Type of the associated Initiative.
+        description: Type of the associated Initiative, copied onto the task row so TASKS can be filtered
+          by the type of the Initiative they belong to. A question about the items or Initiatives themselves
+          -- how many there are, their status -- is about tms_initiative_flat, not this table.
         values:
         - AR_NPD_Shirting
         - AR_NPD_Suiting
@@ -571,10 +554,8 @@ tables:
         type: BIGINT
         description: Number of departments mapped to the user.
   tms_user_department_flat:
-    description: 'Flat mapping of users to departments and sub-departments. Use this, not tms_user_flat,
-      when a question needs a user''s department. Absent from v2.0.
-
-      '
+    description: Flat mapping of users to departments and sub-departments. Use this, not tms_user_flat,
+      when a question needs a user's department.
     columns:
       user_id:
         type: BIGINT
@@ -617,7 +598,6 @@ tables:
       initiative_id:
         type: INTEGER
         description: The Initiative this attachment belongs to. Joins to tms_initiative_flat.initiative_id.
-          48 of the 307 Initiatives have an attachment.
       task_id:
         type: INTEGER
         description: The task this attachment belongs to. Joins to tms_task_flat.task_id. Unique in this
@@ -738,9 +718,9 @@ tables:
     columns:
       issue_id:
         type: INTEGER
-        description: The issue's own identifier, and the only thing that tells one issue from another
-          here -- issues 1 to 4 all carry the title 'test isue' on task 278. Project it whenever a person
-          is being shown individual issues rather than a count.
+        description: The issue's own identifier, and the only thing that reliably tells one issue from
+          another here, because titles repeat. Project it whenever a person is being shown individual
+          issues rather than a count.
       task_id:
         type: INTEGER
         description: The task the issue was raised against. Joins to tms_task_flat.task_id. The 25 issues
@@ -819,11 +799,11 @@ tables:
         description: When the issue was last updated.
       issue_resolved_at:
         type: TIMESTAMP
-        description: When the issue was resolved. NULL for 21 of the 25 issues, so an average over it
-          covers only the four that were resolved.
+        description: When the issue was resolved. NULL unless it was resolved, so an average over it covers
+          only the resolved ones.
       issue_closed_at:
         type: TIMESTAMP
-        description: When the issue was closed. NULL for 22 of the 25 issues.
+        description: When the issue was closed. NULL while the issue is still open.
       comment_count:
         type: BIGINT
         description: 'Number of comments on this one issue, pre-aggregated. To total the comments across
@@ -842,7 +822,7 @@ tables:
         - test comment
       last_comment_at:
         type: TIMESTAMP
-        description: When the most recent comment was posted. NULL for the 18 issues with no comments.
+        description: When the most recent comment was posted. NULL for issues with no comments.
 relationships:
 - name: task_initiative
   from: tms_task_flat.initiative_id
@@ -870,6 +850,11 @@ relationships:
   join_type: MANY_TO_ONE
   description: An issue is raised against a task. Join through here to reach the Initiative, which the
     issue view does not carry.
+ambiguities:
+- subject: initiative synonyms
+  note: Initiative, Order, BO, and Business Object all refer to tms_initiative_flat.
+- subject: task assignment
+  note: Use assigned_user_id to check who is assigned to a task.
 terminology:
   initiative: Also known as Business Object, Order, or BO. Represents a workflow process.
   delayed task: A task whose elapsed duration exceeds its SLA buffer.
@@ -877,8 +862,3 @@ terminology:
   attachment: A file uploaded against an Initiative or one of its tasks. Only active attachments are held.
   issue: A problem raised against a task. Issues have their own status vocabulary and may be 'resolved',
     which tasks never are.
-ambiguities:
-- subject: initiative synonyms
-  note: Initiative, Order, BO, and Business Object all refer to tms_initiative_flat.
-- subject: task assignment
-  note: Use assigned_user_id to check who is assigned to a task.
