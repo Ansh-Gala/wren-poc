@@ -305,3 +305,43 @@ def test_suggestion_ids_are_unique_within_a_follow_up():
     followup = clarify_entity("Show the AR_YD items", load_gazetteer())
     ids = [s.id for s in followup.suggestions]
     assert len(ids) == len(set(ids)), f"duplicate suggestion id in {ids}"
+
+
+def test_the_column_can_be_named_in_its_own_key_instead_of_the_question():
+    """A question written for a person still gets the real values as chips.
+
+    The scan of the prose could only find a column the question named out
+    loud, so offering chips and writing a clean question were in conflict.
+    `about` carries the column separately, and is never shown.
+    """
+    from pipeline.followup import clarification_followup
+
+    followup = clarification_followup(
+        "Was that on time, or running late?",
+        about="task_sla_status",
+    )
+
+    assert followup.reason == "unknown_value"
+    assert {s.action.value for s in followup.suggestions} == {"Delayed", "On Time"}
+
+
+def test_the_question_is_still_scanned_when_no_column_is_named():
+    """Replies that predate the key, and replies that omit it, still work."""
+    from pipeline.followup import clarification_followup
+
+    followup = clarification_followup(
+        "There is no 'Breached' value. task_sla_status only takes two values."
+    )
+
+    assert followup.reason == "unknown_value"
+
+
+def test_a_column_that_is_not_a_column_offers_nothing_rather_than_guessing():
+    from pipeline.followup import clarification_followup
+
+    followup = clarification_followup(
+        "Which one did you mean?", about="not_a_real_column"
+    )
+
+    assert followup.reason == "ambiguous_request"
+    assert followup.suggestions == []

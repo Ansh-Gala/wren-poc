@@ -226,10 +226,26 @@ def test_a_nominated_group_and_its_aggregates_come_back_as_positions():
 
     columns = ["initiative_type", "open_task_count", "total_task_count",
                "business_unit"]
-    out = grouping(columns, ["tms_initiative_flat"])
+    out = grouping(columns, ["tms_initiative_flat"], True)
     assert out["row_groups"] == [0]
     assert out["value_columns"] == [{"index": 1, "aggFunc": "sum"},
                                     {"index": 2, "aggFunc": "sum"}]
+
+
+def test_a_table_nomination_alone_no_longer_groups_anything():
+    """The model decides whether THIS answer reads better grouped.
+
+    The file says which columns may head a group; it cannot say whether the
+    question wanted one, and on its own it fired on every answer off a
+    nominated table -- which is how answers nobody asked to have grouped came
+    back grouped anyway.
+    """
+    from pipeline.column_order import grouping
+
+    columns = ["initiative_type", "open_task_count"]
+    assert grouping(columns, ["tms_initiative_flat"])["row_groups"] == []
+    assert grouping(columns, ["tms_initiative_flat"], False)["row_groups"] == []
+    assert grouping(columns, ["tms_initiative_flat"], True)["row_groups"] == [0]
 
 
 def test_pivot_is_not_nominated_anywhere_yet():
@@ -242,14 +258,14 @@ def test_pivot_is_not_nominated_anywhere_yet():
 
     for table in ("tms_initiative_flat", "tms_task_flat"):
         assert grouping(["initiative_type", "task_department"],
-                        [table])["pivot_columns"] == []
+                        [table], True)["pivot_columns"] == []
 
 
 def test_a_table_that_nominates_nothing_is_never_grouped():
     """The default. Grouping changes what a row means, so it is opt-in."""
     from pipeline.column_order import grouping
 
-    out = grouping(["user_id", "user_name"], ["tms_user_flat"])
+    out = grouping(["user_id", "user_name"], ["tms_user_flat"], True)
     assert out == {"row_groups": [], "pivot_columns": [], "value_columns": []}
 
 
@@ -258,7 +274,7 @@ def test_a_nomination_the_result_did_not_project_is_simply_absent():
     from pipeline.column_order import grouping
 
     out = grouping(["initiative_id", "initiative_status"],
-                   ["tms_initiative_flat"])
+                   ["tms_initiative_flat"], True)
     assert out["row_groups"] == []
     assert out["value_columns"] == []
 
@@ -274,7 +290,8 @@ def test_an_unknown_aggfunc_is_dropped_rather_than_passed_through():
     original = co._spec
     co._spec = lambda tables: spec
     try:
-        out = co.grouping(["open_task_count", "total_task_count"], ["anything"])
+        out = co.grouping(["open_task_count", "total_task_count"], ["anything"],
+                          True)
     finally:
         co._spec = original
 
@@ -285,7 +302,7 @@ def test_an_unknown_aggfunc_is_dropped_rather_than_passed_through():
 def test_no_columns_is_not_an_error_for_grouping_either():
     from pipeline.column_order import grouping
 
-    assert grouping(None, ["tms_task_flat"]) == {
+    assert grouping(None, ["tms_task_flat"], True) == {
         "row_groups": [], "pivot_columns": [], "value_columns": []}
 
 

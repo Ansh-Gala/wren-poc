@@ -99,7 +99,7 @@ def with_column_labels(result):
     return {**result, "column_labels": column_labels(result.get("columns"))}
 
 
-def with_presentation(result, tables):
+def with_presentation(result, tables, grouped=False):
     """A result dict with display order and hidden columns added.
 
     Additive in the same way as with_column_labels, and for the same reason:
@@ -115,4 +115,4 @@ def with_presentation(result, tables):
     shape = presentation(result.get("columns"), tables)
     return {**result, "column_order": shape["order"],
             "hidden_columns": shape["hidden"],
-            "grouping": grouping(result.get("columns"), tables)}
+            "grouping": grouping(result.get("columns"), tables, grouped)}
