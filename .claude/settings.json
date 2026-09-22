@@ -3,7 +3,15 @@
     "allow": [
       "Bash(git switch *)",
       "Bash(php tests/outcome/check.php)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Read(//c/Users/ansh.gala/Pictures/Screenshots/**)",
+      "Bash(xargs ls -la)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(ls \"/c/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail\" 2>/dev/null | head -40; echo \"=== search for sql-chat in frontend ===\"; grep -rl \"sql-chat\" \"/c/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail\" --include=*.js --include=*.jsx --include=*.ts --include=*.tsx --exclude-dir=node_modules 2>/dev/null | head -40)",
+      "Read(//c/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail/**)",
+      "Bash(cd \"c:/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail/src\" && grep -rn \"session_id\\\\|sessionId\" --include=*.jsx --include=*.js . | grep -iv \"react-scripts\" | head -30)",
+      "Read(//c/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail/src/**)",
+      "Bash(cd \"/c/xampp/htdocs/WCMS%20-%20Frontend%20-%20Arvind%20Retail\" && find src -iname \"*SqlChat*\" -o -iname \"*Chatbot*\" -o -iname \"*chatbot*\" | grep -v node_modules | sort)"
     ]
   }
 }

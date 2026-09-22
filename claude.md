@@ -64,6 +64,11 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+**Strict Note**
+Use the simplest possible language in every response.
+Prefer short, clear, and easy-to-understand sentences.
+Avoid unnecessary technical terms, jargon, and complex wording.
+Explain ideas naturally, as if speaking to a person directly.
 
 **Updates**
 on an interval of 120 seconds, you have to update me about what you are doing , 
