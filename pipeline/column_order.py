@@ -59,24 +59,38 @@ def _spec(tables: list[str] | None) -> dict:
 _AGG_FUNCS = frozenset({"sum", "first", "last", "min", "max", "count", "avg"})
 
 
-def grouping(columns: list[str] | None, tables: list[str] | None) -> dict:
+EMPTY_GROUPING = {"row_groups": [], "pivot_columns": [], "value_columns": []}
+
+
+def grouping(columns: list[str] | None, tables: list[str] | None,
+             wanted: bool = False) -> dict:
     """Which columns to group by, and which to aggregate, as positions.
 
     Positions for the same reason as `order`: a result may project one name
     twice and the grid keys its rows by index.
 
-    Empty lists when the table nominates nothing, which is the normal case.
-    Grouping changes what a row means -- a page of groups is not a page of
-    records -- so it is never turned on because a column happened to be
-    present, only because this file named it.
+    Two conditions, and both have to hold. `wanted` is the model's answer to
+    whether THIS answer reads better grouped; the file below says which
+    columns may head a group and which are totals. The file alone was not
+    enough: it fires on every answer off a nominated table, which is how an
+    answer nobody asked to have grouped came back grouped anyway. The model
+    alone is not enough either -- it would have to name columns, and naming
+    columns is the thing this module exists to keep it away from.
+
+    Empty lists when either says no, which is the normal case. Grouping
+    changes what a row means -- a page of groups is not a page of records --
+    so it is never turned on because a column happened to be present.
 
     `pivot_columns` is read but stays empty until a table nominates one:
     pivot is the half that breaks the layout, and the frontend suppresses it
     while nothing is nominated.
     """
+    if not wanted:
+        return dict(EMPTY_GROUPING)
+
     names = list(columns or [])
     if not names:
-        return {"row_groups": [], "pivot_columns": [], "value_columns": []}
+        return dict(EMPTY_GROUPING)
 
     spec = _spec(tables)
 

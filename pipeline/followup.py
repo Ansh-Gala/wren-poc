@@ -24,6 +24,7 @@ the UI never has to parse "Show overdue ones" to work out what it does.
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -32,6 +33,7 @@ import yaml
 
 from pipeline.column_order import hidden_names
 from pipeline.labels import column_phrase
+from pipeline.redact import names_a_database_object
 
 # What a suggestion can ask the system to do. Each maps onto a mutation of
 # ConversationState, and from there back through the normal pipeline -- so
@@ -76,10 +78,24 @@ class Action:
 class Suggestion:
     id: str
     label: str
-    action: Action
+    # None for a reading or a next question, which mutate no state: choosing
+    # one rewrites the question rather than the filters.
+    action: Action | None = None
+    # A handle, present only on the chips the model wrote. A label is not a
+    # handle -- two readings can read alike, and a chip left on screen from
+    # three turns ago sends a label that still matches something -- so the ref
+    # says which offer it came from and a stale one resolves against nothing.
+    ref: str | None = None
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "label": self.label, "action": self.action.to_dict()}
+        out = {
+            "id": self.id,
+            "label": self.label,
+            "action": self.action.to_dict() if self.action else {},
+        }
+        if self.ref is not None:
+            out["ref"] = self.ref
+        return out
 
 
 @dataclass(frozen=True)
@@ -431,11 +447,24 @@ def explore(state, row_count: int | None,
 
     if len(suggestions) < 2:
         return None
+
+    # Four chips, and the escape hatch is built last, so it is the first thing
+    # the cap drops -- while being the one suggestion the reader cannot
+    # reconstruct for themselves. Every other chip here narrows an answer they
+    # can already see; this is the only way back out of a filter the system
+    # added and never mentioned. It is kept at the cost of the chip in front of
+    # it, whatever that happens to be.
+    chosen = suggestions[:4]
+    escape = next(
+        (s for s in suggestions if s.action.type == "remove_filter"), None)
+    if escape is not None and escape not in chosen:
+        chosen = chosen[:3] + [escape]
+
     return FollowUp(
         type="exploration",
         reason="useful_next_actions",
         question="What would you like to explore next?",
-        suggestions=suggestions[:4],
+        suggestions=chosen,
     )
 
 
@@ -518,7 +547,13 @@ def _enum_lookup() -> tuple[tuple[str, tuple[str, ...]], ...]:
     return tuple(sorted(found.items(), key=lambda kv: -len(kv[0])))
 
 
-def clarification_followup(text: str) -> FollowUp:
+def _interpretation_token() -> str:
+    """A nonce identifying one clarification's set of chips."""
+    return secrets.token_hex(6)
+
+
+def clarification_followup(text: str, model_options: list[str] | None = None,
+                           about: str | None = None) -> FollowUp:
     """Turn the model's free-text clarification into the structured contract.
 
     The division of labour is deliberate. The model is good at noticing that a
@@ -529,9 +564,52 @@ def clarification_followup(text: str) -> FollowUp:
 
     The prose is kept as the question because it explains the specific problem
     better than any template could.
+
+    One exception, and it is narrow. When the ambiguity is about what the
+    question MEANS rather than which value it names, the schema has nothing to
+    offer: "performing poorly" could be overdue tasks, delayed tasks, open
+    backlog or initiatives at risk, and no column enumerates those readings.
+    Only the model can produce them, and it already does -- it numbers them in
+    the prose. Discarding them and offering the values of whichever column the
+    prose happened to mention is how a five-way question came back as "No /
+    Yes". So model-supplied readings are taken when present.
     """
+    # The readings are prose the model wrote, so they can name a table exactly
+    # as a clarification can. Asked about a table that does not exist, it
+    # helpfully offered the two that do -- as chips, which the boundary does
+    # not scrub because a chip is normally a value rather than a sentence.
+    #
+    # Filtered here rather than at the boundary because only here is it known
+    # where a chip came from. The enum and gazetteer chips below are built
+    # from real data by this function, and must not be filtered: a genuine
+    # initiative type like AR_YD_Suiting looks exactly like an identifier and
+    # is exactly what the user needs offered.
+    readings = [o for o in (model_options or [])
+                if not names_a_database_object(o)]
+
+    # Same cutoff as the enum path below, for the same reason.
+    if readings and len(readings) <= 8:
+        token = _interpretation_token()
+        return FollowUp(
+            type="clarification",
+            reason="ambiguous_interpretation",
+            question=" ".join(text.split()),
+            suggestions=[
+                Suggestion(id=f"interpretation_{i + 1}", label=option,
+                           action=None, ref=f"{token}.{i + 1}")
+                for i, option in enumerate(readings)
+            ],
+        )
+
+    # `about` is the model saying which column the doubt is about, in a key of
+    # its own. The scan of the question is kept behind it: a reply that omits
+    # the key, and every reply written before the key existed, still finds its
+    # column the old way. What changes is that a clean question no longer has
+    # to go without chips -- which it did, because the scan could only match a
+    # question that named the column out loud.
+    named = (about or "").strip()
     for column, values in _enum_lookup():
-        if column not in text:
+        if column != named and column not in text:
             continue
         # Too many options stop being a choice and become a list to read.
         if len(values) > 8:
@@ -565,8 +643,40 @@ NO_FOLLOWUP = FollowUp(type="none", reason="answer_complete", question="",
                        suggestions=[], allow_free_text=True)
 
 
+def next_questions(state, row_count: int | None,
+                   model_next: list[str] | None = None) -> FollowUp | None:
+    """The model's follow-up questions, as chips.
+
+    Same gates the registry path applies, for the same reasons: an empty result
+    has nothing to explore, and one suggestion is not a choice.
+
+    Each carries no action. Choosing one sends its text as an ordinary
+    question, so a suggestion that turns out to name something absent is caught
+    by the clarification path exactly as a typed question would be -- there is
+    nothing here that can put a made-up value into a query.
+    """
+    if not model_next or len(model_next) < 2:
+        return None
+    if row_count is not None and row_count <= 0:
+        return None
+    token = _interpretation_token()
+    return FollowUp(
+        type="exploration",
+        reason="useful_next_questions",
+        question="What would you like to know next?",
+        suggestions=[
+            Suggestion(id=f"next_{i + 1}", label=question, action=None,
+                       ref=f"{token}.{i + 1}")
+            for i, question in enumerate(list(model_next)[:4])
+        ],
+    )
+
+
 def decide(state, row_count: int | None, clarification: str | None,
-           result: dict | None = None) -> FollowUp:
+           result: dict | None = None,
+           model_options: list[str] | None = None,
+           model_next: list[str] | None = None,
+           clarify_about: str | None = None) -> FollowUp:
     """What to say once the turn is over.
 
     Ordered by how much the user needs it. An unanswered question needs a
@@ -575,7 +685,19 @@ def decide(state, row_count: int | None, clarification: str | None,
     how a helpful feature becomes noise.
     """
     if clarification is not None:
-        return clarification_followup(clarification)
+        return clarification_followup(clarification, model_options,
+                                      clarify_about)
+    # The model's own suggestions first, because only they can be about the
+    # question. explore() reads the business-rule registry, which knows what
+    # the schema affords and nothing about what was asked -- so after "which
+    # departments are performing poorly" it offers "Just count them".
+    #
+    # Kept as the fallback rather than replaced: a reply that carries no
+    # suggestions, and every reply written before this field existed, still
+    # gets the registry's.
+    suggested = next_questions(state, row_count, model_next)
+    if suggested is not None:
+        return suggested
     return explore(state, row_count, result) or NO_FOLLOWUP
 
 
@@ -612,30 +734,102 @@ def resolve_clarification(
     # An id is a machine token and is matched exactly. Lowercasing it would
     # reintroduce the collision between AR_YD_Shirting and AR_YD_SHIRTING that
     # the id was made case-preserving to avoid.
-    by_id = [s.action.value for s in pending.suggestions if s.id == reply]
+    by_id = [_chosen_value(s) for s in pending.suggestions if s.id == reply]
     if len(by_id) == 1:
         chosen = by_id[0]
     else:
         # A person types the value, in whatever case they please -- unless
         # that is itself ambiguous, in which case the exact spelling decides.
         candidates = [
-            s.action.value for s in pending.suggestions
-            if s.action.value
-            and reply.lower() in (s.action.value.lower(), s.label.lower())
+            _chosen_value(s) for s in pending.suggestions
+            if _chosen_value(s)
+            and reply.lower() in (_chosen_value(s).lower(), s.label.lower())
         ]
         if len(candidates) > 1:
             candidates = [v for v in candidates if v == reply]
         if len(candidates) != 1:
+            # "4", when the model numbered four readings and the user picked
+            # one. Before the substring pass, so a numeric value cannot be
+            # resolved by the looser rule.
+            ordinal = _ordinal_choice(reply, pending)
+            if ordinal is not None:
+                return _resume(original_question, ordinal)
+        if len(candidates) != 1:
             # "the suiting one" -- named, but not on its own.
-            candidates = [s.action.value for s in pending.suggestions
-                          if s.action.value
-                          and s.action.value.lower() in reply.lower()]
+            candidates = [_chosen_value(s) for s in pending.suggestions
+                          if _chosen_value(s)
+                          and _chosen_value(s).lower() in reply.lower()]
         if len(candidates) != 1:
             return None
         chosen = candidates[0]
 
-    # Put the choice where the truncated name was, so the resumed question is
-    # the one the user meant to ask in the first place.
+    return _resume(original_question, chosen)
+
+
+def _chosen_value(suggestion: Suggestion) -> str | None:
+    """What a suggestion resolves to when it is chosen.
+
+    An action's value where there is one, and the label otherwise. A reading
+    mutates no state, so it carries no action -- without the fallback every
+    match pass would skip it and typing a reading out in full would fail to
+    resolve just as surely as typing its number.
+    """
+    if suggestion.action is not None and suggestion.action.value:
+        return suggestion.action.value
+    return suggestion.label or None
+
+
+def _ordinal_index(reply: str) -> int | None:
+    """A reply read as a position in a list, 1-based, or None."""
+    reply = (reply or "").strip()
+    found = re.match(
+        r"^(?:the\s+|option\s*|choice\s*|number\s*|no\.?\s*|#\s*)*(\d{1,2})"
+        r"(?:st|nd|rd|th)?\s*[.)]?$",
+        reply, re.IGNORECASE)
+    if found:
+        return int(found.group(1))
+    words = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+             "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
+    found = re.match(r"^(?:the\s+)?([a-z]+)(?:\s+one)?$", reply, re.IGNORECASE)
+    if found:
+        return words.get(found.group(1).lower())
+    return None
+
+
+def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
+    """The reading a positional reply picked, if it picked one.
+
+    Only ever offered against readings the model itself numbered in prose. Two
+    reasons, and both are load-bearing.
+
+    Gazetteer candidates are not positionally answerable. The gazetteer is not
+    deduplicated, so "Show the AR_YD items" offers five candidates of which two
+    pairs are the same string -- asking someone to distinguish option 2 from
+    option 3 when both read AR_YD_Shirting is not a question with an answer.
+
+    And a bare number means nothing on its own. Asked to choose between listing
+    and grouping, a user once replied "3" and the turn came back as LIMIT 3. A
+    number is a choice only where a numbered list was offered, which is
+    precisely what this gate tests.
+    """
+    if pending.reason != "ambiguous_interpretation":
+        return None
+    index = _ordinal_index(reply)
+    if index is None or index < 1 or index > len(pending.suggestions):
+        # Out of range is not a near miss. Nine, against four readings, is the
+        # user talking about something else.
+        return None
+    return _chosen_value(pending.suggestions[index - 1])
+
+
+def _resume(original_question: str, chosen: str) -> str:
+    """The original question with the choice written into it.
+
+    Substituting where the truncated name was is what makes the result read
+    like something a person would have typed. When nothing in the question was
+    a partial form of the choice -- which is always so for a reading, since a
+    reading is a sentence rather than a name -- the choice is appended instead.
+    """
     for token in sorted(_CANDIDATE_TOKEN.findall(original_question),
                         key=len, reverse=True):
         if token.lower() in _NOT_AN_ENTITY or token == chosen:
@@ -643,3 +837,21 @@ def resolve_clarification(
         if _is_partial_name(token, chosen):
             return original_question.replace(token, chosen)
     return f"{original_question} ({chosen})"
+
+
+def label_for_ref(pending: FollowUp | None, ref: str) -> str | None:
+    """The reading a chip was offered for, given the ref it carries.
+
+    Matching against the clarification currently outstanding is what ties a
+    click to the question that prompted it: a chip still on screen from three
+    turns further up carries a nonce nothing is waiting on any more, so it
+    matches nothing and its label is read as ordinary text instead of silently
+    answering a question that has already moved on.
+    """
+    ref = (ref or "").strip()
+    if not ref or pending is None or not pending.suggestions:
+        return None
+    for suggestion in pending.suggestions:
+        if suggestion.ref == ref:
+            return suggestion.label
+    return None
