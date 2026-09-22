@@ -42,6 +42,7 @@ spawn to take that slot.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -147,10 +148,14 @@ class ClaudePool:
     def __init__(self, command: str, system_prompt: str, model: str | None,
                  size: int = DEFAULT_POOL_SIZE,
                  warmup: float = DEFAULT_WARMUP_SECONDS,
-                 reply_timeout: float = DEFAULT_REPLY_TIMEOUT):
+                 reply_timeout: float = DEFAULT_REPLY_TIMEOUT,
+                 effort_level: str = "medium",
+                 config_dir: str = ""):
         self._command = command
         self._system_prompt = system_prompt
         self._model = model
+        self._effort_level = effort_level if effort_level in ("medium", "high") else "medium"
+        self._config_dir = config_dir
         self._size = max(0, size)
         self._warmup = warmup
         self._reply_timeout = reply_timeout
@@ -178,10 +183,27 @@ class ClaudePool:
             "--system-prompt-file", _system_prompt_file(self._system_prompt),
             "--tools", "",
             "--permission-mode", "bypassPermissions",
+            # The same isolation the one-shot path gets. A pooled process is
+            # still a Claude Code session: without these it attaches the
+            # operator's MCP servers, lists their skills and fires their
+            # plugins' SessionStart hooks -- and it does so once per warm
+            # process, held for the life of the pool. See cli_provider's lean
+            # branch for what each one closes.
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--settings", json.dumps({"effortLevel": self._effort_level}),
         ]
         if self._model:
             cmd += ["--model", self._model]
         return cmd
+
+    def _environment(self) -> dict[str, str] | None:
+        """The child's environment, or None to inherit ours unchanged."""
+        if not self._config_dir:
+            return None
+        env = os.environ.copy()
+        env["CLAUDE_CONFIG_DIR"] = self._config_dir
+        return env
 
     def _spawn_one(self) -> None:
         """Boot one process and park it. Runs on a background thread."""
@@ -192,6 +214,7 @@ class ClaudePool:
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, encoding="utf-8",
                 errors="replace", bufsize=1,
+                env=self._environment(),
             )
             warm = _Warm(proc=proc, spawned_at=time.perf_counter())
         except OSError:

@@ -14,6 +14,7 @@ wrong decision is visible on the turn that made it rather than the turn after.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -22,11 +23,13 @@ from typing import Callable
 import yaml
 
 from pipeline.context import (
-    ConversationState, classify_turn, detect_entity, is_complete_request,
-    render_context, update_state,
+    ConversationState, _EXPLICIT_RESET, accept_recap, classify_turn,
+    detect_entity, remember_question,
+    is_complete_request, render_context, update_state,
 )
+from pipeline.identity import CallerIdentity, render_identity
 from pipeline.followup import (
-    FollowUp, clarify_entity, decide, resolve_clarification,
+    FollowUp, clarify_entity, decide, label_for_ref, resolve_clarification,
 )
 from pipeline.normalize import normalize
 from pipeline.evaluator import (
@@ -37,7 +40,11 @@ from pipeline.lean_suite import Conversation, SuiteTurn
 from pipeline.sql_semantics import compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
 from pipeline.safety import UnsafeSQLError, assert_read_only
-from claude.parser import parse_clarification, parse_sql
+from claude.parser import (
+    parse_clarification, parse_clarify_about, parse_explanation, parse_goal,
+    parse_group, parse_next, parse_recap,
+    parse_options, parse_sql,
+)
 from config.logging import get_logger
 from config.settings import Settings
 from database.connection import run_readonly
@@ -68,6 +75,21 @@ def load_gazetteer(path: Path | None = None) -> list[str]:
     for _, vals in (doc.get("entity") or {}).items():
         values.extend(vals or [])
     return values
+
+
+# Ways of saying "not like that". Matched against the question as typed, so
+# the check is over before the model is asked anything.
+_NO_GROUPING = re.compile(
+    r"\b(no|without|don'?t|do not|never|stop|avoid)\s+group(ing|ed|s)?\b"
+    r"|\bungroup(ed)?\b"
+    r"|\bnot\s+grouped\b",
+    re.IGNORECASE,
+)
+
+
+def says_no_grouping(question: str | None) -> bool:
+    """Whether the reader asked for this answer NOT to be collected."""
+    return bool(question) and bool(_NO_GROUPING.search(question))
 
 
 @dataclass
@@ -104,6 +126,22 @@ class TurnResult:
 
     expected_behavior: str = "sql"
     clarification: str | None = None
+    # The readings the model offered with a clarification, its plain account of
+    # what it understood, its restatement of the aim, and the follow-up
+    # questions it thinks are worth asking. All optional on the wire: a reply
+    # carrying none of them leaves these empty and the turn runs as before.
+    clarification_options: list[str] = field(default_factory=list)
+    # The column the clarification is about, when the model named one. Used to
+    # look up the values worth offering; never shown.
+    clarify_about: str | None = None
+    # The model's rewritten summary of the thread, before the ingest guard.
+    recap: str | None = None
+    explanation: str | None = None
+    restated_goal: str | None = None
+    next_questions: list[str] = field(default_factory=list)
+    # Whether the model asked for these rows to be collected under headings.
+    # False unless it said so: a plain list is the normal answer.
+    grouped: bool = False
     behavior_match: bool | None = None
     schema_grounded: bool = True
     hallucinated: list[str] = field(default_factory=list)
@@ -134,6 +172,7 @@ class TurnResult:
     # What the user typed, when this turn was an answer to a question the
     # system asked and was resolved back into the original wording.
     resumed_from: str | None = None
+    resumed_answering: str | None = None
 
     prompt_tokens: int = 0
     cache_read_tokens: int = 0
@@ -246,6 +285,24 @@ def _action_matches(followup: FollowUp, expected: dict | None) -> bool | None:
     return False
 
 
+def _unanswered_question(pending: FollowUp) -> str:
+    """A question the user has not answered yet, with what was offered.
+
+    Written flat rather than as a list, because render_context flattens
+    whitespace before it prints this -- so the numbering has to survive as
+    text, not as layout.
+    """
+    question = " ".join((pending.question or "").split())
+    numbered = [
+        f"({i + 1}) {' '.join(s.label.split())}"
+        for i, s in enumerate(pending.suggestions)
+        if (s.label or "").strip()
+    ]
+    if not numbered:
+        return question
+    return f"{question} -- the choices you offered, in this order: " + "; ".join(numbered) + "."
+
+
 def _attach_followup(
     r: TurnResult,
     turn: SuiteTurn,
@@ -259,7 +316,10 @@ def _attach_followup(
     # The executed result, so a breakdown is only offered where the rows can
     # support one. r already carries it -- set before this is reached on every
     # path -- so this needs no new argument.
-    followup = decide(state, row_count, r.clarification, r.actual_result)
+    followup = decide(state, row_count, r.clarification, r.actual_result,
+                      getattr(r, 'clarification_options', None) or [],
+                      getattr(r, 'next_questions', None) or [],
+                      getattr(r, 'clarify_about', None))
     r.followup_type = followup.type
     r.followup = followup.to_dict()
     # Set after update_state, which resets the block and would clear it.
@@ -288,6 +348,7 @@ def run_turn(
     session: Session,
     context_mode: str = "state",
     followup_mode: bool = True,
+    identity: CallerIdentity | None = None,
 ) -> TurnResult:
     started = time.perf_counter()
     r = TurnResult(
@@ -322,14 +383,26 @@ def run_turn(
     #     it can only ask what to do with it, so the thread deadlocks one turn
     #     after the clarification meant to unblock it.
     resumed = None
+    unresolved = None
     if followup_mode and state.pending_clarification is not None:
         pending, asked_about = state.pending_clarification, state.pending_question
         state.pending_clarification, state.pending_question = None, ""
         resumed = resolve_clarification(question, asked_about, pending)
         if resumed is not None:
             r.resumed_from = question
+            # Which question the reply answered. Kept because the reply on its
+            # own is unreadable after the fact -- a stored turn saying only
+            # that the user typed "4" records nothing about what they chose.
+            r.resumed_answering = pending.question
             question = resumed
             r.normalized_question = question
+        else:
+            # Held for step 1. Failing to match is not the same as the reply
+            # having nothing to do with the question: "the one about backlog"
+            # is an answer this cannot read, and sending it on alone is what
+            # makes the model say it has no idea what the user is talking
+            # about.
+            unresolved = pending
 
     # 1. Decide how this turn relates to the block, before asking anything.
     decision, entity = classify_turn(question, state, gazetteer)
@@ -344,6 +417,29 @@ def run_turn(
     if (followup_mode and resumed is None and state.awaiting_answer_to
             and not is_complete_request(question)):
         decision = "clarification_response"
+    # A reply this could not read still belongs to the question that prompted
+    # it. Carrying the question and its options into the context lets the model
+    # resolve what the matcher could not -- "the second one", "that one", a
+    # number against readings it wrote itself -- rather than receiving a bare
+    # token and truthfully reporting that it has no idea what the conversation
+    # is about.
+    #
+    # Held on awaiting_answer_to rather than by keeping pending_clarification
+    # alive, and that is the whole of why this cannot wedge: update_state has
+    # no branch for clarification_response, so a pending kept here would be
+    # cleared only by a reset, whereas awaiting_answer_to is nulled further
+    # down on every turn.
+    if (followup_mode and resumed is None and unresolved is not None
+            and not is_complete_request(question)
+            and not _EXPLICIT_RESET.match(question)):
+        state.awaiting_answer_to = _unanswered_question(unresolved)
+        decision = "clarification_response"
+
+    # An inferred switch keeps the recap; only the user saying so drops it.
+    # The distinction is the point: the classifier noticing a change of
+    # subject is not the same as being told the thread is over.
+    if _EXPLICIT_RESET.match(question):
+        state.forget_history()
 
     r.decision, r.resolved_entity = decision, entity
     if turn.expect_decision is not None:
@@ -363,7 +459,9 @@ def run_turn(
             # answering a question the system asked in prose: the state is
             # empty after a clarification, so without this the reply arrives
             # with no trace of what it is replying to.
-            context = render_context(state) if state.awaiting_answer_to else ""
+            # A switch no longer needs a different block. The filters that
+            # had to be dropped on a switch are not in the block any more.
+            context = render_context(state)
         else:
             if decision == "rebase":
                 state.active_filters = {
@@ -372,6 +470,13 @@ def run_turn(
                 }
                 state.active_entity = entity
             context = render_context(state)
+    # Who is asking rides at the top of the same block, on every turn --
+    # including the first, which has no conversation context at all. It is not
+    # conversation state: it does not accumulate, a switch does not drop it,
+    # and nothing the model says can change it.
+    # After the block is built, so a question is never in its own history.
+    remember_question(state, question)
+    context = render_identity(identity) + context
     r.context_chars = len(context)
     state.awaiting_answer_to = None
 
@@ -431,6 +536,17 @@ def run_turn(
 
     parsed = parse_sql(run.result_text)
     r.clarification = parse_clarification(run.result_text)
+    r.explanation = parse_explanation(run.result_text)
+    r.clarification_options = parse_options(run.result_text)
+    r.clarify_about = parse_clarify_about(run.result_text)
+    r.recap = parse_recap(run.result_text)
+    r.next_questions = parse_next(run.result_text)
+    r.restated_goal = parse_goal(run.result_text)
+    # The model is told never to group when asked not to, and mostly does not.
+    # "Must not be grouped" is not a thing to leave to mostly, so the words are
+    # checked here as well: a reader who says it should not have to say it
+    # twice.
+    r.grouped = parse_group(run.result_text) and not says_no_grouping(question)
 
     # A clarification is not a query, but parse_sql's looser fallbacks will
     # happily lift a fragment out of the prose -- "with SLA status 'Delayed'?"
@@ -472,6 +588,13 @@ def run_turn(
             r.sql_valid = True
         except UnsafeSQLError as exc:
             r.error = r.error or f"unsafe SQL: {exc}"
+            # "Please try rephrasing" is the wrong advice for someone asking
+            # what the tables are -- rephrasing cannot help, because the
+            # question is not about the work. 42703's safe text says the
+            # useful thing instead: ask about tasks, initiatives, users,
+            # departments or roles.
+            if "system catalogue" in str(exc) or "system function" in str(exc):
+                r.sqlstate = r.sqlstate or "42703"
         r.safety_ms = (time.perf_counter() - _t) * 1000
 
     if turn.expect_behavior == "zero_or_clarify":
@@ -530,7 +653,27 @@ def run_turn(
         r.expected_result = result_summary(expected)
 
     actual = None
-    if r.sql_valid and parsed.sql:
+    # Grounding is a gate, not a note.
+    #
+    # The check above already knew the query named something the described
+    # schema does not have, and its answer was used only to label the failure
+    # afterwards. So "show me the columns of that table" was answered out of
+    # information_schema, and the answer WAS the schema -- returned as rows,
+    # where no guard on the wording can reach it. The rows are the leak, so
+    # the only thing that stops it is not running the query.
+    #
+    # It also closes every other table in the database at once: the role holds
+    # SELECT on far more than the TMS views, and the schema file is now the
+    # boundary of what is answerable.
+    if r.sql_valid and parsed.sql and not r.schema_grounded:
+        r.error = r.error or (
+            "refused: the query names objects outside the described schema: "
+            + ", ".join(r.hallucinated or []))
+        # undefined_column. Its safe message already says the right thing:
+        # ask about tasks, initiatives, users, departments or roles.
+        r.sqlstate = r.sqlstate or "42703"
+        r.execution_success = False
+    elif r.sql_valid and parsed.sql:
         actual = run_readonly(settings, parsed.sql, settings.statement_timeout_ms)
         r.db_ms += actual.duration_ms
         r.actual_result = result_summary(actual)
@@ -634,6 +777,21 @@ def run_turn(
         entity,
         decision,
     )
+    # After update_state, which is what sets the goal from the question that
+    # opened the block. That default is right until a follow-up contradicts it
+    # -- "open tasks for Sales" then "forget the department" leaves a goal
+    # still naming Sales beside filters that no longer do. The model is the
+    # only thing that can see the aim has moved, so its restatement wins.
+    if followup_mode and r.restated_goal:
+        state.active_goal = " ".join(r.restated_goal.split())
+    # The recap is folded, not appended: the model is handed the previous one
+    # and returns the whole thing rewritten, so it cannot grow. A rejected
+    # recap leaves the previous one standing rather than blanking the thread.
+    if followup_mode:
+        accepted = accept_recap(r.recap)
+        if accepted is not None:
+            state.rolling_recap = accepted
+
     session.turns.append(Turn(index=turn.turn_index, question=question,
                               generated_sql=parsed.sql))
 
@@ -660,6 +818,12 @@ def run_suite(
 ) -> list[TurnResult]:
     if context_mode not in CONTEXT_MODES:
         raise ValueError(f"context_mode must be one of {CONTEXT_MODES}")
+    # A suite has no session to resolve a caller from, and "my tasks" now
+    # refuses rather than guessing -- correctly, but it would score every
+    # MY_TASK question as a failure. The suite says who it is running as
+    # instead, which is the same thing a request does, from a different source.
+    identity = CallerIdentity(settings.benchmark_user_id,
+                              settings.benchmark_user_name)
     gazetteer = load_gazetteer()
     log.info("gazetteer: %d entity value(s)", len(gazetteer))
 
@@ -671,7 +835,8 @@ def run_suite(
             r = run_turn(turn, state, gazetteer, settings,
                          mcp_config_path, privacy_mode, session,
                          context_mode=context_mode,
-                         followup_mode=followup_mode)
+                         followup_mode=followup_mode,
+                         identity=identity)
             results.append(r)
 
             if jsonl_path is not None:
