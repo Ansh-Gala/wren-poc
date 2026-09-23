@@ -27,15 +27,35 @@ metadata/column_hierarchy.yaml
 metadata/entity_gazetteer.yaml
 ```
 
-Rule: edit in **Python first**, then copy across with a plain file copy, then check:
+Rule: edit in **Python first**, then copy across with a plain file copy.
 
-```bash
-md5sum <python>/metadata/X.yaml <drupal>/metadata/X.yaml   # must match
+**The md5-of-the-file check no longer passes, and that is fine.** As of
+23 September 2026 three of the five differ — Python holds CRLF,
+Drupal holds LF:
+
+| file | Python | Drupal |
+|---|---|---|
+| `business_rules.yaml` | CRLF | LF |
+| `question_sql_pairs.yaml` | CRLF | LF |
+| `schema_description.yaml` | CRLF | LF |
+| `column_hierarchy.yaml` | CRLF | CRLF |
+| `entity_gazetteer.yaml` | CRLF | CRLF |
+
+The **content** is identical, which is what matters: both sides parse the YAML
+and build the prompt from the result, so the line endings never reach it.
+Parity holds and the built-prompt md5 matches on both sides.
+
+So do not chase a file md5 mismatch. **The check that means something is the
+prompt md5 printed by `tests/parity/check.php`**, which compares what the
+model is actually sent. Compare content, not bytes:
+
+```python
+import yaml
+yaml.safe_load(open(a).read()) == yaml.safe_load(open(b).read())   # this is the test
 ```
 
-**Line endings.** Both copies are currently **CRLF**. Do not "helpfully" convert
-to LF. A tool that rewrites the file with different endings breaks the check
-even though the words are identical.
+Still copy the file rather than retyping the change: a second hand-edit is how
+the two drift in ways parity *will* catch, loudly, at the worst moment.
 
 Good news: Python turns CRLF into LF when it compiles a `.py` file, so the line
 endings of `prompts.py` do **not** change the built prompt. Only the YAML files
@@ -48,13 +68,23 @@ and the PHP files matter.
 Every edit to a prompt or to those five YAML files changes the built system
 prompt, which is compared byte-for-byte.
 
+Run `generate_expected.py` **from the Python project root**, not from the
+module folder — it imports the Python project and puts its own directory on
+the path, not the working one.
+
 ```bash
 python <drupal-module>/tests/parity/generate_expected.py <tmpdir>
 php    <drupal-module>/tests/parity/check.php <tmpdir>      # want: PARITY HOLDS
 php    <drupal-module>/tests/context/check.php              # 88 cases
-php    <drupal-module>/tests/context/adversarial.php        # 108 cases
+php    <drupal-module>/tests/context/adversarial.php        # 113 cases
 php    <drupal-module>/tests/outcome/check.php              # 11 cases
+php    <drupal-module>/tests/provider/check.php             # 47 cases
 ```
+
+Counts as of 23 September 2026. The parity run also covers the streaming
+scanner — 8,333 partial replies, built by cutting the 1,392 real ones off
+before the key, inside the value, one byte short of the close, and at it.
+Whole replies agree trivially; the cuts are what tests it.
 
 If the prompt md5 differs between the two sides, **the prompt text differs** —
 usually because a change was made in `claude/prompts.py` but not in the matching
@@ -218,6 +248,35 @@ already do this.
 callers (`scripts/run_suite.php`, `bench_latency.py`, the test harnesses).
 Inserting a parameter in the middle breaks them silently.
 
+**A new optional parameter must be passed only when wanted.** Adding
+`on_delta=None` to every `provider.ask()` call broke 25 tests at once: a
+provider written before it existed, and every test double standing in for one,
+takes five arguments and rejects a sixth. Build the keyword argument
+conditionally (`**({"on_delta": …} if wanted else {})`) rather than always
+sending it.
+
+**A setting can be accepted, stored, and silently ignored.**
+`CLAUDE_EFFORT_LEVEL=low` could be written in `.env`, loaded into `Settings`
+and printed back by any diagnostic — and then two call sites, clamping to
+`("medium", "high")` independently, turned it into `medium` before the CLI saw
+it. The Drupal port had the same clamp in two more places. All four now share
+one list, asked of the CLI rather than assumed:
+
+```
+$ claude --effort bogus -p "hi"
+Valid values: low, medium, high, xhigh, max.
+```
+
+Keep `medium`. Measured on Sonnet, three reps: `low` 2.77s, `medium` 2.50s,
+`high` 4.37s. `low` and `medium` are the same thing; only `high` costs
+anything.
+
+**`dump_cli_call.php` builds its own argv.** It claims to print the exact call
+the chatbot makes, so every flag added to `ClaudeCliProvider` has to be added
+there too. It was missing `--include-partial-messages` and was quietly
+describing a call nobody made — while being used to prove the Python and
+Drupal prompts matched.
+
 **The standalone PHP harnesses have a hand-written class list.** Add any new
 `src/Service/*.php` class to the `foreach ([...])` require list in
 `tests/context/check.php`, `tests/context/adversarial.php` and
@@ -300,20 +359,116 @@ about the work.
 
 ## 12. Test failures that are NOT yours
 
-As of September 2026, **10 tests fail on a clean checkout**. Do not chase them:
+As of 23 September 2026, **27 tests fail on a clean checkout** — not the 10
+this section used to claim. Do not chase them:
 
-- `tests/test_metadata.py` — 6 failures. Still expects rule names like
-  `active_user` and `workflow_owner_join` that the Initiative rename removed.
-- `tests/test_ground_truth.py` — 3 failures. Expects single-letter categories;
-  the questions file uses descriptive names now.
-- `tests/test_context.py::test_a_bare_fragment_still_continues_the_block` — 1.
+| file | n | why |
+|---|---|---|
+| `tests/test_database.py` | 16 | Expects the old demo schema — `users`, `tasks`, `tasks_assigned_user_id_fkey`. Those tables are gone; the database holds the `tms_*` ones. |
+| `tests/test_metadata.py` | 6 | Still expects rule names like `active_user` and `workflow_owner_join` that the Initiative rename removed. |
+| `tests/test_ground_truth.py` | 3 | Expects single-letter categories; the questions file uses descriptive names now. |
+| `tests/test_runtime_turn.py` | 1 | Expects `SCHEMA_ERROR`, gets `TOOL_PIPELINE_ERROR`. |
+| `tests/test_context.py` | 1 | `test_a_bare_fragment_still_continues_the_block`. |
 
-Everything else should pass. If you are unsure whether a failure is yours,
-revert just your change and run that one test again.
+Every one of them is the **Initiative rename**, not a defect. They were written
+against a schema that no longer exists.
+
+**Check the count, not the list.** `27 failed, N passed` means you broke
+nothing. The way to be sure a failure is yours:
+
+```bash
+git stash -u && python -m pytest tests/ -q | tail -2 && git stash pop
+```
+
+If the count is the same before and after, it is not yours. This takes thirty
+seconds and has settled the question twice.
+
+**Frontend tests:** run them as `npx jest <path> --env=jsdom`. Invoked without
+it they fail with `document is not defined` — `react-scripts test` sets the
+environment and a direct `jest` call does not. **16 fail there too**, also
+pre-existing.
 
 ---
 
-## 13. Two design rules that are easy to break
+## 13. The question suites drift too, and nothing checks them
+
+The five metadata files are guarded by parity. **The question suites are not.**
+They live in both repos, nobody compares them, and on 23 September 2026 two of
+the three in Drupal were still asking about `tms_business_object_flat` — a
+table the Initiative rename deleted. 183 stale references in
+`lean_questions.yaml`, 304 in `expansion_questions.yaml`.
+
+The result: **the suite reported 2% accuracy for a system answering at 94%.**
+Every expected answer named a table that does not exist, so every correct
+answer was scored wrong. `new_views_questions.yaml`, the one file already in
+step, scored 100% throughout.
+
+A benchmark that says 2% for a working system is worse than no benchmark,
+because it hides the three failures that are real. Nobody had run the lean
+suite on Drupal for exactly this reason: the number looked absurd, so it was
+not trusted, so it was not run.
+
+**Check before believing a bad score:**
+
+```bash
+grep -c business_object <drupal-module>/tests/*.yaml    # want 0 everywhere
+```
+
+Fix by copying from Python, which is the spec, byte for byte.
+
+**Two more things about running the suites:**
+
+- **`run_suite.php` passes no caller identity.** `runTurn` is called without
+  one, so *"Show my tasks"* is answered with a clarifying question — correctly,
+  since nobody is signed in. Those turns fail in the harness and work in the
+  app, where `ChatRuntime` passes `$this->identity->current()`. Two of the
+  three remaining lean-suite failures are exactly this and neither is a bug.
+- **`--out` is relative to the working directory, not the module.** Run from
+  the module folder and the results land in `web/results/...`, not
+  `web/modules/custom/vf_sql_chatbot/results/...`. Pass an absolute path, or
+  go looking afterwards.
+- **`results/**/*.json` is gitignored in the Drupal module**, so a run you want
+  to keep needs `git add -f` or a note of the numbers somewhere else.
+
+**Reading the suite files:** conversations are nested under a `turns:` key, not
+flagged by a `conversation_id` column. Counting top-level `conversation_id`
+returns zero and makes a suite full of follow-ups look like it has none. The
+lean suite is 32 entries → 50 turns, of which 18 are follow-ups.
+
+---
+
+## 14. Streaming: the table arrives before the sentences
+
+`/api/sql-chat/ask/stream` sends two Server-Sent Events — `rows` when the
+query has run, `answer` when the model has finished writing. `/api/sql-chat/ask`
+is untouched and still returns one body.
+
+- **The switch is a checkbox** at `/admin/config/system/sql-chatbot-llm`.
+  Turned off, the stream endpoint still answers correctly; it just sends
+  nothing until the whole reply is in hand. Honoured in `StreamController`, not
+  in the page, so the frontend can never be left waiting for a `rows` event the
+  operator has switched off.
+- **`answer` always arrives and is the whole response.** A client may ignore
+  `rows` entirely. Keep it that way — the moment `answer` stops being complete,
+  this becomes a second contract to maintain.
+- **`rows` never arrives for a clarification**, which carries no SQL. Anything
+  waiting on it will wait forever.
+- **The early query applies the grounding check first.** Skipping it would
+  reopen §11's leak from behind `TurnRunner`'s back — the rows *are* the
+  schema. `tests/test_stream_early_sql.py` guards this.
+- **Buffer the SSE reader.** A network chunk can end between the two newlines
+  that separate events, inside a JSON string, or mid-character. Getting it
+  wrong still works locally, where the whole body arrives at once, and fails on
+  a slow connection. Both readers are tested at one byte per chunk.
+
+**Groq cannot run this system.** The free tier caps the org at 8,000 tokens per
+minute and one request is 10,548, so every call is rejected before a model sees
+it — not a throttle to wait out. Fitting would mean cutting 24% of the prompt,
+which `results/v3_*` already tried at 8–20% accuracy.
+
+---
+
+## 15. Two design rules that are easy to break
 
 **Never put raw user questions into the prompt as history.** It was tried and
 removed. When a user says *"forget the department"*, that counts as an ordinary
