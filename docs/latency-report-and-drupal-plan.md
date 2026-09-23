@@ -203,6 +203,113 @@ Real, and worth fixing independently of Drupal:
 
 ---
 
+# Part 1b — 23 September: where the seconds actually were, and sub-2s reached
+
+Part 1 named five levers in §1.6 and ranked them by guess. Four were measured
+on 23 September and the ranking was wrong. `scripts/probe_ttft.py` is the
+instrument; every figure below is in `results/2026-09-23/`.
+
+## 1b.1 The wait is not one thing, and the two models differ
+
+`llm_ms` is a single number and a single number cannot tell dead air apart
+from typing. Streaming the call takes four marks instead of one.
+
+**gpt-5.6-luna** — a reasoning model. Warm mean of five runs, one question:
+
+| `reasoning_effort` | first token | sql complete | last token | thinking tokens |
+|---|---|---|---|---|
+| default (medium) | 3.44s | 3.75s | 4.68s | 75 |
+| `none` | 1.54s | 1.93s | 2.90s | 0 |
+| **`low`** | **0.99s** | **1.28s** | **2.01s** | 9 |
+
+73–83% of the wait was before the first token, and it was the model thinking.
+Those tokens are billed and generated but never streamed, so every metric this
+project had was blind to them. `low` beats `none`, which nobody would have
+guessed. Generation itself runs at 120–270 tok/s — so **shortening the answer
+would have bought almost nothing here.**
+
+**Claude Sonnet via the CLI** — not a reasoning model, and the opposite shape.
+Three reps per level, same question:
+
+| `--settings effortLevel` | model time | output tokens |
+|---|---|---|
+| `low` | 2.77s | 213 |
+| `medium` | 2.50s | 219 |
+| `high` | 4.37s | 299 |
+
+`low` and `medium` are indistinguishable; only `high` costs anything. So
+§1.6's lever 3, "lower effort to low", is worth nothing on the shipped path —
+medium was already the fast end.
+
+What *does* bind Sonnet is output length, at ~88 tok/s. That is visible across
+every run in `results/`: 68 tokens → 2.30s, 83 → 2.43s, 90 → 2.34s, 200 →
+3.74s, 214 → 3.61s. §1.4 read this correctly.
+
+## 1b.2 The clamp that ate the setting
+
+`CLAUDE_EFFORT_LEVEL=low` could be set in `.env`, loaded into `Settings` and
+printed back by any diagnostic — and two call sites, clamping to
+`("medium", "high")` independently, turned it into `medium` before the CLI saw
+it. The Drupal port had the same clamp in two places. Fixed in both; the valid
+list is now asked of the CLI (`claude --effort bogus` prints it) and named
+once. The default is unchanged, and on the measurements above it should stay
+`medium`.
+
+This is a sixth entry for §1.7's defect list, and the only one of them fixed.
+
+## 1b.3 Groq cannot run this system on the free tier
+
+Not slow — impossible. The account is capped at 8,000 tokens per minute and
+one request is 10,548, so every call is rejected before a model sees it:
+
+    Request too large for model `openai/gpt-oss-120b` ... on tokens per
+    minute (TPM): Limit 8000, Requested 10548
+
+All three models that can hold the prompt fail the same way (`gpt-oss-120b`,
+`gpt-oss-20b` at 8,000; `qwen3.8-27b` at 7,000 ITPM). The rest of the
+catalogue is audio models and 512-token classifiers. Fitting would mean
+removing 24% of the prompt, and the only sections that large are the schema
+(56%) and the business rules (26%) — which is what `results/v3_*` did, at
+8–20% accuracy. A paid Dev Tier is the only route.
+
+## 1b.4 Sub-2s, reached — by not waiting for the parts nobody asked for
+
+§1.6 called streaming "the only lever that cannot cost accuracy" but said it
+"does not reduce latency". That was too modest. The reply is one JSON object
+and the contract puts `sql` first, so the query can run while the prose is
+still being written. Measured with `--include-partial-messages`:
+
+| question | first token | sql complete | last token | gap |
+|---|---|---|---|---|
+| open tasks for AR_YD_Suiting | 4.53s | 5.56s | 8.06s | 2.50s |
+| initiatives by status | 8.14s | 8.64s | 10.24s | 1.60s |
+| initiative type with most items | 3.94s | 4.73s | 6.69s | 1.96s |
+
+`POST /ask/stream` now sends `rows` then `answer`. End to end against the real
+model and database, four questions over two passes, warm pool:
+
+| | mean |
+|---|---|
+| **table on screen** | **1.44s** |
+| whole answer | 2.57s |
+| **turns under 2s** | **4/4** |
+
+Against §1.6's "No" and the 0/50 of 18 September. Nothing about the answer
+changed, so the accuracy of `after_meta` stands.
+
+`POST /ask` is untouched and returns exactly what it did. The early execution
+applies the grounding check first — run_turn refuses ungrounded SQL because
+the rows *are* the schema, and an early path without that check would reopen
+the disclosure from behind. `tests/test_stream_early_sql.py` holds that.
+
+## 1b.5 What this leaves for Drupal
+
+Part 2 is unchanged and more urgent, not less. Drupal spawns a fresh CLI per
+request and cannot pool, so ~4s of startup sits in front of any of this.
+Streaming there saves 2s of tail behind 4s of silence. Step 2 first.
+
+---
+
 # Part 2 — Bringing this to Drupal
 
 ## 2.1 The problem
