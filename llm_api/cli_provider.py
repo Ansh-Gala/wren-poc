@@ -19,6 +19,7 @@ import pathlib
 import shutil
 import subprocess
 import threading
+from collections.abc import Callable
 from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
 from config.settings import Settings, effort_level
@@ -302,6 +303,7 @@ class CLILocalProvider(LLMProvider):
         privacy_mode: str,
         settings: Settings,
         session: Session | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> ClaudeRun:
         # A warm process, when there is one. The lean path only: the MCP
         # branch passes --mcp-config and a different tool set, and warming
@@ -314,7 +316,7 @@ class CLILocalProvider(LLMProvider):
                     question, session,
                     context=session.context_block if session else None,
                     lean=True)
-                run = pool.ask(user_prompt)
+                run = pool.ask(user_prompt, on_delta)
                 if run is not None:
                     return run
                 # Fell through: no warm process, or one died mid-answer. The
@@ -390,5 +392,14 @@ class CLILocalProvider(LLMProvider):
         elif not run.result_text and not run.error:
             run.ok = False
             run.error = "claude produced no result event"
+
+        # The whole reply at once, because subprocess.run captured it that
+        # way. This path is the fallback for a pool miss and already costs a
+        # cold spawn; restructuring it around Popen to stream would add risk
+        # to the slow path for a saving it cannot deliver anyway. Delivering
+        # the text late rather than not at all keeps the caller's logic the
+        # same on both paths -- it still sees the SQL, just no sooner.
+        if on_delta is not None and run.result_text:
+            on_delta(run.result_text)
 
         return run

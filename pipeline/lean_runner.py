@@ -41,6 +41,8 @@ from pipeline.sql_semantics import compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
 from pipeline.safety import UnsafeSQLError, assert_read_only
 from claude.parser import (
+    partial_sql,
+    sql_value_end,
     parse_clarification, parse_clarify_about, parse_explanation, parse_goal,
     parse_group, parse_next, parse_recap,
     parse_options, parse_sql,
@@ -338,6 +340,104 @@ def _attach_followup(
     r.action_match = _action_matches(followup, turn.expect_action)
 
 
+# ---------------------------------------------------------- early execution --
+#
+# The reply is one JSON object and the contract puts `sql` first in it.
+# Measured with `claude --include-partial-messages` across three questions,
+# the SQL is complete a mean of 2.02 seconds before the last token -- the rest
+# of that time writes explanation, goal, recap and next. Running the query in
+# that gap rather than after it is worth about two seconds to whoever is
+# waiting for a table.
+#
+# The execution is published into a memo that run_turn's own call sites read,
+# rather than run_turn being restructured around it. run_turn is 857 lines and
+# every accuracy figure in results/ was produced by it; the alternative to a
+# memo was either rewriting that or running the user's query twice.
+
+
+def _execute(settings: Settings, sql: str, timeout_ms: int,
+             memo: dict | None = None) -> QueryResult:
+    """Run `sql`, or hand back the run that already happened.
+
+    The memo is per turn and keyed on the statement, so it can only ever
+    return the result of the identical query. It is consulted, never
+    populated, on this path: only the early execution puts anything in it, and
+    only after the same two gates run_turn applies.
+    """
+    if memo is not None and sql in memo:
+        return memo[sql]
+    return run_readonly(settings, sql, timeout_ms)
+
+
+def _execute_early(settings: Settings, text: str, memo: dict,
+                   on_sql: Callable[[dict], None]) -> None:
+    """Vet and run the SQL out of a reply that is still arriving.
+
+    Declining is always safe: nothing is memoised, and run_turn then runs the
+    query itself exactly as it does today. So this applies the two gates
+    rather than reproducing the decisions that follow from them.
+
+    Both gates are required, and grounding is the one that matters. run_turn
+    refuses to execute ungrounded SQL because the rows *are* the schema --
+    "show me the columns of that table" answered out of information_schema is
+    a disclosure no wording guard can reach. Executing here without that check
+    would reopen it behind run_turn's back.
+    """
+    sql = partial_sql(text)
+    if not sql:
+        return
+
+    from pipeline.sql_semantics import check_against_schema
+    if not check_against_schema(sql).grounded:
+        return
+    try:
+        assert_read_only(sql)
+    except UnsafeSQLError:
+        return
+
+    res = _execute(settings, sql, settings.statement_timeout_ms)
+    memo[sql] = res
+    on_sql({
+        "generated_sql": sql,
+        "sql_valid": True,
+        "schema_grounded": True,
+        "execution_success": res.ok,
+        "error": res.error,
+        "sqlstate": res.sqlstate,
+        "actual_result": result_summary(res),
+    })
+
+
+def _delta_watcher(settings: Settings, memo: dict,
+                   on_sql: Callable[[dict], None]) -> Callable[[str], None]:
+    """An on_delta that fires once, the moment the sql value closes.
+
+    A clarification carries no sql key, so the mark never arrives and this
+    never fires -- which is correct, and is why the caller must not wait for
+    it.
+    """
+    buf: list[str] = []
+    fired = False
+
+    def on_delta(piece: str) -> None:
+        nonlocal fired
+        buf.append(piece)
+        if fired:
+            return
+        text = "".join(buf)
+        if sql_value_end(text) is None:
+            return
+        fired = True
+        try:
+            _execute_early(settings, text, memo, on_sql)
+        except Exception:
+            # An answer matters more than the two seconds. Whatever went
+            # wrong here, run_turn is about to do the same work itself.
+            log.exception("early execution failed; falling back")
+
+    return on_delta
+
+
 def run_turn(
     turn: SuiteTurn,
     state: ConversationState,
@@ -349,8 +449,22 @@ def run_turn(
     context_mode: str = "state",
     followup_mode: bool = True,
     identity: CallerIdentity | None = None,
+    on_sql: Callable[[dict], None] | None = None,
 ) -> TurnResult:
+    """One turn, end to end.
+
+    ``on_sql`` is optional and changes nothing about the answer. When it is
+    set the reply is streamed, and the moment the sql value closes the query
+    is vetted, run and handed over -- about two seconds before the last token
+    on the measurements in docs/superpowers/specs/2026-09-23-stream-sql-early-design.md.
+    The turn then finishes exactly as it would have, reusing that execution
+    rather than repeating it. A reply that clarifies has no sql and never
+    calls it.
+    """
     started = time.perf_counter()
+    # Filled only by the early execution, read only by the two call sites
+    # below that run the generated SQL.
+    executed: dict = {}
     r = TurnResult(
         turn_id=turn.id, conversation_id=turn.conversation_id,
         turn_index=turn.turn_index, category=turn.category,
@@ -521,7 +635,13 @@ def run_turn(
 
     # 3. Ask.
     provider = get_provider(settings)
-    run = provider.ask(question, mcp_config_path, privacy_mode, settings, session)
+    # Passed only when a caller asked to be told early. Sending on_delta=None
+    # would still be sending it, and a provider written before streaming
+    # existed -- or a test double standing in for one -- takes five arguments
+    # and rejects a sixth.
+    streaming = {"on_delta": _delta_watcher(settings, executed, on_sql)} if on_sql else {}
+    run = provider.ask(question, mcp_config_path, privacy_mode, settings, session,
+                       **streaming)
     r.llm_ms = run.duration_ms
     r.llm_wall_ms = run.wall_ms or run.duration_ms
     r.tools_used = list(run.tools_used)
@@ -601,7 +721,7 @@ def run_turn(
         if r.clarification is not None and parsed.sql is None:
             r.behavior_match = r.result_match = r.semantic_match = True
         elif parsed.sql:
-            res = run_readonly(settings, parsed.sql, settings.statement_timeout_ms)
+            res = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
             r.actual_result = result_summary(res)
             r.execution_success = res.ok
             empty = res.ok and (
@@ -674,7 +794,7 @@ def run_turn(
         r.sqlstate = r.sqlstate or "42703"
         r.execution_success = False
     elif r.sql_valid and parsed.sql:
-        actual = run_readonly(settings, parsed.sql, settings.statement_timeout_ms)
+        actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
         r.db_ms += actual.duration_ms
         r.actual_result = result_summary(actual)
         r.execution_success = actual.ok

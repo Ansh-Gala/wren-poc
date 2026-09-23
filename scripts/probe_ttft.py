@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from claude.parser import sql_value_end as find_sql_end  # noqa: E402
 from claude.prompts import build_lean_system_prompt, build_user_prompt  # noqa: E402
 
 # The same ceiling the Drupal transport uses, so a model is not given more room
@@ -53,41 +54,6 @@ from claude.prompts import build_lean_system_prompt, build_user_prompt  # noqa: 
 MAX_TOKENS = 2048
 
 DEFAULT_QUESTION = "Show the open tasks for AR_YD_Suiting"
-
-
-def find_sql_end(text: str) -> int | None:
-    """Index just past the closing quote of the `sql` value, or None.
-
-    This is the moment the database query could start: the SQL is fully known
-    and everything still arriving -- explanation, goal, recap, next, group --
-    is content the user is not waiting for. The contract in claude/prompts.py
-    puts `sql` first in the object, so the mark is always early.
-
-    Scanned rather than parsed because the text is a half-finished JSON object
-    at the time of asking, which json.loads cannot read.
-    """
-    key = text.find('"sql"')
-    if key < 0:
-        return None
-    colon = text.find(":", key + 5)
-    if colon < 0:
-        return None
-    open_quote = text.find('"', colon + 1)
-    if open_quote < 0:
-        return None
-    i = open_quote + 1
-    while i < len(text):
-        c = text[i]
-        # A backslash escapes whatever follows, including a quote and another
-        # backslash. The SQL arrives full of \n escapes, so this branch is the
-        # common case, not the edge one.
-        if c == "\\":
-            i += 2
-            continue
-        if c == '"':
-            return i + 1
-        i += 1
-    return None
 
 
 def probe(client: httpx.Client, url: str, headers: dict, payload: dict) -> dict:

@@ -47,6 +47,7 @@ import queue
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from config.settings import DEFAULT_EFFORT_LEVEL, effort_level as _effort_level
@@ -192,6 +193,14 @@ class ClaudePool:
             # branch for what each one closes.
             "--strict-mcp-config",
             "--disable-slash-commands",
+            # Text deltas as they are produced, rather than one finished
+            # message. Added unconditionally: the read loop below already
+            # skips event types it does not recognise, so a caller that
+            # passes no on_delta pays a little more stdout traffic and one
+            # pool serves both kinds of caller. Two pools, keyed on whether
+            # the caller wanted streaming, would double the warm processes
+            # to no purpose.
+            "--include-partial-messages",
             "--settings", json.dumps({"effortLevel": self._effort_level}),
         ]
         if self._model:
@@ -256,7 +265,8 @@ class ClaudePool:
             time.sleep(0.05)
         return None
 
-    def ask(self, user_prompt: str) -> ClaudeRun | None:
+    def ask(self, user_prompt: str,
+            on_delta: Callable[[str], None] | None = None) -> ClaudeRun | None:
         """Put one question to a warm process and retire it.
 
         Returns None when the pool could not serve the question, which is the
@@ -277,7 +287,7 @@ class ClaudePool:
 
         warm_ms = warm.warm_ms
         try:
-            run = self._converse(warm, user_prompt, started)
+            run = self._converse(warm, user_prompt, started, on_delta)
         finally:
             # One question per process, always -- see the module docstring.
             warm.kill()
@@ -292,8 +302,8 @@ class ClaudePool:
             run.warm_ms = warm_ms
         return run
 
-    def _converse(self, warm: _Warm, user_prompt: str,
-                  started: float) -> ClaudeRun | None:
+    def _converse(self, warm: _Warm, user_prompt: str, started: float,
+                  on_delta: Callable[[str], None] | None = None) -> ClaudeRun | None:
         from llm_api.cli_provider import apply_result_event
 
         message = {"type": "user", "message": {
@@ -322,6 +332,19 @@ class ClaudePool:
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
+                continue
+
+            # Text as it is produced. The callback runs on this thread, so
+            # whatever it does -- running the query, typically -- happens
+            # while the rest of the reply is still being generated into the
+            # queue behind us. That overlap is the whole point; the drain
+            # thread keeps reading, so a slow callback cannot stall the CLI.
+            if on_delta is not None and event.get("type") == "stream_event":
+                inner = event.get("event") or {}
+                if inner.get("type") == "content_block_delta":
+                    piece = (inner.get("delta") or {}).get("text") or ""
+                    if piece:
+                        on_delta(piece)
                 continue
 
             if event.get("type") == "assistant":

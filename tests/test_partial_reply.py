@@ -1,4 +1,4 @@
-"""The one piece of probe_ttft.py that can be wrong silently.
+"""The one piece of the streaming path that can be wrong silently.
 
 `sql_done_ms` is the whole point of the probe -- it says how much of the wait
 is the SQL and how much is the trimmings after it. A scanner that fires one
@@ -9,7 +9,7 @@ is timing arithmetic over bytes that either arrived or did not.
 
 import json
 
-from scripts.probe_ttft import find_sql_end
+from claude.parser import sql_value_end as find_sql_end
 
 
 def _mark(text):

@@ -24,6 +24,7 @@ import json
 import mimetypes
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -309,10 +310,19 @@ class Runtime:
         except OSError as exc:      # a full disk must not lose the answer
             log.warning("could not append to %s: %s", self.log_path, exc)
 
-    def ask(self, payload: dict) -> dict:
+    def ask(self, payload: dict, on_rows: Callable[[dict], None] | None = None) -> dict:
+        """One turn, and the response the console renders.
+
+        ``on_rows`` is optional. When it is given, the reply is streamed and
+        the table is handed over the moment the SQL is complete -- about two
+        seconds before the last token. The returned response is the same
+        either way, so a caller that ignores the rows behaves exactly as it
+        does today.
+        """
         question = (payload.get("question") or "").strip()
         if not question:
             raise ValueError("question is required")
+        debug = bool(payload.get("debug"))
 
         conversation = conversation_for(payload.get("session_id") or "default")
 
@@ -352,6 +362,8 @@ class Runtime:
                 turn, conversation.state, self.gazetteer, self.settings,
                 self.mcp_config_path, self.privacy, conversation.session,
                 context_mode=self.context_mode,
+                on_sql=(lambda early: on_rows(self.rows_event(early, debug)))
+                if on_rows else None,
             )
             conversation.turn_index += 1
             after = state_snapshot(conversation.state)
@@ -369,7 +381,33 @@ class Runtime:
             del conversation.debug_log[:-DEBUG_LOG_TURNS]
         # Debug off is the default, and it is enforced here rather than in the
         # page: a field the browser receives has already left the server.
-        return full if payload.get("debug") else public_response(full)
+        return full if debug else public_response(full)
+
+    def rows_event(self, early: dict, debug: bool) -> dict:
+        """The table, before the sentences that explain it have been written.
+
+        Redacted by the same public_response the finished answer goes through
+        -- whitelisting, so the SQL and the real column names drop out with
+        debug off exactly as they do there. A second redaction rule here is a
+        second thing to keep in step.
+
+        with_presentation is the one wrapper missing, and deliberately: what
+        it needs is the model's `group` verdict, which has not arrived yet.
+        Grouping lands with the finished answer, which carries the whole
+        result again.
+        """
+        summary = early.get("actual_result")
+        columns = (summary or {}).get("columns")
+        event = {
+            "generated_sql": early.get("generated_sql"),
+            "sql_valid": early.get("sql_valid"),
+            "execution_success": early.get("execution_success"),
+            "error": safe_error(early.get("error"), early.get("sqlstate")),
+            "raw_error": early.get("error"),
+            "result": with_column_labels(
+                with_links(with_initiative(summary, columns, self.settings), columns)),
+        }
+        return event if debug else public_response(event)
 
 
 # ------------------------------------------------------------------- http --
@@ -397,6 +435,52 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
         self.wfile.write(raw)
+
+    def _stream(self) -> None:
+        """POST /ask/stream -- the table first, the rest when it is written.
+
+        Two Server-Sent Events:
+
+            event: rows      the query and what it returned
+            event: answer    exactly what POST /ask returns
+
+        `rows` is omitted when the turn clarifies, because a clarification
+        carries no SQL and none is coming. `answer` always arrives and is the
+        whole response, so a client may ignore `rows` entirely and behave as
+        it does today -- which is what keeps this additive rather than a
+        second contract to maintain.
+
+        Connection: close rather than chunked. The body's length is not known
+        when the headers go out, and closing the connection to end the stream
+        is the older and simpler of the two ways to say so.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._json(400, {"error": f"bad request body: {exc}"})
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self._cors()
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(event: str, data: dict) -> None:
+            body = json.dumps(data, default=str)
+            self.wfile.write(f"event: {event}\ndata: {body}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            answer = self.runtime.ask(payload, on_rows=lambda d: emit("rows", d))
+            emit("answer", answer)
+        except ValueError as exc:
+            emit("error", {"error": str(exc)})
+        except Exception as exc:                  # a bad turn must not kill the server
+            log.exception("streamed turn failed")
+            emit("error", {"error": f"{type(exc).__name__}: {exc}"})
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -439,6 +523,9 @@ class Handler(BaseHTTPRequestHandler):
             conversation = conversation_for(payload.get("session_id") or "default")
             with conversation.lock:
                 return self._json(200, {"turns": list(conversation.debug_log)})
+
+        if path == "/ask/stream":
+            return self._stream()
 
         if path != "/ask":
             return self._json(404, {"error": "POST /ask"})

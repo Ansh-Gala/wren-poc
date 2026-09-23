@@ -328,3 +328,64 @@ def parse_next(text: str) -> list[str]:
     anyone wanted. Relevance needs the question, and only the model has it.
     """
     return _parse_string_list(text, "next")
+
+
+# ------------------------------------------------------- partial replies --
+#
+# Everything above reads a reply that has fully arrived. This reads one that
+# has not.
+#
+# The contract in claude/prompts.py puts `sql` first in the object, and the
+# SQL is complete a mean of 2.02 seconds before the last token (measured with
+# `claude --include-partial-messages` across three questions; the rest of that
+# time writes explanation, goal, recap and next). Knowing where the value ends
+# is what lets the query run in that gap instead of after it.
+
+
+def sql_value_end(text: str) -> int | None:
+    """Index just past the closing quote of the ``sql`` value, or None.
+
+    None means "not yet, or not at all": the value is still arriving, or this
+    is a clarification, which carries no ``sql`` key and never will.
+
+    Scanned rather than parsed because at the moment of asking the text is a
+    half-finished JSON object, which ``json.loads`` cannot read. A backslash
+    escapes the byte after it, which is the common case and not the edge one:
+    the contract requires ``\n`` escapes so the JSON stays valid on one line.
+    """
+    key = text.find('"sql"')
+    if key < 0:
+        return None
+    colon = text.find(":", key + 5)
+    if colon < 0:
+        return None
+    open_quote = text.find('"', colon + 1)
+    if open_quote < 0:
+        return None
+    i = open_quote + 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            # Both bytes, and the second may not have arrived yet -- a chunk
+            # can split an escape pair. Stepping past the end ends the loop,
+            # which is the right answer: not yet.
+            i += 2
+            continue
+        if c == '"':
+            return i + 1
+        i += 1
+    return None
+
+
+def partial_sql(text: str) -> str | None:
+    """The SQL from a reply still arriving, or None if it is not all there.
+
+    The object is closed by hand before parsing, so the same ``parse_sql``
+    that reads a finished reply reads this one -- rather than a second
+    extraction path that could disagree with it about what the model said.
+    """
+    end = sql_value_end(text)
+    if end is None:
+        return None
+    parsed = parse_sql(text[:end] + "}")
+    return parsed.sql

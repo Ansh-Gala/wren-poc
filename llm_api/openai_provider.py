@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import nest_asyncio
@@ -47,9 +48,10 @@ class OpenAIProvider(LLMProvider):
         privacy_mode: str,
         settings: Settings,
         session: Session | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> ClaudeRun:
         if settings.cli_lean:
-            return asyncio.run(self._ask_lean(question, settings, session))
+            return asyncio.run(self._ask_lean(question, settings, session, on_delta))
         return asyncio.run(self._ask_async(question, privacy_mode, settings, session))
 
     async def _ask_lean(
@@ -57,6 +59,7 @@ class OpenAIProvider(LLMProvider):
         question: str,
         settings: Settings,
         session: Session | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> ClaudeRun:
         """One call, the whole semantic layer in the system prompt, no tools.
 
@@ -91,12 +94,18 @@ class OpenAIProvider(LLMProvider):
         ]
 
         try:
-            response = await client.chat.completions.create(
-                model=settings.openai_model,
-                messages=messages,
-                max_tokens=LEAN_MAX_TOKENS,
-                temperature=0,
-            )
+            if on_delta is None:
+                response = await client.chat.completions.create(
+                    model=settings.openai_model,
+                    messages=messages,
+                    max_tokens=LEAN_MAX_TOKENS,
+                    temperature=0,
+                )
+                text = response.choices[0].message.content or ""
+                usage = response.usage
+            else:
+                text, usage = await self._stream_lean(
+                    client, settings, messages, on_delta)
         except Exception as e:
             return ClaudeRun(
                 ok=False,
@@ -105,8 +114,6 @@ class OpenAIProvider(LLMProvider):
             )
 
         elapsed_ms = (time.perf_counter() - started) * 1000
-        text = response.choices[0].message.content or ""
-        usage = response.usage
 
         return ClaudeRun(
             ok=text != "",
@@ -122,6 +129,37 @@ class OpenAIProvider(LLMProvider):
                  and getattr(usage.prompt_tokens_details, "cached_tokens", 0)) or 0
             ) if usage else 0,
         )
+
+    async def _stream_lean(self, client, settings, messages, on_delta):
+        """The same call, delivered as it is produced.
+
+        `stream_options.include_usage` is sent because a streamed response
+        carries no usage block unless it is asked for, and the suite averages
+        those figures -- a streamed turn reporting zero tokens would quietly
+        pull every average down.
+        """
+        text = ""
+        usage = None
+        stream = await client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            max_tokens=LEAN_MAX_TOKENS,
+            temperature=0,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in stream:
+            if chunk.usage:
+                usage = chunk.usage
+            if not chunk.choices:
+                # The usage block arrives in a final chunk of its own, with
+                # no choices to index.
+                continue
+            piece = chunk.choices[0].delta.content or ""
+            if piece:
+                text += piece
+                on_delta(piece)
+        return text, usage
 
     async def _ask_async(
         self,
