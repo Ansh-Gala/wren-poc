@@ -40,6 +40,7 @@ from pipeline.lean_suite import Conversation, SuiteTurn
 from pipeline.sql_semantics import compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
 from pipeline.safety import UnsafeSQLError, assert_read_only
+from claude.prompts import build_repair_question
 from claude.parser import (
     partial_sql,
     sql_value_end,
@@ -196,6 +197,12 @@ class TurnResult:
     schema_check_ms: float = 0.0
     safety_ms: float = 0.0
     db_ms: float = 0.0
+    # What a second attempt cost, and whether it was worth it. Zero and False
+    # on the overwhelming majority of turns, which never reach a repair.
+    repair_ms: float = 0.0
+    repair_attempted: bool = False
+    repair_succeeded: bool = False
+    repaired_from: str | None = None
     followup_ms: float = 0.0
     error: str | None = None
     # Carried from QueryResult so the HTTP layer can turn a failure into
@@ -438,6 +445,48 @@ def _delta_watcher(settings: Settings, memo: dict,
     return on_delta
 
 
+def _repair(
+    question: str,
+    sql: str,
+    error: str,
+    settings: Settings,
+    mcp_config_path,
+    privacy_mode: str,
+) -> tuple[str | None, float]:
+    """One more attempt, with the database's complaint attached.
+
+    Postgres says precisely what is wrong -- "DISTINCT is not implemented for
+    window functions", "column x does not exist". Until this existed that
+    sentence was read, sanitised for the user and thrown away, so the model
+    that wrote the query never learned it had written something impossible.
+
+    Exactly one attempt, and only for a statement the database rejected. A
+    loop here would turn a bad question into an unbounded bill, and a second
+    failure is a signal worth showing rather than grinding at.
+
+    No session and no context: the repair is about this statement and this
+    error, and replaying the conversation would invite the model to revisit
+    what the question meant instead of fixing what was named.
+
+    Returns the corrected SQL and what the call cost in milliseconds. None
+    means the attempt produced nothing usable, and the caller keeps the
+    original failure -- a repair that cannot help must not make things worse.
+    """
+    provider = get_provider(settings)
+    run = provider.ask(
+        build_repair_question(question, sql, error),
+        mcp_config_path, privacy_mode, settings, None,
+    )
+    if not run.ok or not run.result_text:
+        return None, run.duration_ms
+    fixed = parse_sql(run.result_text).sql
+    # A repair that hands back the same statement has not repaired anything,
+    # and running it again would fail the same way for the same reason.
+    if not fixed or fixed.strip() == sql.strip():
+        return None, run.duration_ms
+    return fixed, run.duration_ms
+
+
 def run_turn(
     turn: SuiteTurn,
     state: ConversationState,
@@ -450,6 +499,7 @@ def run_turn(
     followup_mode: bool = True,
     identity: CallerIdentity | None = None,
     on_sql: Callable[[dict], None] | None = None,
+    repair_mode: bool = True,
 ) -> TurnResult:
     """One turn, end to end.
 
@@ -796,6 +846,45 @@ def run_turn(
     elif r.sql_valid and parsed.sql:
         actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
         r.db_ms += actual.duration_ms
+
+        # The database rejected the statement, and it said why. Tell the model
+        # and let it try once more. Only here: a refusal above is a decision
+        # this pipeline made on purpose, and asking the model to work around
+        # one would be asking it to defeat a gate.
+        if not actual.ok and actual.error and repair_mode:
+            # Set before the call, not after: this counts how often a turn
+            # needed a second attempt, which is the figure worth having.
+            # Whether the attempt produced anything usable is repair_succeeded.
+            r.repair_attempted = True
+            fixed, cost_ms = _repair(question, parsed.sql, actual.error,
+                                     settings, mcp_config_path, privacy_mode)
+            r.repair_ms = cost_ms
+            if fixed:
+                r.repaired_from = parsed.sql
+                # The corrected statement goes through the same two gates as
+                # the first one. A repair must not become the way round them.
+                from pipeline.sql_semantics import check_against_schema
+                sc = check_against_schema(fixed)
+                safe = True
+                try:
+                    assert_read_only(fixed)
+                except UnsafeSQLError:
+                    safe = False
+                if sc.grounded and safe:
+                    retried = _execute(settings, fixed, settings.statement_timeout_ms, executed)
+                    r.db_ms += retried.duration_ms
+                    if retried.ok:
+                        # Only on success. A second failure leaves the first
+                        # one standing, because that is the one the user's
+                        # question actually produced.
+                        r.repair_succeeded = True
+                        parsed = ParsedSQL(sql=fixed, strategy="repair",
+                                           raw=parsed.raw)
+                        r.generated_sql = fixed
+                        r.schema_grounded = sc.grounded
+                        r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
+                        actual = retried
+
         r.actual_result = result_summary(actual)
         r.execution_success = actual.ok
         if actual.error:

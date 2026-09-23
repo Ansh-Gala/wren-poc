@@ -126,6 +126,18 @@ Rules for your answer:
 
 1. Target PostgreSQL. Write a single read-only SELECT (a leading WITH is fine).
    No INSERT, UPDATE, DELETE or DDL.
+
+   PostgreSQL does not allow DISTINCT inside a window function:
+   COUNT(DISTINCT x) OVER (PARTITION BY y) is rejected outright, whatever the
+   query around it looks like.
+
+   That matters when a question asks for counts at two levels at once -- "each
+   workflow with its order count, and for each order the task count". Joining
+   the child table repeats every parent row, so each count needs DISTINCT to
+   undo the repetition, and showing a parent-level total beside child rows
+   wants a window function. The two cannot be combined, so aggregate in a
+   subquery or a WITH clause first and join the result, rather than counting
+   across a join that has already repeated the rows.
 2. Return the columns the question actually asks for.
 3. Do NOT execute the query and do not report or invent results.
 4. Reply with ONE JSON object and nothing else, in this exact shape:
@@ -314,4 +326,31 @@ def build_lean_system_prompt() -> str:
         + _render_schema(load("schema_description.yaml"))
         + _render_rules(load("business_rules.yaml"))
         + _render_examples(load("question_sql_pairs.yaml"))
+    )
+
+
+def build_repair_question(question: str, sql: str, error: str) -> str:
+    """The question again, with the database's complaint attached.
+
+    The database says precisely what is wrong -- "DISTINCT is not implemented
+    for window functions", "column x does not exist" -- and until this existed
+    that sentence was read, sanitised for the user, and thrown away. The model
+    that wrote the query never learned it had written something impossible.
+
+    Sent as the question rather than through a second prompt-building route,
+    so the repair turn is an ordinary turn: same system prompt, same schema,
+    same reply contract. Nothing new can drift.
+
+    The original question leads, because the correction has to answer it --
+    a model handed only the error and the SQL will fix the syntax and lose
+    the point of the query.
+    """
+    return (
+        f"{question}\n\n"
+        "You answered with this SQL and PostgreSQL rejected it.\n\n"
+        f"SQL:\n{sql}\n\n"
+        f"PostgreSQL said:\n{error}\n\n"
+        "Write the query again, correcting what the error names and changing "
+        "nothing else. If the error means the shape of the query cannot work, "
+        "use a different shape that answers the same question."
     )
