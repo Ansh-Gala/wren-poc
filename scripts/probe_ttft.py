@@ -144,6 +144,12 @@ def probe(client: httpx.Client, url: str, headers: dict, payload: dict) -> dict:
         "output_tokens": out_tokens,
         "prompt_tokens": int(usage.get("prompt_tokens") or 0),
         "cached_tokens": int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0),
+        # A reasoning model thinks before it says anything, and those tokens
+        # are billed and generated but never streamed. If TTFT is large, this
+        # is where the seconds went -- and unlike the answer contract, it is
+        # tunable with one parameter.
+        "reasoning_tokens": int(
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0),
         "chunks": chunks,
         "output_chars": len(text),
         # What the model spent typing, as distinct from what the caller spent
@@ -181,6 +187,9 @@ def show(label: str, rows: list[dict]) -> None:
     print(f"  {'  of which generating':34} {fmt('gen_ms')}")
     print(f"  {'  spent after the SQL was known':34} {fmt('after_sql_ms')}")
     print(f"  {'Output tokens':34} {fmt('output_tokens', 'n')}")
+    reasoning = mean(rows, "reasoning_tokens")
+    if reasoning:
+        print(f"  {'  of which thinking, never shown':34} {fmt('reasoning_tokens', 'n')}")
     print(f"  {'Tokens per second':34} {fmt('tok_per_s', 'n')}")
     print(f"  {'Prompt tokens (cached)':34} {fmt('prompt_tokens', 'n')} ({fmt('cached_tokens', 'n').strip()})")
 
@@ -190,7 +199,11 @@ def show(label: str, rows: list[dict]) -> None:
         print()
         if share >= 60:
             print(f"  TTFT-BOUND: {share:.0f}% of the wait is before the first token.")
-            print("  Output length is not the lever. A different provider is.")
+            if reasoning:
+                print(f"  {reasoning:.0f} of those tokens are the model thinking. "
+                      "Try --reasoning-effort minimal.")
+            else:
+                print("  Output length is not the lever. A different provider is.")
         else:
             print(f"  GENERATION-BOUND: {100 - share:.0f}% of the wait is typing.")
             sql_done = mean(rows, "sql_done_ms")
@@ -211,6 +224,10 @@ def main() -> int:
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--temperature", type=float, default=0.0,
                     help="pass -1 to omit it, which OpenAI's reasoning models require")
+    ap.add_argument("--reasoning-effort", default=None,
+                    help="minimal, low, medium or high. OpenAI's reasoning models "
+                         "think before emitting anything, and that thinking is "
+                         "the TTFT this script measures.")
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--out", default=None,
                     help="where to write the JSON; defaults to "
@@ -229,14 +246,22 @@ def main() -> int:
             {"role": "system", "content": build_lean_system_prompt()},
             {"role": "user", "content": build_user_prompt(args.question, lean=True)},
         ],
-        "max_tokens": MAX_TOKENS,
         "stream": True,
         # Not every provider sends usage on a stream unless asked. Ignored by
         # those that always do.
         "stream_options": {"include_usage": True},
     }
-    if args.temperature >= 0:
+    # OpenAI renamed the output ceiling for its reasoning models and the
+    # current ones reject the old name outright. The same branch
+    # src/Llm/OpenAiCompatibleProvider.php makes, and for the same reason.
+    on_openai = "api.openai.com" in args.base_url
+    payload["max_completion_tokens" if on_openai else "max_tokens"] = MAX_TOKENS
+    # Those models also accept only the default temperature. Sending nothing
+    # gets it, which is the only thing they allow.
+    if args.temperature >= 0 and not on_openai:
         payload["temperature"] = args.temperature
+    if args.reasoning_effort:
+        payload["reasoning_effort"] = args.reasoning_effort
 
     print(f"{args.model} at {args.base_url}")
     print(f"{args.reps} reps of: {args.question}")
