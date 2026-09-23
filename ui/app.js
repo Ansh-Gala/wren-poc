@@ -190,6 +190,9 @@
     if (debugEnabled()) msg.append(debugPane(r));
     el.messages.append(msg);
     scroll();
+    // Returned so the table drawn from the `rows` event can be swapped for
+    // the finished answer without the page jumping.
+    return msg;
   }
 
   /* Copies the whole result, not the eight rows on screen. */
@@ -418,8 +421,22 @@
       _state: session.state,
     };
 
+    // The table as soon as the query has run, about a second before the
+    // sentences around it are written. It is drawn with what the `rows` event
+    // carries and nothing else -- no explanation, no chips, no grouping,
+    // because none of that exists yet. The finished answer replaces it.
+    // Declared out here so the catch below can clear it too.
+    let early = null;
+
     try {
-      const r = await API.sendMessageToBackend(payload, { useMock: mockEnabled() });
+      const r = await API.streamMessageToBackend(payload, {
+        useMock: mockEnabled(),
+        onRows(partial) {
+          placeholder.remove();
+          early = addResponse(partial);
+        },
+      });
+      if (early) early.remove();
       placeholder.remove();
       session.resetPending = false;
       session.turns += 1;
@@ -435,6 +452,9 @@
       renderMutations(r.state_mutations);
     } catch (err) {
       placeholder.remove();
+      // A stream that failed after the table arrived would otherwise leave a
+      // half-turn on screen, with rows above an error about the same turn.
+      if (early) early.remove();
       addError(err.message || String(err));
       showError(`Request failed: ${err.message || err}`);
     } finally {

@@ -149,6 +149,9 @@ const API = (() => {
     ? `${location.origin}/debug`
     : "http://localhost:8000/debug";
 
+  // The same turn, delivered in two parts. See streamMessageToBackend.
+  const STREAM_ENDPOINT = ENDPOINT + "/stream";
+
   const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
@@ -170,6 +173,83 @@ const API = (() => {
         throw new Error(`backend returned ${res.status} ${res.statusText}`);
       }
       return normalize(await res.json());
+    } catch (err) {
+      if (err.name === "AbortError") {
+        throw new Error(`no response within ${TIMEOUT_MS / 1000}s`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* THE SAME CALL, IN TWO PARTS.
+
+     The backend knows the SQL about a second before it has finished writing
+     the sentences around it, so /ask/stream sends the table as soon as it has
+     run the query and the rest when it is written:
+
+       event: rows      what the query returned -- no explanation, no chips
+       event: answer    exactly what POST /ask returns
+
+     `onRows` may never fire: a turn that asks for clarification has no SQL.
+     `onAnswer` always fires, and carries everything, so the page is correct
+     whether or not the early table arrived.
+
+     Falls back to the plain call when the browser cannot read a stream, or
+     when the mock is on -- the mock has nothing to stream. */
+  async function streamMessageToBackend(payload, { useMock = true, onRows } = {}) {
+    if ((useMock && window.MOCK) || !window.ReadableStream || !window.TextDecoder) {
+      return sendMessageToBackend(payload, { useMock });
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(STREAM_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`backend returned ${res.status} ${res.statusText}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let answer = null;
+
+      // An event ends at a blank line, and a chunk can split one anywhere --
+      // including mid-character, which is why the decoder is told to stream.
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let cut;
+        while ((cut = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+
+          let name = null;
+          let data = null;
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) name = line.slice(7).trim();
+            else if (line.startsWith("data: ")) {
+              try { data = JSON.parse(line.slice(6)); } catch (e) { data = null; }
+            }
+          }
+          if (!data) continue;
+          if (name === "rows" && onRows) onRows(normalize(data));
+          else if (name === "answer") answer = normalize(data);
+          else if (name === "error") throw new Error(data.error || "turn failed");
+        }
+      }
+
+      if (!answer) throw new Error("the stream ended without an answer");
+      return answer;
     } catch (err) {
       if (err.name === "AbortError") {
         throw new Error(`no response within ${TIMEOUT_MS / 1000}s`);
@@ -219,5 +299,6 @@ const API = (() => {
     };
   }
 
-  return { sendMessageToBackend, normalize, ENDPOINT, DEBUG_ENDPOINT };
+  return { sendMessageToBackend, streamMessageToBackend, normalize,
+           ENDPOINT, STREAM_ENDPOINT, DEBUG_ENDPOINT };
 })();
