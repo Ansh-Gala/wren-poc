@@ -49,6 +49,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from config.settings import DEFAULT_EFFORT_LEVEL, effort_level as _effort_level
 from pipeline.models import ClaudeRun
 
 # Where the warm-up curve above flattens. Paid on a background thread, so it
@@ -149,12 +150,12 @@ class ClaudePool:
                  size: int = DEFAULT_POOL_SIZE,
                  warmup: float = DEFAULT_WARMUP_SECONDS,
                  reply_timeout: float = DEFAULT_REPLY_TIMEOUT,
-                 effort_level: str = "medium",
+                 effort_level: str = DEFAULT_EFFORT_LEVEL,
                  config_dir: str = ""):
         self._command = command
         self._system_prompt = system_prompt
         self._model = model
-        self._effort_level = effort_level if effort_level in ("medium", "high") else "medium"
+        self._effort_level = _effort_level(effort_level)
         self._config_dir = config_dir
         self._size = max(0, size)
         self._warmup = warmup

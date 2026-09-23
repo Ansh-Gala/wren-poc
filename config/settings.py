@@ -18,6 +18,30 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_NAMES = ("A", "B", "C", "D")
 PRIVACY_MODES = ("strict", "validated")
 
+# What `claude --effort` accepts, asked of the CLI rather than assumed:
+#
+#   $ claude --effort bogus -p "hi"
+#   Warning: Unknown --effort value 'bogus' -- ignoring it and using the
+#   default effort. Valid values: low, medium, high, xhigh, max.
+#
+# Two call sites used to clamp this to ("medium", "high") independently, so
+# CLAUDE_EFFORT_LEVEL=low was accepted, stored, and silently turned back into
+# medium. Named once here so a third site cannot disagree with the first two.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+DEFAULT_EFFORT_LEVEL = "medium"
+
+
+def effort_level(value: str | None) -> str:
+    """A level the CLI will honour, or the default.
+
+    The CLI ignores an unknown value and warns on stderr, which nothing here
+    reads -- so an unrecognised level would fall back to Claude Code's own
+    default rather than to this project's, and a run would be neither what
+    was asked for nor what the settings say.
+    """
+    cleaned = (value or "").strip().lower()
+    return cleaned if cleaned in EFFORT_LEVELS else DEFAULT_EFFORT_LEVEL
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -47,9 +71,21 @@ class Settings:
     claude_command: str = "claude"
     claude_model: str = "sonnet"
     claude_timeout_seconds: int = 180
-    # medium or high. Anything else is read as medium: a SELECT does not need
-    # extended reasoning, and this is the one setting that silently
+    # One of EFFORT_LEVELS. Anything else is read as medium: a SELECT does
+    # not need extended reasoning, and this is the one setting that silently
     # multiplies the bill.
+    #
+    # It costs time as well as money, which is why `low` is now reachable.
+    # `low` used to be clamped away here, so the value could be set and had
+    # no effect. Measured on gpt-5.6-luna, the same lever under its API name
+    # `reasoning_effort`, warm mean of five runs on one question:
+    #
+    #   medium (default)   3.44s to first token, 4.68s total, 75 thinking tokens
+    #   low                0.99s to first token, 2.01s total,  9 thinking tokens
+    #
+    # The model thinks before it emits anything, so the thinking is dead air
+    # the caller waits through. Whether `low` costs accuracy is a question for
+    # the suite, not for this comment.
     claude_effort_level: str = "medium"
     # The chatbot's own Claude Code config directory. Empty means inherit the
     # operator's, which also inherits their plugins and their hooks.

@@ -21,7 +21,7 @@ import subprocess
 import threading
 from pipeline.models import ClaudeRun, Session
 from claude.prompts import build_system_prompt, build_user_prompt
-from config.settings import Settings
+from config.settings import Settings, effort_level
 from llm_api.provider import LLMProvider
 
 
@@ -123,7 +123,7 @@ def build_command(
             "--strict-mcp-config",
             "--disable-slash-commands",
             "--settings",
-            json.dumps({"effortLevel": effort if effort in ("medium", "high") else "medium"}),
+            json.dumps({"effortLevel": effort_level(effort)}),
         ]
         if settings.claude_model:
             cmd += ["--model", settings.claude_model]
