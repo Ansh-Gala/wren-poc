@@ -111,6 +111,27 @@ def test_a_sentence_initial_capital_is_still_repaired():
     assert n.question.startswith("Active")
 
 
+def test_a_negating_prefix_is_never_repaired_away():
+    """"unassigned" is not a typo of "assigned"; it means the opposite.
+
+    Real session, 25 September 2026: "tasks of my department which are
+    unassigned" reached the model as "... which are assigned", which wrote
+    assigned_user_name <> 'NA' and answered the reverse question twice. A
+    prefix the user typed changes the meaning, so a repair may never drop it.
+    """
+    for typed, word in [
+        ("show tasks of my department which are unassigned", "unassigned"),
+        ("I asked about unassigned not assigned", "unassigned"),
+        ("show the unasigned tasks", "unasigned"),
+        ("how many unresolved issues are there", "unresolved"),
+        ("show nonactive initiatives", "nonactive"),
+        ("show reassigned tasks", "reassigned"),
+    ]:
+        n = normalize(typed)
+        assert word in n.question.split(), (typed, n.question)
+        assert not n.repairs, (typed, n.repairs)
+
+
 def test_lowercase_typos_are_still_repaired_after_the_capital_rule():
     """Regression guard: the fix must only ever remove repairs, never add."""
     assert normalize("give me my actie task").question == "give me my active task"

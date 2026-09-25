@@ -149,3 +149,20 @@ rules:
     issue''s title, status and the department or person it came from -- a list of task ids is technically
     the right rows and tells the reader nothing they asked to know. The same holds for attachments. Listings
     only: a count, a total or an average answers with the number.'
+- name: latest_first
+  definition: 'When a question asks to SEE records (show, list, which, give me) and asks for no order
+    of its own, sort them newest first by when each record was created: issues by tms_task_issue_flat.issue_created_at
+    DESC, attachments by tms_attachment_flat.attachment_created_at DESC, tasks by tms_task_flat.created_at
+    DESC, and Initiatives by tms_initiative_flat.initiative_created_at DESC. "Show all issues" starts
+    from the latest issue; "show all attachments" starts from the latest attachment.'
+  scope: 'Only an order the question asks for turns this off. When it asks for one -- "oldest first",
+    "earliest", "sorted by name", "by due date", "top 5 by delay" -- that order decides and this default
+    is not added. A time filter on its own -- "created last week", "since Monday", "this month" -- asks
+    for no order, so the newest-first sort still applies. When the conversation already carries an order,
+    that order decides. This changes the order only, never which rows come back: add no filter and no
+    LIMIT for it. Listings only: a count, a total or a breakdown by group is not sorted by it.'
+- name: attachments_carry_file_uri
+  definition: 'Whenever a query lists attachments from tms_attachment_flat, select file_uri alongside
+    file_name, even when the question does not ask for it. file_uri is what turns the file name into
+    a download link; without it the person sees a name they cannot open.'
+  scope: Listings of attachments only. A count of attachments needs no file_uri.

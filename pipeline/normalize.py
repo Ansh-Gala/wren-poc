@@ -69,6 +69,18 @@ closing opening raising raised uploaded uploading
 """.split())
 
 
+# Prefixes that change what a word means. "unassigned" is two letters from
+# "assigned" and scores 0.89, so it looks like a typo of the opposite word.
+# Real session, 25 September 2026: "tasks ... which are unassigned" reached
+# the model as "which are assigned" and was answered in reverse. A repair may
+# never drop one of these from the front of what the user typed.
+_MEANING_PREFIXES = ("un", "non", "dis", "re")
+
+
+def _drops_a_prefix(token: str, corrected: str) -> bool:
+    return any(token.startswith(p) and not corrected.startswith(p) for p in _MEANING_PREFIXES)
+
+
 @dataclass(frozen=True)
 class Repair:
     """One token rewritten, and why."""
@@ -289,7 +301,7 @@ def normalize(question: str) -> Normalized:
         if _is_known(lowered, vocabulary):
             return token
         corrected = _best_match(lowered, vocabulary)
-        if corrected is None or corrected == lowered:
+        if corrected is None or corrected == lowered or _drops_a_prefix(lowered, corrected):
             return token
         corrected = _match_case(token, corrected)
         repairs.append(Repair(original=token, corrected=corrected, kind="typo"))
