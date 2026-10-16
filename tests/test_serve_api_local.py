@@ -217,3 +217,61 @@ def test_a_chip_ref_asks_the_reading_it_was_offered_for(runtime):
     rt.ask({"session_id": "chip", "question": "typed text", "option_ref": "stale:9"})
 
     assert asked == ["Delayed open tasks", "typed text"]
+
+
+# ------------------------------------------------------------------ charts --
+
+BY_DEPT = {"columns": ["department", "n"], "rows": [["Sales", "3"], ["Design", "5"]],
+           "row_count": 2, "truncated": False}
+CHART = {"type": "groupedColumn", "category": "department", "values": ["n"]}
+
+
+def test_a_chart_drawn_from_the_rows_shown():
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True, chart=CHART,
+                                 generated_sql="SELECT 1"), "q", {}, {}, SETTINGS)
+    assert full["result"]["chart"]["rows"] == [["Sales", 3], ["Design", 5]]
+    assert full["chart_reason"] == "ok" and "chart_note" not in full["result"]
+
+
+def test_a_chart_query_that_failed_draws_nothing_and_says_so():
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+                                 chart={**CHART, "sql": "SELECT 2"}, chart_error="timeout"),
+                           "q", {}, {}, SETTINGS)
+    assert "chart" not in full["result"]
+    assert full["chart_reason"] == "chart_sql_timeout"
+    assert full["result"]["chart_note"].startswith("No chart: the numbers")
+
+
+def test_a_chart_query_draws_from_its_own_rows():
+    own = {"columns": ["department", "n"], "rows": [["All", "8"]], "row_count": 1,
+           "truncated": False, "duration_ms": 3.0}
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+                                 chart={**CHART, "sql": "SELECT 2"}, chart_result=own),
+                           "q", {}, {}, SETTINGS)
+    assert full["result"]["chart"]["rows"] == [["All", 8]]
+    assert full["chart_query"] == {"columns": ["department", "n"], "types": [],
+                                   "row_count": 1, "duration_ms": 3.0}
+
+
+def test_a_title_that_names_the_schema_is_dropped():
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+                                 chart={**CHART, "title": "count of task_status"}),
+                           "q", {}, {}, SETTINGS)
+    assert "title" not in full["result"]["chart"]
+
+
+def test_no_chart_asked_for_says_nothing():
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True), "q", {}, {}, SETTINGS)
+    assert full["chart_reason"] is None and "chart" not in full["result"]
+
+
+def test_the_chart_and_the_download_survive_debug_off():
+    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+                                 chart={**CHART, "colors": {"Sales": "#123456"}}),
+                           "q", {}, {}, SETTINGS)
+    full["result"]["download"] = {"chat_id": 4, "turn": 2}
+    full["result"]["chart"]["internal"] = "kept private"
+    public = api.public_response(full)
+    assert public["result"]["download"] == {"chat_id": 4, "turn": 2}
+    assert set(public["result"]["chart"]) == {"type", "labels", "rows", "colors"}
+    assert "chart_reason" not in public and "chart_query" not in public

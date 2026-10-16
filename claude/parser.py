@@ -389,3 +389,83 @@ def partial_sql(text: str) -> str | None:
         return None
     parsed = parse_sql(text[:end] + "}")
     return parsed.sql
+
+
+# PHP's trim(): only these characters, not every Unicode space.
+_PHP_TRIM = " \t\n\r\0\x0b"
+
+
+def _is_php_list(value: dict) -> bool:
+    """Whether PHP would decode this JSON object as a list: keys "0".."n-1".
+    An empty object is one too."""
+    return list(value) == [str(i) for i in range(len(value))]
+
+
+def parse_chart(text: str) -> dict | None:
+    """The chart the model asked for, if it asked for one.
+
+    Ported from the Drupal port's ResponseParser::parseChart. None when the
+    reply has no chart. A chart that is present but unusable comes back as
+    {"invalid": code}, never as a partial chart, so a bad config cannot be
+    drawn and the debug view can say why. The chart's own "sql" is kept as
+    written; the turn decides whether it is SQL, because a malformed chart
+    query drops the whole chart, not just its query.
+    """
+    from pipeline.chart_check import COLOUR, MAX_SERIES, ONE_VALUE_TYPES, TITLE_LENGTH, TYPES
+
+    for obj in _json_objects(text):
+        chart = obj.get("chart")
+        if chart is None or chart is False:
+            continue
+        if "clarify" in obj:
+            return {"invalid": "in_clarify"}
+        if not isinstance(chart, dict) or _is_php_list(chart):
+            return {"invalid": "bad_shape"}
+        kind = chart.get("type")
+        if not isinstance(kind, str) or kind not in TYPES:
+            return {"invalid": "bad_type"}
+        category = chart.get("category")
+        if not isinstance(category, str) or category.strip(_PHP_TRIM) == "":
+            return {"invalid": "bad_category"}
+        values = chart.get("values")
+        if not isinstance(values, list) or not values or len(values) > MAX_SERIES:
+            return {"invalid": "bad_values"}
+        if any(not isinstance(v, str) or v.strip(_PHP_TRIM) == "" for v in values):
+            return {"invalid": "bad_values"}
+        if kind in ONE_VALUE_TYPES and len(values) != 1:
+            return {"invalid": "pie_values"}
+        if chart.get("sql") is not None and not isinstance(chart["sql"], str):
+            return {"invalid": "bad_sql"}
+        # Long rows: one row per category and part, one value, pivoted by
+        # chart_check. A pie has no second dimension to split by.
+        series = chart.get("series")
+        if series is not None and (not isinstance(series, str) or series.strip(_PHP_TRIM) == ""
+                                   or len(values) != 1 or kind in ONE_VALUE_TYPES):
+            return {"invalid": "bad_series"}
+
+        parsed = {"type": kind, "category": category.strip(_PHP_TRIM),
+                  "values": [v.strip(_PHP_TRIM) for v in values]}
+        if series is not None:
+            parsed["series"] = series.strip(_PHP_TRIM)
+        title = chart.get("title")
+        if isinstance(title, str) and title.strip(_PHP_TRIM) != "":
+            parsed["title"] = title.strip(_PHP_TRIM)[:TITLE_LENGTH]
+        if chart.get("sql") is not None:
+            parsed["sql"] = chart["sql"].strip(_PHP_TRIM)
+        # Colours by value column, series or category name. A bad entry is
+        # dropped on its own: a colour is never worth losing the chart.
+        colors = chart.get("colors")
+        if isinstance(colors, dict) and not _is_php_list(colors):
+            kept = {str(name).strip(_PHP_TRIM): colour for name, colour in colors.items()
+                    if str(name).strip(_PHP_TRIM) != "" and isinstance(colour, str)
+                    and COLOUR.match(colour)}
+            if kept:
+                parsed["colors"] = kept
+        return parsed
+    return None
+
+
+def chart_sql(text) -> str | None:
+    """The chart's own query, cleaned as the main one is, or None if not SQL."""
+    cleaned = _clean(str(text or ""))
+    return cleaned if cleaned and _looks_like_sql(cleaned) else None

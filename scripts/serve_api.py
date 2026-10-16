@@ -34,6 +34,7 @@ from urllib.parse import parse_qs
 
 import _bootstrap  # noqa: F401
 
+from pipeline.chart_check import build as build_chart, note as chart_note_for
 from pipeline.chat_store import CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore
 from pipeline.context import ConversationState, remember_question
 from pipeline.context_pills import context_pills, drop_by_ref
@@ -48,7 +49,9 @@ from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.metadata import enable_site_metadata
 from pipeline.models import Session
-from pipeline.redact import GENERIC, public_response, safe_error, safe_explanation
+from pipeline.redact import (
+    GENERIC, names_a_database_object, public_response, safe_error, safe_explanation,
+)
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 
@@ -165,6 +168,40 @@ def state_mutations(before: dict, after: dict) -> list[str]:
     return out
 
 
+def chart_for(r: TurnResult, result) -> tuple[dict | None, str | None, str | None]:
+    """The chart for this answer, why there is none when there is none, and
+    what the reader is told. Ported from the Drupal port's ChatRuntime.
+
+    The shown rows are the source unless the model wrote a chart query. If
+    that query failed there is no chart: never a fallback to the main rows,
+    whose shape and meaning may differ from what was asked to be drawn.
+    """
+    chart = r.chart
+    if not isinstance(chart, dict):
+        return None, None, None
+    if "invalid" in chart:
+        return _no_chart("config_" + chart["invalid"])
+    if not r.execution_success or not (result or {}).get("rows"):
+        return _no_chart("no_answer")
+    if "sql" in chart:
+        if r.chart_error:
+            return _no_chart("chart_sql_" + r.chart_error)
+        if not isinstance(r.chart_result, dict):
+            return _no_chart("chart_sql_not_run")
+        source = with_column_labels(r.chart_result)
+    else:
+        source = result
+    built = build_chart(chart, source, source.get("column_labels") or [])
+    drawn = built["chart"]
+    if drawn is not None and "title" in drawn and names_a_database_object(drawn["title"]):
+        drawn = {k: v for k, v in drawn.items() if k != "title"}
+    return drawn, built["reason"], built.get("note") or chart_note_for(built["reason"])
+
+
+def _no_chart(reason: str) -> tuple[None, str, str | None]:
+    return None, reason, chart_note_for(reason)
+
+
 def to_response(r: TurnResult, asked: str, before: dict, after: dict,
                 settings=None, pills: list[dict] | None = None) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
@@ -186,10 +223,20 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
     result = with_presentation(
         with_column_labels(with_links(with_initiative(shown, columns, settings), columns)),
         after.get("tables"), r.grouped)
+    chart, chart_reason, chart_note = chart_for(r, result)
+    if isinstance(result, dict) and chart is not None:
+        result = {**result, "chart": chart}
+    if isinstance(result, dict) and chart_note is not None:
+        result = {**result, "chart_note": chart_note}
     if isinstance(result, dict) and result.get("rows") and settings is not None:
-        note = freshness_note(settings, [r.generated_sql])
+        # Read from the SQL that ran, the chart's own included.
+        ran = [r.generated_sql]
+        if chart is not None and isinstance(r.chart, dict):
+            ran.append(r.chart.get("sql") or "")
+        note = freshness_note(settings, ran)
         if note:
             result = {**result, "freshness": note}
+    chart_query = r.chart_result if isinstance(r.chart_result, dict) else None
 
     return {
         "decision": r.decision,
@@ -213,6 +260,16 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "raw_error": r.error,
         "failure_category": r.failure_category,
         "result": result,
+        # Debug only: why there is no chart, and the chart's own query. Never
+        # the chart query's rows; only the built chart carries any of them.
+        "chart_reason": chart_reason,
+        "chart_sql": r.chart.get("sql") if isinstance(r.chart, dict) else None,
+        "chart_query": None if chart_query is None else {
+            "columns": chart_query.get("columns", []),
+            "types": chart_query.get("types", []),
+            "row_count": chart_query.get("row_count"),
+            "duration_ms": chart_query.get("duration_ms"),
+        },
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,
@@ -456,6 +513,8 @@ class Runtime:
             pills = context_pills(conversation.state)
             self.record(result, question, after)
             full = to_response(result, question, before, after, self.settings, pills)
+            # The chart's verdict is reached in to_response, after the turn ran.
+            result.chart_reason = full.get("chart_reason")
 
             # Inside the lock: the next question reads its recent questions
             # from these rows, and must not load before this one lands.

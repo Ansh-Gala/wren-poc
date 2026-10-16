@@ -45,7 +45,7 @@ from claude.parser import (
     partial_sql,
     sql_value_end,
     parse_clarification, parse_clarify_about, parse_explanation, parse_goal,
-    parse_group, parse_next, parse_recap,
+    chart_sql, parse_chart, parse_group, parse_next, parse_recap,
     parse_options, parse_sql,
 )
 from config.logging import get_logger
@@ -224,6 +224,14 @@ class TurnResult:
     # Wall-clock start of the turn, as a unix time, for the history row.
     turn_started: float = 0.0
 
+    # The chart the model asked for, its own query's result and why that
+    # query failed, and the verdict the HTTP layer reached on the chart. All
+    # empty when no chart was asked for.
+    chart: dict | None = None
+    chart_result: dict | None = None
+    chart_error: str | None = None
+    chart_reason: str | None = None
+
 
 def _classify_failure(r: TurnResult, expected, actual) -> str:
     """Name the failure so patterns are visible across the suite."""
@@ -387,6 +395,48 @@ def _execute(settings: Settings, sql: str, timeout_ms: int,
     if memo is not None and sql in memo:
         return memo[sql]
     return run_readonly(settings, sql, timeout_ms)
+
+
+def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
+    """Run the chart's own query, through the main query's gates.
+
+    Ported from the Drupal port's TurnRunner::runChartQuery. Called only once
+    the main query has returned rows. Never after a repair: the turn's time
+    budget is spent by then. No repair either, since a chart is not worth a
+    second model call. Any failure sets chart_error and drops the chart; the
+    main answer is never touched, and the chart never falls back to the main
+    rows.
+    """
+    from pipeline.chart_check import MAX_ROWS, TIMEOUT_MS
+    from pipeline.sql_semantics import check_against_schema
+
+    chart = r.chart
+    if not isinstance(chart, dict) or "invalid" in chart or "sql" not in chart:
+        return
+    if r.repair_attempted:
+        r.chart_error = "skipped"
+        return
+    sql = chart_sql(chart["sql"])
+    if sql is None:
+        r.chart_error = "malformed"
+        return
+    try:
+        assert_read_only(sql)
+    except UnsafeSQLError:
+        r.chart_error = "refused"
+        return
+    if not check_against_schema(sql).grounded:
+        r.chart_error = "ungrounded"
+        return
+    result = _execute(settings, sql, TIMEOUT_MS, memo)
+    if not result.ok:
+        # query_canceled: the statement timeout fired.
+        r.chart_error = "timeout" if result.sqlstate == "57014" else "db_error"
+        return
+    # More rows than the cap mark the result truncated, which chart_check
+    # refuses, and keep the rest out of the turn result.
+    r.chart_result = {**result_summary(result, max_rows=MAX_ROWS),
+                      "duration_ms": result.duration_ms}
 
 
 def _execute_early(settings: Settings, text: str, memo: dict,
@@ -746,6 +796,7 @@ def run_turn(
     # checked here as well: a reader who says it should not have to say it
     # twice.
     r.grouped = parse_group(run.result_text) and not says_no_grouping(question)
+    r.chart = parse_chart(run.result_text)
 
     # A clarification is not a query, but parse_sql's looser fallbacks will
     # happily lift a fragment out of the prose -- "with SLA status 'Delayed'?"
@@ -925,6 +976,8 @@ def run_turn(
         # answer. What is shown, or written to a log, is cut later.
         r.actual_result = result_summary(actual, max_rows=None)
         r.execution_success = actual.ok
+        if actual.ok and actual.rows:
+            _run_chart_query(r, settings, executed)
         if actual.error:
             r.error = r.error or actual.error
             r.sqlstate = r.sqlstate or actual.sqlstate

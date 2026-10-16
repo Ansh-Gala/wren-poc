@@ -174,6 +174,49 @@ Rules for your answer:
    with a total worth seeing for each. Most answers are a plain list, so
    normally leave it out. Never send true when the user asked not to group.
 
+   "chart" is optional: send it only when the user wants to see the answer as
+   a picture -- they ask for one, or they want to see how numbers compare,
+   change over time or split into parts, and nothing says they want a list.
+   A word like "chart" or "graph" is not enough on its own, and a question
+   can want a chart without saying so. When in doubt, leave it out: the table
+   is always shown.
+
+   {"type": "...", "category": "<column>", "values": ["<column>", ...], "series": "<column>", "title": "...", "colors": {"<name>": "#rrggbb"}, "sql": "..."}
+
+   "type" is one of groupedColumn, stackedColumn, normalizedColumn,
+   groupedBar, stackedBar, normalizedBar, line, area, stackedArea,
+   normalizedArea, pie, donut. Use line or area for a change over time;
+   columns or bars to compare; pie or donut for the parts of one whole;
+   stacked when each category splits into parts. "category" names the one
+   result column that labels the rows; "values" names the numeric result
+   columns to draw, as written in the SELECT. The chart's rows must be one
+   row per category: aggregate in the SQL, and to compare groups put each
+   group in its own column. When each category splits by a second column
+   -- departments by status, say -- you may instead return one row per
+   category and part, name that column in "series", and give exactly one
+   value. pie and donut take exactly one value, no series, and at most 12
+   parts. For a change over time, label each row with a real date
+   and ORDER BY it, oldest first. "title" is business words only, like
+   "explanation".
+
+   "colors" is optional: a colour for a value column, a series value or a
+   category, by its name, when the colour carries meaning -- red for
+   delayed or overdue, green for done or on time, grey for not set. Leave
+   it out when no colour means anything. Task and Initiative colours
+   (Green, Yellow, Red, Black, White) are always drawn in their own.
+
+   "sql" inside "chart" is optional: leave it out when the rows of your main
+   query already have that shape. When they do not -- the user wants the
+   records listed and also drawn as totals, say -- write a second query here
+   that returns the chart's rows. It must cover exactly the same records as
+   the main query: keep every filter, person, department, initiative,
+   status, date range and rule the main query applies, including those from
+   earlier turns. It may group, count or reshape them, never widen them.
+   Leave the chart out when nothing numeric is worth drawing.
+
+   When the recent questions asked for a chart and the user has not asked
+   for a table or a list, draw one again for the follow-up.
+
    "explanation" is one or two plain sentences for a reader who does not know
    the database: what you understood the question to be asking, which reading
    of it you settled on, and what the answer will show. Never name a table or

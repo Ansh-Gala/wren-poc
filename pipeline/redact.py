@@ -96,11 +96,18 @@ _PUBLIC_FIELDS = frozenset({
 # mode it actually runs in: exactly how the column hierarchy shipped inert.
 #
 # links is positions too: which cell opens an issue, a file or a task.
-# freshness is a fixed sentence from the settings, naming no table.
+# freshness and chart_note are fixed sentences, naming no table or column.
+# download is two integers: the chat and the question's number in it. chart
+# is labels and numbers only, trimmed to _PUBLIC_CHART_FIELDS.
 _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated",
                                    "column_order", "hidden_columns",
                                    "initiative", "colours", "grouping",
-                                   "links", "freshness"})
+                                   "links", "freshness", "download",
+                                   "chart", "chart_note"})
+
+# Inside result.chart. Anything added to the chart later stays private.
+# `colors` is keyed by the labels already in `labels` and `rows`.
+_PUBLIC_CHART_FIELDS = frozenset({"type", "title", "labels", "rows", "colors"})
 
 # The suggestion chips stay -- they are the product, not a diagnostic -- but
 # their plumbing does not. `action` carries the column it filters on and `id`
@@ -225,6 +232,9 @@ def public_response(response: dict[str, Any]) -> dict[str, Any]:
     result = response.get("result")
     if isinstance(result, dict):
         out["result"] = {k: v for k, v in result.items() if k in _PUBLIC_RESULT_FIELDS}
+        if isinstance(out["result"].get("chart"), dict):
+            out["result"]["chart"] = {k: v for k, v in out["result"]["chart"].items()
+                                      if k in _PUBLIC_CHART_FIELDS}
 
     followup = response.get("followup")
     if isinstance(followup, dict):

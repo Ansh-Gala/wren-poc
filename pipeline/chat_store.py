@@ -380,8 +380,11 @@ def metadata_for(r, question: str, state: ConversationState | None = None) -> st
             "context_reset": bool(r.context_reset),
             # No masquerade in a one-person console.
             "masqueraded": False,
+            # Why a requested chart was not drawn ("ok" when it was), and how
+            # long its own query took. None when no chart was asked for.
             "chart_reason": getattr(r, "chart_reason", None),
-            "chart_query_ms": getattr(r, "chart_query_ms", None),
+            "chart_query_ms": (r.chart_result or {}).get("duration_ms")
+            if isinstance(getattr(r, "chart_result", None), dict) else None,
         },
         # Shape, never content. None means no query ran, unlike 0.
         "result": {"row_count": int(result["row_count"]) if "row_count" in result else None,
