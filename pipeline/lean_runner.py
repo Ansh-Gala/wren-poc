@@ -643,6 +643,8 @@ def run_turn(
     context = render_identity(identity) + context
     r.context_chars = len(context)
     state.awaiting_answer_to = None
+    # Named for this turn only; the SQL that runs now carries the change.
+    state.dropped_filters = []
 
     session.context_block = context or None
     if context_mode != "history":

@@ -328,3 +328,31 @@ def test_an_outstanding_question_allows_asking_again():
         "the block must permit re-asking; without it a reply that answers "
         "nothing gets forced into an interpretation"
     )
+
+
+def test_a_dropped_filter_is_named_so_it_is_not_put_back():
+    """Recovered from a real session (chat 123, turn 8).
+
+    The user dropped the "task status = open" pill. The model saw only the
+    question and a recap saying "showing all open tasks", and the business
+    rule that answers about open tasks by default put the filter straight
+    back -- in 2 of 4 runs. The removed predicate has to travel, with an
+    instruction not to re-apply it as a default.
+    """
+    state = ConversationState()
+    state.rolling_recap = "It now returns to showing all open tasks."
+    state.dropped_filters = ["task_status = 'open'"]
+
+    context = render_context(state)
+
+    assert "task_status = 'open'" in context, "the removed predicate must travel"
+    lowered = context.lower()
+    assert "removed" in lowered
+    assert "default" in lowered, "it must also overrule the open-by-default rule"
+
+
+def test_no_dropped_filter_means_no_removal_block():
+    state = ConversationState()
+    state.rolling_recap = "Open tasks."
+
+    assert "removed" not in render_context(state).lower()

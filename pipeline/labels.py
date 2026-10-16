@@ -40,7 +40,17 @@ _ACRONYMS = {
 # turn initiative_id into "Initiative Object Id" and business_unit into
 # "Initiative Unit". The database keeps its own names; this is the word the
 # people reading the grid use.
-_PHRASES = (("business_object", "initiative"),)
+#
+# task_display_name is the task's readable name; "display" is how the source
+# table tells it apart from the machine code, which the reader never needs.
+_PHRASES = (("business_object", "initiative"),
+            ("task_display_name", "task_name"))
+
+# Units the view converts to and the name does not say. The one exception to
+# "no per-column table": tms_attachment_flat.file_size is in KB, and the name
+# alone would let a reader take it for bytes. Only the exact column name gets
+# the unit; an alias is the model's own name and says what it says.
+_UNITS = {"file_size": "KB"}
 
 # Split on underscores and on runs of whitespace, so a column that already
 # arrived with spaces (a quoted alias) is handled by the same path.
@@ -58,8 +68,10 @@ def column_label(name: str | None) -> str:
     """One column name as a heading. ``initiative_ref_id`` -> ``Initiative Ref Id``."""
     if not name:
         return ""
-    return " ".join(_ACRONYMS.get(w.lower(), w[:1].upper() + w[1:])
-                    for w in _words(name))
+    label = " ".join(_ACRONYMS.get(w.lower(), w[:1].upper() + w[1:])
+                     for w in _words(name))
+    unit = _UNITS.get(str(name).strip())
+    return f"{label} ({unit})" if unit else label
 
 
 def column_phrase(name: str | None) -> str:

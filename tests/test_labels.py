@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.labels import column_label, column_labels
+from pipeline.labels import column_label, column_labels, column_phrase
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -52,6 +52,29 @@ def test_ordinary_names(name, expected):
 def test_acronyms_the_schema_itself_capitalises(name, expected):
     """Only where title case would be wrong. "Task Sla Status" reads as a typo."""
     assert column_label(name) == expected
+
+
+@pytest.mark.parametrize("name,expected", [
+    # The readable name is headed "Task Name"; the column keeps its own name.
+    ("task_display_name", "Task Name"),
+    ("business_object_status", "Initiative Status"),
+])
+def test_domain_terms(name, expected):
+    assert column_label(name) == expected
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("file_size", "File Size (KB)"),
+    # The tag's limit is still bytes, and an alias is the model's own name.
+    ("max_file_size", "Max File Size"),
+    ("total_file_size", "Total File Size"),
+])
+def test_the_unit_the_view_converted_to(name, expected):
+    assert column_label(name) == expected
+
+
+def test_chips_name_the_task_name_the_way_the_heading_does():
+    assert column_phrase("task_display_name") == "task name"
 
 
 @pytest.mark.parametrize("name", ["", None, "   ", "_", "___"])

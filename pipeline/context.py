@@ -274,6 +274,12 @@ class ConversationState:
     # what was offered; these have nothing to match, so the question itself has
     # to reach the next turn or the reply is meaningless.
     awaiting_answer_to: str | None = None
+    # Filters the user took off by hand this turn (the Drupal port's context
+    # pills). Named to the model for this one turn: left to the question's
+    # wording, the open-by-default rule put a dropped status filter back.
+    # Cleared once the context block is built, so it never reaches a later
+    # turn.
+    dropped_filters: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return self.previous_sql is None and not self.active_entity
@@ -695,6 +701,17 @@ def render_context(state: ConversationState) -> str:
         lines.append("  If it does not answer that, ask again instead of choosing an")
         lines.append("  interpretation. A reply matching none of what you asked is not")
         lines.append("  an answer to it.")
+
+    # The other exception: a filter the user removed by hand. Left to the
+    # question's wording, the model put a dropped "task_status = 'open'" back
+    # in 4 of 10 runs, because the active-first rule re-adds it by default.
+    if state.dropped_filters:
+        if lines:
+            lines.append("")
+        lines.append("THE USER JUST REMOVED THIS FILTER")
+        for predicate in state.dropped_filters:
+            lines.append(f"  {predicate}")
+        lines.append("  Leave it out of the query. Do not add it back, not even as a default.")
 
     if state.rolling_recap:
         if lines:
