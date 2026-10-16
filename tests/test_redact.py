@@ -390,3 +390,29 @@ def test_a_clarification_chip_keeps_its_ref():
                                                     "field": "task_department"}}]}
     assert public_response(turn)["followup"]["suggestions"] == [
         {"label": "Sales", "ref": "9f2c41:0"}]
+
+
+# ---------------------------------------------------- model failures --
+
+@pytest.mark.parametrize("raw,starts", [
+    ("OPENAI_API_KEY is not set.", "Authentication failed"),
+    ("Error code: 401 - invalid x-api-key", "Authentication failed"),
+    ("Error code: 429 - rate_limit_error", "Too many requests"),
+    ("overloaded_error: Overloaded", "Too many requests"),
+    ("prompt is too long: 210000 tokens", "This request is too large"),
+    ("Claude CLI timed out after 500s", "The AI service is temporarily unavailable"),
+    ("Error code: 503 - upstream unavailable", "The AI service is temporarily unavailable"),
+])
+def test_a_model_failure_says_what_kind_it_was(raw, starts):
+    """Drupal's Redactor::BY_PROVIDER: no sqlstate, so the message decides."""
+    assert safe_error(raw).startswith(starts)
+
+
+def test_a_database_failure_is_judged_by_its_sqlstate_not_its_words():
+    """A query timeout says 'timeout' too; the code is the reliable signal."""
+    message = safe_error("canceling statement due to statement timeout", "57014")
+    assert message.startswith("That question took too long")
+
+
+def test_an_unrecognised_model_failure_gets_the_general_sentence():
+    assert safe_error("something nobody foresaw").startswith("I couldn't process")

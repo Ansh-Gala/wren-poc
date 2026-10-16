@@ -337,15 +337,13 @@ class CLILocalProvider(LLMProvider):
         cmd = build_command(question, mcp_config_path, privacy_mode, settings, session)
 
         # Inherit the environment so Claude Code finds its own credentials, but do
-        # not add any secret of ours to it.
-        env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)  # force local Claude Code auth
-        # Our own Claude Code config directory: credentials, and nothing else.
-        # The CLI reads settings.json and the plugins it enables from here, so
-        # leaving it unset hands the run the operator's whole setup -- and a
-        # plugin's SessionStart hook is the one leak no flag can close.
-        if settings.claude_config_dir:
-            env["CLAUDE_CONFIG_DIR"] = settings.claude_config_dir
+        # not add any secret of ours to it. Our own Claude Code config directory
+        # holds credentials and nothing else: the CLI reads settings.json and the
+        # plugins it enables from there, so leaving it unset hands the run the
+        # operator's whole setup -- and a plugin's SessionStart hook is the one
+        # leak no flag can close.
+        from llm_api.cli_pool import cli_environment
+        env = cli_environment(settings.claude_config_dir)
 
         started = time.perf_counter()
         try:

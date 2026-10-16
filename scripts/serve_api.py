@@ -43,7 +43,7 @@ from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.metadata import enable_site_metadata
 from pipeline.models import Session
-from pipeline.redact import public_response, safe_error, safe_explanation
+from pipeline.redact import GENERIC, public_response, safe_error, safe_explanation
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 
@@ -537,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                  # a bad turn must not kill the server
             # Log, not wire: the raw message names tables and columns.
             log.exception("streamed turn failed")
-            emit("error", {"error": safe_error(str(exc))})
+            emit("error", {"error": GENERIC})
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -597,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                      # a bad turn must not kill the server
             # Log, not wire: the raw message names tables and columns.
             log.exception("turn failed")
-            return self._json(500, {"error": safe_error(str(exc))})
+            return self._json(500, {"error": GENERIC})
 
 
 def main() -> int:

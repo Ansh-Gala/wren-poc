@@ -28,9 +28,20 @@ MAX_TURNS = 8
 MAX_TOOL_RESULT_CHARS = 8000
 
 # A ceiling on the lean reply, which is a SELECT and a few sentences. The same
-# figure src/Llm/OpenAiCompatibleProvider.php uses, so a model is not given
-# more room here than it gets in the port.
-LEAN_MAX_TOKENS = 2048
+# figure the Drupal port uses for every transport (LlmProviderInterface::
+# MAX_TOKENS), so a model is not given more room here than it gets there.
+LEAN_MAX_TOKENS = 4000
+
+
+def _limits(settings: Settings) -> dict:
+    """The output cap and temperature, in the form each vendor accepts.
+
+    OpenAI's reasoning models reject max_tokens and any non-default
+    temperature; Groq and Gemini still expect both. As the Drupal port sends.
+    """
+    if settings.llm_provider == "openai":
+        return {"max_completion_tokens": LEAN_MAX_TOKENS}
+    return {"max_tokens": LEAN_MAX_TOKENS, "temperature": 0}
 
 
 def _cap(text: str) -> str:
@@ -98,8 +109,7 @@ class OpenAIProvider(LLMProvider):
                 response = await client.chat.completions.create(
                     model=settings.openai_model,
                     messages=messages,
-                    max_tokens=LEAN_MAX_TOKENS,
-                    temperature=0,
+                    **_limits(settings),
                 )
                 text = response.choices[0].message.content or ""
                 usage = response.usage
@@ -143,8 +153,7 @@ class OpenAIProvider(LLMProvider):
         stream = await client.chat.completions.create(
             model=settings.openai_model,
             messages=messages,
-            max_tokens=LEAN_MAX_TOKENS,
-            temperature=0,
+            **_limits(settings),
             stream=True,
             stream_options={"include_usage": True},
         )

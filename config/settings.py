@@ -52,7 +52,9 @@ class Settings:
     pg_password: str = field(repr=False, default="")
     pg_readonly_user: str = "wren_ro"
     pg_readonly_password: str = field(repr=False, default="")
-    statement_timeout_ms: int = 15000
+    # 100 s and 500 s, as in the Drupal port: a turn can make two model calls
+    # (answer, then repair) and two queries.
+    statement_timeout_ms: int = 100000
 
     # Who the benchmark is run as. A real request resolves this from the
     # Drupal session; a suite has no session, so it says so here.
@@ -83,7 +85,7 @@ class Settings:
 
     claude_command: str = "claude"
     claude_model: str = "sonnet"
-    claude_timeout_seconds: int = 180
+    claude_timeout_seconds: int = 500
     # One of EFFORT_LEVELS. Anything else is read as medium: a SELECT does
     # not need extended reasoning, and this is the one setting that silently
     # multiplies the bill.
@@ -187,7 +189,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         pg_password=g("DATABASE_PASSWORD") or "",
         pg_readonly_user=g("DATABASE_READONLY_USER") or "wren_ro",
         pg_readonly_password=g("DATABASE_READONLY_PASSWORD") or "",
-        statement_timeout_ms=_as_int(g("DATABASE_STATEMENT_TIMEOUT_MS"), 15000),
+        statement_timeout_ms=_as_int(g("DATABASE_STATEMENT_TIMEOUT_MS"), 100000),
         benchmark_user_id=_as_int(g("BENCHMARK_USER_ID"), 1),
         benchmark_user_name=g("BENCHMARK_USER_NAME") or "Admin",
         chatbot_user_id=_as_int(g("CHATBOT_USER_ID"), 0),
@@ -205,7 +207,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),
         claude_command=g("CLAUDE_CLI_COMMAND") or "claude",
         claude_model=(g("CLAUDE_MODEL") or "sonnet").strip(),
-        claude_timeout_seconds=_as_int(g("CLAUDE_TIMEOUT_SECONDS"), 180),
+        claude_timeout_seconds=_as_int(g("CLAUDE_TIMEOUT_SECONDS"), 500),
         claude_effort_level=(g("CLAUDE_EFFORT_LEVEL") or "medium").strip().lower(),
         claude_config_dir=(g("CLAUDE_CONFIG_DIR") or "").strip(),
         benchmark_config=(g("BENCHMARK_CONFIG") or "D").strip().upper(),

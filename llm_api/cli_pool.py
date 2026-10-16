@@ -51,6 +51,29 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from config.settings import DEFAULT_EFFORT_LEVEL, effort_level as _effort_level
+
+# The output cap every transport gets, as in the Drupal port.
+MAX_OUTPUT_TOKENS = 4000
+
+
+def cli_environment(config_dir: str = "") -> dict[str, str]:
+    """The environment a Claude Code child runs in, one-shot or pooled.
+
+    Ported from the Drupal port's ClaudeCliProvider. No API key of ours, so
+    the CLI uses its own login; the one-hour prompt cache, since about one
+    question in six arrives 5-60 minutes after the last; nothing inherited
+    that would turn caching off or shorten it; and the same output cap the
+    API transports get.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("DISABLE_PROMPT_CACHING")
+           and key not in ("ANTHROPIC_API_KEY", "FORCE_PROMPT_CACHING_5M")}
+    env["ENABLE_PROMPT_CACHING_1H"] = "1"
+    env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = "1h"
+    env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(MAX_OUTPUT_TOKENS)
+    if config_dir:
+        env["CLAUDE_CONFIG_DIR"] = config_dir
+    return env
 from pipeline.models import ClaudeRun
 
 # Where the warm-up curve above flattens. Paid on a background thread, so it
@@ -207,13 +230,9 @@ class ClaudePool:
             cmd += ["--model", self._model]
         return cmd
 
-    def _environment(self) -> dict[str, str] | None:
-        """The child's environment, or None to inherit ours unchanged."""
-        if not self._config_dir:
-            return None
-        env = os.environ.copy()
-        env["CLAUDE_CONFIG_DIR"] = self._config_dir
-        return env
+    def _environment(self) -> dict[str, str]:
+        """The child's environment: the same one a one-shot call gets."""
+        return cli_environment(self._config_dir)
 
     def _spawn_one(self) -> None:
         """Boot one process and park it. Runs on a background thread."""

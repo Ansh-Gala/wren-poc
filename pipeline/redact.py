@@ -21,8 +21,8 @@ from typing import Any
 # Enough of the answer to act on, and no more. The nouns here are business
 # vocabulary from the semantic layer's TERMINOLOGY section -- "task",
 # "initiative" -- not table or column names.
-_GENERIC = ("I couldn't process that request. Please try rephrasing your "
-            "question.")
+GENERIC = ("I couldn't process that request. Please try rephrasing your "
+           "question.")
 
 _BY_SQLSTATE = {
     # query_canceled: the statement timeout fired.
@@ -34,10 +34,34 @@ _BY_SQLSTATE = {
     "42P01": ("I couldn't find the information you asked for. Try asking about "
               "tasks, initiatives, users, departments or roles."),
     # syntax_error, and the read-only refusals.
-    "42601": _GENERIC,
+    "42601": GENERIC,
     "42501": ("I can only read data, so I can't make that change."),
     "55000": ("I can only read data, so I can't make that change."),
 }
+
+# A person-readable reason per kind of model failure. There is no code to
+# switch on, only the message text, which carries the HTTP status. First match
+# wins: a 429 body can also mention tokens. Ported from the Drupal port's
+# Redactor::BY_PROVIDER, patterns and sentences unchanged.
+_BY_PROVIDER = (
+    # No key, a dead key, or a key without access to the model asked for.
+    (re.compile(r"API_KEY is not set|\b(?:401|403)\b|unauthorized|authentication[_ ]error|"
+                r"permission[_ ]error|invalid[_ ]api[_ ]key|invalid x-api-key", re.I),
+     "Authentication failed. Please check your API key and try again."),
+    # Too many requests, or a model with no capacity left to give.
+    (re.compile(r"\b429\b|rate[_ ]limit|too many requests|overloaded", re.I),
+     "Too many requests were sent. Please wait a moment and try again."),
+    # The conversation outgrew the window it has to fit in.
+    (re.compile(r"context[_ ]length|context window|max[_ ]tokens|prompt is too long|"
+                r"token limit|too many tokens", re.I),
+     "This request is too large for the selected AI model. Please try a shorter "
+     "question or start a new conversation."),
+    # The service is down, unreachable, or took longer than we will wait.
+    (re.compile(r"\b(?:500|502|503|504)\b|timed out|timeout|unavailable|failed to launch claude|"
+                r"could not create a temporary file|could not write the system prompt|"
+                r"cURL error|connection (?:refused|reset|timed)", re.I),
+     "The AI service is temporarily unavailable. Please try again later."),
+)
 
 # Fields a normal answer may carry. Everything absent from this set is
 # diagnostic and reaches the browser only with debug on.
@@ -149,7 +173,15 @@ def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
     """
     if not error:
         return None
-    return _BY_SQLSTATE.get((sqlstate or "").strip(), _GENERIC)
+    # A sqlstate means PostgreSQL refused; the code is the reliable signal.
+    code = (sqlstate or "").strip()
+    if code:
+        return _BY_SQLSTATE.get(code, GENERIC)
+    # No sqlstate: a model or network failure, and only the message remains.
+    for pattern, message in _BY_PROVIDER:
+        if pattern.search(str(error)):
+            return message
+    return GENERIC
 
 
 def safe_clarification(text: str | None) -> str | None:
