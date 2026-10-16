@@ -54,6 +54,7 @@ from pipeline.redact import (
 )
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
+from llm_api.factory import llm_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_DIR = ROOT / "ui"
@@ -68,6 +69,10 @@ log = get_logger("serve_api")
 TOKEN_LIMIT_MESSAGE = ("You have exceeded your monthly token limit. "
                        "Please try again next month.")
 TOKEN_LIMIT_CODE = "monthly_token_limit"
+
+# Drupal's ChatRuntime::LOCK_WAIT: a second question on a busy chat waits
+# this long for the first, then fails rather than queueing forever.
+LOCK_WAIT_SECONDS = 30
 
 
 class TokenLimitError(Exception):
@@ -302,14 +307,8 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
 
 # ------------------------------------------------------------------ asking --
 
-def preflight(settings) -> None:
-    """Fail at startup rather than three seconds into someone's first question.
-
-    A misconfigured provider surfaces as an HTTP 500 carrying whatever the
-    upstream said, which is a poor place to learn that .env still points at a
-    model that was decommissioned. Checked once, here, where the message can
-    say what to do about it.
-    """
+def provider_problem(settings) -> str | None:
+    """Why the configured LLM cannot answer, or None when it can."""
     # The transports Drupal offers: the local CLI, or one HTTPS call to an
     # API. An API needs only its key; the CLI needs to be installed.
     keys = {"anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
@@ -319,22 +318,58 @@ def preflight(settings) -> None:
     provider = settings.llm_provider
     if provider in keys:
         name, key = keys[provider]
-        if not key:
-            raise SystemExit(f"LLM_PROVIDER is {provider!r} but {name} is not set in .env.")
-        if provider == "anthropic":
-            return
-    elif provider != "cli":
-        raise SystemExit(
-            f"LLM_PROVIDER is {provider!r}. Use cli, anthropic, openai, groq or gemini."
-        )
-    else:
-        from llm_api.cli_provider import detect_claude
-        if not detect_claude(settings.claude_command):
-            raise SystemExit(
-                f"Claude Code CLI not found (looked for {settings.claude_command!r} "
+        return None if key else f"LLM_PROVIDER is {provider!r} but {name} is not set in .env."
+    if provider != "cli":
+        return f"LLM_PROVIDER is {provider!r}. Use cli, anthropic, openai, groq or gemini."
+    from llm_api.cli_provider import detect_claude
+    if not detect_claude(settings.claude_command):
+        return (f"Claude Code CLI not found (looked for {settings.claude_command!r} "
                 "on PATH).\nInstall it from https://claude.com/claude-code, then "
-                "run `claude --version` to confirm."
-            )
+                "run `claude --version` to confirm.")
+    return None
+
+
+def health(settings) -> dict:
+    """GET /health, in the shape of Drupal's /api/sql-chat/health."""
+    from database.connection import read_only_posture, run_readonly
+    mode, vendor, model = llm_identity(settings)
+    database = run_readonly(settings, "SELECT 1")
+    posture = read_only_posture(settings)
+    ready = provider_problem(settings) is None
+    return {
+        "ok": database.ok and ready and posture["select_only"],
+        "provider": mode,
+        # What is answering questions right now.
+        "api_provider": vendor if mode == "api" else None,
+        "model": model,
+        "provider_ready": ready,
+        "database": {
+            "ok": database.ok,
+            "name": settings.pg_database,
+            # Sanitised: the raw message can name schema objects.
+            "error": None if database.ok else "could not query the database",
+        },
+        "read_only_role": {
+            "role": settings.pg_readonly_user,
+            "privileges": posture["privileges"],
+            "select_only": posture["select_only"],
+        },
+    }
+
+
+def preflight(settings) -> None:
+    """Fail at startup rather than three seconds into someone's first question.
+
+    A misconfigured provider surfaces as an HTTP 500 carrying whatever the
+    upstream said, which is a poor place to learn that .env still points at a
+    model that was decommissioned. Checked once, here, where the message can
+    say what to do about it.
+    """
+    problem = provider_problem(settings)
+    if problem:
+        raise SystemExit(problem)
+    if settings.llm_provider == "anthropic":
+        return
 
     if not settings.cli_lean:
         # The MCP path needs wren_setup, which a lean-only deployment does not
@@ -439,7 +474,9 @@ class Runtime:
 
         conversation = conversation_for(session_id)
 
-        with conversation.lock:
+        if not conversation.lock.acquire(timeout=LOCK_WAIT_SECONDS):
+            raise RuntimeError("another question is still being answered on this session")
+        try:
             reset = bool(payload.get("reset_context"))
             if reset:
                 conversation.reset()
@@ -535,6 +572,8 @@ class Runtime:
                 full["result"] = {**full["result"],
                                   "download": {"chat_id": chat_id, "turn": turn_index + 1}}
             store.record_turn(chat_id, turn_index, question, result, full, conversation.state)
+        finally:
+            conversation.lock.release()
 
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
@@ -838,8 +877,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(f"event: {event}\ndata: {body}\n\n".encode("utf-8"))
             self.wfile.flush()
 
+        # Kill switch, honoured server-side: when off, only `answer` is sent.
+        streaming = self.runtime.settings.stream_answers
         try:
-            answer = self.runtime.ask(payload, on_rows=lambda d: emit("rows", d))
+            answer = self.runtime.ask(payload, on_rows=(lambda d: emit("rows", d))
+                                      if streaming else None)
             emit("answer", answer)
         except TokenLimitError as exc:
             # Same body as /ask's 429.
@@ -854,7 +896,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path, _, query = self.path.partition("?")
         if path == "/health":
-            return self._json(200, {"ok": True, "sessions": len(SESSIONS)})
+            return self._json(200, health(self.runtime.settings))
 
         if path == "/chats" or path.startswith("/chats/"):
             return self._chats(path, parse_qs(query))

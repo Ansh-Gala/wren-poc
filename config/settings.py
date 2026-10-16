@@ -126,6 +126,8 @@ class Settings:
     
     llm_provider: str = "cli" # 'cli' or 'openai'
     cli_lean: bool = False
+    # Drupal's stream_answers: off, /ask/stream sends only the final answer.
+    stream_answers: bool = True
     # Warm Claude Code processes kept standing by, each serving one question.
     # The CLI costs ~4s to boot and that was being paid on every query; this
     # pays it in advance instead. 0 disables the pool and restores the plain
@@ -250,6 +252,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         debug=_as_bool(g("DEBUG"), False),
         llm_provider=(g("LLM_PROVIDER") or "cli").strip().lower(),
         cli_lean=_as_bool(g("CLI_LEAN"), False),
+        stream_answers=_as_bool(g("STREAM_ANSWERS"), True),
         cli_pool_size=int(g("CLI_POOL_SIZE") or 4),
         cli_pool_warmup_seconds=float(g("CLI_POOL_WARMUP_SECONDS") or 3.0),
         # Each branch falls back to "" -- naming a provider whose key is absent

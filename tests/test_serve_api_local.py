@@ -30,6 +30,7 @@ class StubRuntime:
     def __init__(self):
         self.payloads: list[dict] = []
         self.fail = False
+        self.settings = SimpleNamespace(stream_answers=True)
 
     def ask(self, payload, on_rows=None):
         self.payloads.append(dict(payload))
@@ -275,3 +276,85 @@ def test_the_chart_and_the_download_survive_debug_off():
     assert public["result"]["download"] == {"chat_id": 4, "turn": 2}
     assert set(public["result"]["chart"]) == {"type", "labels", "rows", "colors"}
     assert "chart_reason" not in public and "chart_query" not in public
+
+
+# ------------------------------------------------- lock, health, streaming --
+
+def test_a_busy_chat_is_waited_for_then_refused(runtime, monkeypatch):
+    rt, asked = runtime
+    monkeypatch.setattr(api, "LOCK_WAIT_SECONDS", 0.05)
+    conversation = api.conversation_for("busy")
+    conversation.lock.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="still being answered"):
+            rt.ask({"session_id": "busy", "question": "q"})
+    finally:
+        conversation.lock.release()
+    assert asked == []
+    rt.ask({"session_id": "busy", "question": "q"})     # released after a turn
+    rt.ask({"session_id": "busy", "question": "q"})
+    assert asked == ["q", "q"]
+
+
+import dataclasses  # noqa: E402
+
+from config.settings import Settings  # noqa: E402
+from pipeline.models import QueryResult  # noqa: E402
+
+API = Settings(pg_host="h", pg_port=5432, pg_database="tms", pg_user="u",
+               pg_readonly_user="wren_ro", llm_provider="anthropic",
+               anthropic_api_key="sk-test", anthropic_model="claude-opus-5-5")
+
+
+def _health(monkeypatch, settings=API, db_error=None, privileges=("SELECT",)):
+    import database.connection as connection
+    monkeypatch.setattr(connection, "run_readonly", lambda s, sql: QueryResult(
+        columns=[], rows=[], duration_ms=1.0, error=db_error))
+    monkeypatch.setattr(connection, "read_only_posture", lambda s: {
+        "privileges": list(privileges), "select_only": list(privileges) == ["SELECT"],
+        "error": None})
+    return api.health(settings)
+
+
+def test_health_says_what_answers_and_that_all_is_well(monkeypatch):
+    assert _health(monkeypatch) == {
+        "ok": True, "provider": "api", "api_provider": "anthropic",
+        "model": "claude-opus-5-5", "provider_ready": True,
+        "database": {"ok": True, "name": "tms", "error": None},
+        "read_only_role": {"role": "wren_ro", "privileges": ["SELECT"], "select_only": True},
+    }
+
+
+def test_health_fails_on_any_one_check_and_hides_the_database_error(monkeypatch):
+    down = _health(monkeypatch, db_error='relation "secret_table" does not exist')
+    assert not down["ok"] and down["database"]["error"] == "could not query the database"
+    assert not _health(monkeypatch, privileges=("INSERT", "SELECT"))["ok"]
+    no_key = _health(monkeypatch, dataclasses.replace(API, anthropic_api_key=""))
+    assert not no_key["ok"] and not no_key["provider_ready"]
+
+
+def _stream(streaming: bool) -> str:
+    import io
+
+    class Rt:
+        settings = SimpleNamespace(stream_answers=streaming)
+
+        def ask(self, payload, on_rows=None):
+            if on_rows is not None:
+                on_rows({"sql": "SELECT 1"})
+            return {"answer": "done"}
+
+    body = b'{"question": "q"}'
+    handler = api.Handler.__new__(api.Handler)
+    handler.runtime, handler.client_address = Rt(), ("127.0.0.1", 0)
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile, handler.wfile = io.BytesIO(body), io.BytesIO()
+    handler.send_response = handler.send_header = lambda *a: None
+    handler.end_headers = lambda: None
+    handler._stream()
+    return handler.wfile.getvalue().decode()
+
+
+def test_streaming_off_sends_only_the_answer():
+    assert "event: rows" in _stream(True) and "event: answer" in _stream(True)
+    assert "event: rows" not in _stream(False) and "event: answer" in _stream(False)

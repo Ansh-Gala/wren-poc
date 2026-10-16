@@ -81,6 +81,23 @@ def close_thread_connection() -> None:
             pass
 
 
+def read_only_posture(settings: Settings) -> dict:
+    """What the read-only role may do to tables; SELECT alone is the aim.
+
+    Asked as that role, as Drupal's QueryRunner::readOnlyPosture asks it.
+    """
+    try:
+        with connect(settings, readonly=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT privilege_type FROM information_schema.role_table_grants"
+                " WHERE grantee = %s", (settings.pg_readonly_user,))
+            privileges = sorted(row[0] for row in cur.fetchall())
+        return {"privileges": privileges, "select_only": privileges == ["SELECT"],
+                "error": None}
+    except Exception as exc:
+        return {"privileges": [], "select_only": False, "error": str(exc)}
+
+
 def run_readonly(
     settings: Settings,
     sql: str,
