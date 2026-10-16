@@ -25,23 +25,25 @@ import mimetypes
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
 from pipeline.context import ConversationState
-from pipeline.followup import ACTION_TYPES, Action, apply_action
+from pipeline.context_pills import context_pills, drop_by_ref
+from pipeline.evaluator import SHOWN_ROWS, first_rows
+from pipeline.followup import ACTION_TYPES, Action, apply_action, label_for_ref
+from pipeline.freshness import freshness_note
 from pipeline.identity_provider import resolve_identity
-from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
+from pipeline.lean_runner import TurnResult, load_gazetteer, logged, run_turn
 from pipeline.initiative import with_initiative
 from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.metadata import enable_site_metadata
 from pipeline.models import Session
-from pipeline.redact import public_response, safe_error
+from pipeline.redact import public_response, safe_error, safe_explanation
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 
@@ -146,13 +148,31 @@ def state_mutations(before: dict, after: dict) -> list[str]:
 
 
 def to_response(r: TurnResult, asked: str, before: dict, after: dict,
-                settings=None) -> dict:
+                settings=None, pills: list[dict] | None = None) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
 
     result_match and semantic_match come through as None, which the console
     renders as "n/a". They are only meaningful against a known-correct answer,
     and a real question does not have one.
     """
+    # The raw message names the table and column it failed on. The sanitised
+    # one is what a normal answer carries; the original travels only under
+    # debug, alongside the SQL it belongs to.
+    error = safe_error(r.error, getattr(r, "sqlstate", None))
+
+    # At most SHOWN_ROWS rows; row_count keeps the whole count. with_initiative
+    # and with_links are innermost: both need the real column names, and every
+    # wrapper around them only adds fields.
+    shown = first_rows(r.actual_result, SHOWN_ROWS)
+    columns = (shown or {}).get("columns")
+    result = with_presentation(
+        with_column_labels(with_links(with_initiative(shown, columns, settings), columns)),
+        after.get("tables"), r.grouped)
+    if isinstance(result, dict) and result.get("rows") and settings is not None:
+        note = freshness_note(settings, [r.generated_sql])
+        if note:
+            result = {**result, "freshness": note}
+
     return {
         "decision": r.decision,
         "question": asked,
@@ -161,25 +181,19 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "resumed_from": r.resumed_from,
         "preflight_clarified": r.preflight_clarified,
 
+        # Written before the query runs: on an error it would describe an
+        # answer that never arrived, so it is dropped.
+        "explanation": safe_explanation(r.explanation) if error is None else None,
+        # Public: a filter the reader cannot see, they cannot argue with.
+        "context": pills or [],
+
         "generated_sql": r.generated_sql,
         "sql_valid": r.sql_valid,
         "execution_success": r.execution_success,
-        # The raw message names the table and column it failed on. The
-        # sanitised one is what a normal answer carries; the original travels
-        # only under debug, alongside the SQL it belongs to.
-        "error": safe_error(r.error, getattr(r, "sqlstate", None)),
+        "error": error,
         "raw_error": r.error,
         "failure_category": r.failure_category,
-        # with_initiative and with_links are innermost: both need the real
-        # column names, and every wrapper around them only adds fields.
-        "result": with_presentation(
-            with_column_labels(
-                with_links(
-                    with_initiative(r.actual_result,
-                                    (r.actual_result or {}).get("columns"),
-                                    settings),
-                    (r.actual_result or {}).get("columns"))),
-            after.get("tables"), r.grouped),
+        "result": result,
 
         "semantic_match": r.semantic_match,
         "semantic_issues": r.semantic_issues,
@@ -299,7 +313,7 @@ class Runtime:
     def record(self, result, question: str, state: dict) -> None:
         if self.log_path is None:
             return
-        row = asdict(result)
+        row = logged(result)
         row.update({
             "asked_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "session_id": result.conversation_id,
@@ -321,8 +335,11 @@ class Runtime:
         either way, so a caller that ignores the rows behaves exactly as it
         does today.
         """
-        question = (payload.get("question") or "").strip()
-        if not question:
+        question = str(payload.get("question") or "").strip()
+        drop_ref = str(payload.get("drop_ref") or "").strip()
+        # A drop has no question; the goal fills it in once the state is in
+        # hand. Checked again below.
+        if not question and not drop_ref:
             raise ValueError("question is required")
         debug = bool(payload.get("debug"))
 
@@ -349,6 +366,24 @@ class Runtime:
                 except (ValueError, TypeError) as exc:
                     log.warning("ignoring unusable action %s: %s", action, exc)
 
+            # Map a chip's ref back to the exact offered wording. A stale chip
+            # matches nothing and is read as typed text; the turn still
+            # resolves it, the same as a typed answer.
+            option_ref = str(payload.get("option_ref") or "").strip()
+            if option_ref:
+                chosen = label_for_ref(conversation.state.pending_clarification, option_ref)
+                if chosen is not None:
+                    question = chosen
+
+            # Dropping a pill: take the constraint off, and ask the active goal
+            # again with one fewer constraint.
+            if drop_ref:
+                dropped = drop_by_ref(conversation.state, drop_ref)
+                if dropped and not question and conversation.state.active_goal is not None:
+                    question = conversation.state.active_goal
+            if not question:
+                raise ValueError("question is required")
+
             before = state_snapshot(conversation.state)
 
             turn_index = conversation.turn_index
@@ -372,11 +407,12 @@ class Runtime:
             )
             conversation.turn_index += 1
             after = state_snapshot(conversation.state)
+            pills = context_pills(conversation.state)
             self.record(result, question, after)
 
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
-        full = to_response(result, question, before, after, self.settings)
+        full = to_response(result, question, before, after, self.settings, pills)
 
         # Bounded: a long session should not grow without limit, and nobody
         # scrolls back past fifty answers to read their SQL. Under the lock
@@ -401,16 +437,22 @@ class Runtime:
         Grouping lands with the finished answer, which carries the whole
         result again.
         """
-        summary = early.get("actual_result")
+        summary = first_rows(early.get("actual_result"), SHOWN_ROWS)
         columns = (summary or {}).get("columns")
+        result = with_column_labels(
+            with_links(with_initiative(summary, columns, self.settings), columns))
+        # The same note the answer will carry, so it arrives with the table.
+        if isinstance(result, dict) and result.get("rows"):
+            note = freshness_note(self.settings, [early.get("generated_sql")])
+            if note:
+                result = {**result, "freshness": note}
         event = {
             "generated_sql": early.get("generated_sql"),
             "sql_valid": early.get("sql_valid"),
             "execution_success": early.get("execution_success"),
             "error": safe_error(early.get("error"), early.get("sqlstate")),
             "raw_error": early.get("error"),
-            "result": with_column_labels(
-                with_links(with_initiative(summary, columns, self.settings), columns)),
+            "result": result,
         }
         return event if debug else public_response(event)
 

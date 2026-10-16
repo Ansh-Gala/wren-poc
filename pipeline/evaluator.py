@@ -144,8 +144,12 @@ def compare_results(
     return False
 
 
-def result_summary(result: QueryResult, max_rows: int = 20) -> dict:
+def result_summary(result: QueryResult, max_rows: int | None = 20) -> dict:
     """Compact, JSON-safe view of a result for the report.
+
+    ``max_rows=None`` keeps every row, as the Drupal port's summary does for a
+    turn: the follow-up layer reads the whole answer, and the cut is made only
+    for what is shown (SHOWN_ROWS) or kept in a log (LOGGED_ROWS).
 
     Only ever applied to results already held on the Python side. Nothing from
     here is sent to Claude.
@@ -161,8 +165,25 @@ def result_summary(result: QueryResult, max_rows: int = 20) -> dict:
         "columns": list(result.columns),
         "row_count": len(result.rows),
         "rows": rows,
-        "truncated": len(result.rows) > max_rows,
+        "truncated": max_rows is not None and len(result.rows) > max_rows,
     }
+
+
+# Rows the browser is sent. More are cut, with `truncated` set; row_count
+# keeps the whole count. The Drupal port's ChatRuntime::SHOWN_ROWS.
+SHOWN_ROWS = 200
+
+# Rows a log file keeps per turn: enough to read the answer back, and the
+# figure every turn log has always held.
+LOGGED_ROWS = 20
+
+
+def first_rows(summary, limit: int):
+    """A summary with at most ``limit`` rows. An error summary or None passes
+    through, and row_count keeps the whole count."""
+    if not isinstance(summary, dict) or len(summary.get("rows") or []) <= limit:
+        return summary
+    return {**summary, "rows": summary["rows"][:limit], "truncated": True}
 
 
 def _jsonable(value: Any) -> Any:

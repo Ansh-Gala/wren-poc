@@ -34,6 +34,10 @@ _ISSUE_LABEL_COLUMNS = ("issue_title",)
 _FILE_URI_COLUMNS = ("file_uri",)
 _FILE_LABEL_COLUMNS = ("file_name",)
 
+# The task's own identifier. One position only: a task opens through its own
+# button, so there is no readable cell to make clickable.
+_TASK_ID_COLUMNS = ("task_id",)
+
 
 def _first(names: list[str], candidates) -> int | None:
     for i, name in enumerate(names):
@@ -43,7 +47,7 @@ def _first(names: list[str], candidates) -> int | None:
 
 
 def indices(columns: list[str] | None) -> dict:
-    """Where an issue and a file sit in a result, by position.
+    """Where an issue, a file and a task sit in a result, by position.
 
     The first occurrence of each wins, matching `initiative.indices`: a result
     may project one name twice, and the frontend keys its rows by index.
@@ -54,6 +58,7 @@ def indices(columns: list[str] | None) -> dict:
     issue_label = _first(names, _ISSUE_LABEL_COLUMNS)
     file_uri = _first(names, _FILE_URI_COLUMNS)
     file_label = _first(names, _FILE_LABEL_COLUMNS)
+    task_id = _first(names, _TASK_ID_COLUMNS)
 
     return {
         "issue": {
@@ -65,6 +70,7 @@ def indices(columns: list[str] | None) -> dict:
             "uri_at": file_uri,
             "at": file_label if file_label is not None else file_uri,
         } if file_uri is not None else None,
+        "task": {"id_at": task_id} if task_id is not None else None,
     }
 
 
@@ -83,7 +89,7 @@ def with_links(result, columns: list[str] | None):
         return result
 
     where = indices(columns)
-    if where["issue"] is None and where["file"] is None:
+    if where["issue"] is None and where["file"] is None and where["task"] is None:
         # Nothing to follow. Say so by omission rather than by a block of
         # nulls the frontend would have to pick apart.
         return result

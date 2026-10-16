@@ -15,7 +15,9 @@ import json
 
 import pytest
 
-from pipeline.redact import public_response, safe_clarification, safe_error
+from pipeline.redact import (
+    public_response, safe_clarification, safe_error, safe_explanation,
+)
 
 # Real identifiers from this database. Any of these reaching a normal response
 # is the leak, whichever field it arrives in.
@@ -336,3 +338,55 @@ def test_a_clean_followup_question_is_not_disturbed():
                         "suggestions": [{"label": "Open tasks"}]}
     out = public_response(turn)
     assert out["followup"]["question"] == "What would you like to know next?"
+
+
+# ------------------------------------------------- explanation and context --
+
+def test_an_explanation_written_for_a_person_is_shown():
+    text = "Open tasks in the Sales department, newest first."
+    assert safe_explanation(text) == text
+
+
+def test_an_explanation_naming_a_column_is_dropped_whole():
+    """Dropped, not scrubbed: partial redaction misses forms nobody foresaw."""
+    assert safe_explanation("Filtered on task_sla_status for you.") is None
+    assert safe_explanation("SELECT the delayed ones") is None
+
+
+def test_no_explanation_stays_no_explanation():
+    assert safe_explanation(None) is None
+    assert safe_explanation("   ") is None
+
+
+def test_debug_off_keeps_the_explanation_and_the_pills():
+    turn = full_turn()
+    turn["explanation"] = "The delayed tasks."
+    turn["context"] = [{"ref": "ed87674c6b", "label": "task status = open",
+                        "kind": "filter"}]
+    out = public_response(turn)
+    assert out["explanation"] == "The delayed tasks."
+    assert out["context"] == turn["context"]
+    assert_nothing_sensitive(out)
+
+
+def test_debug_off_keeps_the_links_and_the_note():
+    """Both name nothing: positions, and a fixed sentence."""
+    turn = full_turn()
+    turn["result"]["links"] = {"issue": None, "file": None, "task": {"id_at": 0}}
+    turn["result"]["freshness"] = "This data is not updated in real time."
+    result = public_response(turn)["result"]
+    assert result["links"] == turn["result"]["links"]
+    assert result["freshness"] == turn["result"]["freshness"]
+
+
+def test_a_clarification_chip_keeps_its_ref():
+    """Sent back as option_ref, the ref ties a click to the question that
+    offered it. It is a nonce and a position, and names nothing."""
+    turn = full_turn()
+    turn["followup"] = {"type": "clarification", "question": "Which department?",
+                        "suggestions": [{"id": "dept_sales", "label": "Sales",
+                                         "ref": "9f2c41:0",
+                                         "action": {"type": "add_filter",
+                                                    "field": "task_department"}}]}
+    assert public_response(turn)["followup"]["suggestions"] == [
+        {"label": "Sales", "ref": "9f2c41:0"}]

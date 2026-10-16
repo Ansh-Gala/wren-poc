@@ -57,3 +57,17 @@ def test_both_targets_can_appear_in_one_answer():
 def test_the_first_occurrence_wins():
     """A result may project one name twice; the frontend keys rows by index."""
     assert indices(["issue_id", "issue_id"])["issue"]["id_at"] == 0
+
+
+def test_a_task_is_followed_by_its_id_alone():
+    """A task opens through its own button: no readable cell to point at."""
+    assert indices(["task_display_name", "task_id"])["task"] == {"id_at": 1}
+
+
+def test_a_task_alone_is_enough_for_a_links_block():
+    result = {"columns": ["task_id"], "rows": [[7]]}
+    assert with_links(result, ["task_id"])["links"]["task"] == {"id_at": 0}
+
+
+def test_no_task_id_means_no_task_target():
+    assert indices(["task_display_name"])["task"] is None

@@ -44,6 +44,9 @@ _BY_SQLSTATE = {
 _PUBLIC_FIELDS = frozenset({
     "question",        # what they typed, echoed back
     "clarification",   # the model's own words, written to be read
+    "explanation",     # what the model understood; safe_explanation guards it
+    "context",         # the filter pills: a filter the reader cannot see,
+                       # they cannot argue with
     "followup",        # the suggestion chips
     "result",          # rows, and the readable headings
     "error",           # sanitised by safe_error before it gets here
@@ -67,9 +70,13 @@ _PUBLIC_FIELDS = frozenset({
 # carries a column name, a table name or any SQL. Without them here the grid
 # would draw no colour bar and open no dialog when debug is off, which is the
 # mode it actually runs in: exactly how the column hierarchy shipped inert.
+#
+# links is positions too: which cell opens an issue, a file or a task.
+# freshness is a fixed sentence from the settings, naming no table.
 _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated",
                                    "column_order", "hidden_columns",
-                                   "initiative", "colours", "grouping"})
+                                   "initiative", "colours", "grouping",
+                                   "links", "freshness"})
 
 # The suggestion chips stay -- they are the product, not a diagnostic -- but
 # their plumbing does not. `action` carries the column it filters on and `id`
@@ -77,9 +84,10 @@ _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "trunca
 # own label as the next question, which is the path the follow-up layer
 # already documents as the one that keeps a single way for a query to be
 # built. What remains is the wording, which is prose rather than an
-# identifier.
+# identifier, and `ref`, a nonce and a position that names nothing: sent back
+# as option_ref, it ties a click to the clarification that offered it.
 _PUBLIC_FOLLOWUP_FIELDS = frozenset({"type", "question", "suggestions"})
-_PUBLIC_SUGGESTION_FIELDS = frozenset({"label"})
+_PUBLIC_SUGGESTION_FIELDS = frozenset({"label", "ref"})
 
 # Text that gives the game away: an identifier, or a query.
 #
@@ -154,6 +162,18 @@ def safe_clarification(text: str | None) -> str | None:
         return None
     body = str(text).strip()
     return _CLARIFY_FALLBACK if names_a_database_object(body) else body
+
+
+def safe_explanation(text: str | None) -> str | None:
+    """The model's account of what it understood, if it is fit to show.
+
+    Dropped whole rather than scrubbed: partial redaction misses forms nobody
+    anticipated, and a turn reads fine without one. ``None`` in, ``None`` out.
+    """
+    if text is None or not str(text).strip():
+        return None
+    body = str(text).strip()
+    return None if names_a_database_object(body) else body
 
 
 def public_response(response: dict[str, Any]) -> dict[str, Any]:

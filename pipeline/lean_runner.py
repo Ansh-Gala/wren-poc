@@ -33,8 +33,8 @@ from pipeline.followup import (
 )
 from pipeline.normalize import normalize
 from pipeline.evaluator import (
-    compare_projection_agnostic, compare_results, compare_row_subset,
-    result_summary,
+    LOGGED_ROWS, compare_projection_agnostic, compare_results, compare_row_subset,
+    first_rows, result_summary,
 )
 from pipeline.lean_suite import Conversation, SuiteTurn
 from pipeline.sql_semantics import compare as compare_semantics
@@ -411,7 +411,7 @@ def _execute_early(settings: Settings, text: str, memo: dict,
         "execution_success": res.ok,
         "error": res.error,
         "sqlstate": res.sqlstate,
-        "actual_result": result_summary(res),
+        "actual_result": result_summary(res, max_rows=None),
     })
 
 
@@ -452,6 +452,7 @@ def _repair(
     settings: Settings,
     mcp_config_path,
     privacy_mode: str,
+    r: TurnResult | None = None,
 ) -> tuple[str | None, float]:
     """One more attempt, with the database's complaint attached.
 
@@ -471,12 +472,21 @@ def _repair(
     Returns the corrected SQL and what the call cost in milliseconds. None
     means the attempt produced nothing usable, and the caller keeps the
     original failure -- a repair that cannot help must not make things worse.
+
+    The call's tokens are added to ``r``, as Drupal adds them, so the turn
+    records what it really cost.
     """
     provider = get_provider(settings)
     run = provider.ask(
         build_repair_question(question, sql, error),
         mcp_config_path, privacy_mode, settings, None,
     )
+    # Counted before any return: a repair that fails still cost tokens.
+    if r is not None:
+        r.prompt_tokens += run.prompt_tokens
+        r.completion_tokens += run.completion_tokens
+        r.cache_read_tokens += run.cache_read_tokens
+        r.cache_write_tokens += run.cache_write_tokens
     if not run.ok or not run.result_text:
         return None, run.duration_ms
     fixed = parse_sql(run.result_text).sql
@@ -774,7 +784,7 @@ def run_turn(
             r.behavior_match = r.result_match = r.semantic_match = True
         elif parsed.sql:
             res = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
-            r.actual_result = result_summary(res)
+            r.actual_result = result_summary(res, max_rows=None)
             r.execution_success = res.ok
             empty = res.ok and (
                 not res.rows or (len(res.rows) == 1 and res.rows[0][0] == 0))
@@ -858,11 +868,15 @@ def run_turn(
             # needed a second attempt, which is the figure worth having.
             # Whether the attempt produced anything usable is repair_succeeded.
             r.repair_attempted = True
-            fixed, cost_ms = _repair(question, parsed.sql, actual.error,
-                                     settings, mcp_config_path, privacy_mode)
+            try:
+                fixed, cost_ms = _repair(question, parsed.sql, actual.error,
+                                         settings, mcp_config_path, privacy_mode, r)
+            except Exception:
+                # The original failure is still reported below; a repair that
+                # cannot run must not turn a database error into a crash.
+                fixed, cost_ms = None, 0.0
             r.repair_ms = cost_ms
             if fixed:
-                r.repaired_from = parsed.sql
                 # The corrected statement goes through the same two gates as
                 # the first one. A repair must not become the way round them.
                 from pipeline.sql_semantics import check_against_schema
@@ -880,6 +894,7 @@ def run_turn(
                         # one standing, because that is the one the user's
                         # question actually produced.
                         r.repair_succeeded = True
+                        r.repaired_from = parsed.sql
                         parsed = ParsedSQL(sql=fixed, strategy="repair",
                                            raw=parsed.raw)
                         r.generated_sql = fixed
@@ -887,7 +902,9 @@ def run_turn(
                         r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
                         actual = retried
 
-        r.actual_result = result_summary(actual)
+        # Every row, as Drupal keeps them: the follow-up layer reads the whole
+        # answer. What is shown, or written to a log, is cut later.
+        r.actual_result = result_summary(actual, max_rows=None)
         r.execution_success = actual.ok
         if actual.error:
             r.error = r.error or actual.error
@@ -1017,6 +1034,19 @@ def run_turn(
     return r
 
 
+def logged(r: TurnResult) -> dict:
+    """A turn as a log file keeps it: everything, but at most LOGGED_ROWS rows.
+
+    A turn holds every row its query returned. A log that wrote them all would
+    grow by thousands of rows per question, and it has never needed more than
+    enough to read the answer back.
+    """
+    row = asdict(r)
+    for key in ("actual_result", "expected_result"):
+        row[key] = first_rows(row.get(key), LOGGED_ROWS)
+    return row
+
+
 def run_suite(
     conversations: list[Conversation],
     settings: Settings,
@@ -1053,7 +1083,7 @@ def run_suite(
             if jsonl_path is not None:
                 jsonl_path.parent.mkdir(parents=True, exist_ok=True)
                 with jsonl_path.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(asdict(r), default=str) + "\n")
+                    fh.write(json.dumps(logged(r), default=str) + "\n")
 
             if on_result is not None:
                 on_result(r)

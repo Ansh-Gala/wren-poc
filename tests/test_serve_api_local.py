@@ -110,3 +110,109 @@ def test_another_machine_gets_neither_debug_nor_the_debug_log(server, monkeypatc
 ])
 def test_what_counts_as_this_machine(address, local):
     assert api._local_client(address) is local
+
+
+# ------------------------------------------------------- the answer's shape --
+
+from types import SimpleNamespace  # noqa: E402
+
+from pipeline.context_pills import pill_ref  # noqa: E402
+from pipeline.followup import FollowUp, Suggestion  # noqa: E402
+from pipeline.lean_runner import TurnResult  # noqa: E402
+
+NOTE = "This data is not updated in real time."
+SETTINGS = SimpleNamespace(chatbot_user_id=0, freshness_tables=("vf_report_task_summary",),
+                           freshness_message=NOTE)
+
+
+def _turn(**fields) -> TurnResult:
+    r = TurnResult(turn_id="t.0", conversation_id="t", turn_index=0,
+                   category="runtime", question="q")
+    for name, value in fields.items():
+        setattr(r, name, value)
+    return r
+
+
+def _rows(n: int) -> dict:
+    return {"columns": ["n"], "rows": [[i] for i in range(n)], "row_count": n,
+            "truncated": False}
+
+
+def test_the_browser_gets_200_rows_and_the_whole_count():
+    full = api.to_response(_turn(actual_result=_rows(250)), "q", {}, {}, SETTINGS)
+    assert len(full["result"]["rows"]) == 200
+    assert full["result"]["row_count"] == 250
+    assert full["result"]["truncated"] is True
+
+
+def test_the_explanation_travels_only_with_an_answer():
+    ok = api.to_response(_turn(explanation="The open tasks."), "q", {}, {}, SETTINGS)
+    failed = api.to_response(_turn(explanation="The open tasks.", error="boom"),
+                             "q", {}, {}, SETTINGS)
+    assert ok["explanation"] == "The open tasks."
+    assert failed["explanation"] is None, "it would describe an answer that never arrived"
+
+
+def test_rows_from_a_snapshot_table_carry_the_note():
+    snapshot = api.to_response(
+        _turn(actual_result=_rows(3), generated_sql="SELECT * FROM vf_report_task_summary"),
+        "q", {}, {}, SETTINGS)
+    live = api.to_response(
+        _turn(actual_result=_rows(3), generated_sql="SELECT * FROM tms_task_flat"),
+        "q", {}, {}, SETTINGS)
+    assert snapshot["result"]["freshness"] == NOTE
+    assert "freshness" not in live["result"]
+
+
+def test_the_pills_are_passed_through():
+    pills = [{"ref": "x", "label": "task status = open", "kind": "filter"}]
+    assert api.to_response(_turn(), "q", {}, {}, SETTINGS, pills)["context"] == pills
+    assert api.to_response(_turn(), "q", {}, {}, SETTINGS)["context"] == []
+
+
+@pytest.fixture
+def runtime(monkeypatch):
+    """The real Runtime.ask, with run_turn faked to record what it was asked."""
+    asked: list[str] = []
+
+    def fake_run_turn(turn, *args, **kwargs):
+        asked.append(turn.question)
+        return _turn(question=turn.question)
+
+    monkeypatch.setattr(api, "run_turn", fake_run_turn)
+    api.SESSIONS.clear()
+    rt = api.Runtime.__new__(api.Runtime)
+    rt.settings, rt.gazetteer, rt.mcp_config_path = SETTINGS, [], None
+    rt.privacy, rt.context_mode, rt.log_path = "strict", "state", None
+    return rt, asked
+
+
+def test_dropping_a_pill_asks_the_goal_again_without_it(runtime):
+    rt, asked = runtime
+    state = api.conversation_for("drop").state
+    state.active_goal = "open tasks in Sales"
+    state.active_filters = {"task_status": "task_status = 'open'"}
+
+    rt.ask({"session_id": "drop", "drop_ref": pill_ref("task_status")})
+
+    assert asked == ["open tasks in Sales"]
+    assert "task_status" not in state.active_filters
+
+
+def test_a_drop_with_nothing_to_ask_is_refused(runtime):
+    rt, _ = runtime
+    with pytest.raises(ValueError):
+        rt.ask({"session_id": "nothing", "drop_ref": "0000000000"})
+
+
+def test_a_chip_ref_asks_the_reading_it_was_offered_for(runtime):
+    rt, asked = runtime
+    state = api.conversation_for("chip").state
+    state.pending_clarification = FollowUp(
+        type="clarification", reason="ambiguous_interpretation", question="Which one?",
+        suggestions=[Suggestion(id="a", label="Delayed open tasks", ref="n1:0")])
+
+    rt.ask({"session_id": "chip", "question": "the first one", "option_ref": "n1:0"})
+    rt.ask({"session_id": "chip", "question": "typed text", "option_ref": "stale:9"})
+
+    assert asked == ["Delayed open tasks", "typed text"]

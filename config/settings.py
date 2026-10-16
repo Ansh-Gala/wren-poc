@@ -70,6 +70,13 @@ class Settings:
     # nobody: "my tasks" is then answered with a question, never a default id.
     chatbot_user_id: int = 0
 
+    # The "not live" note. A query that reads one of these tables carries the
+    # sentence above its table. Drupal sets both on its admin form; these are
+    # its install defaults. An empty sentence, or no tables, turns it off.
+    freshness_tables: tuple[str, ...] = ("vf_report_task_summary",)
+    freshness_message: str = ("This data is not updated in real time. "
+                              "Last updated 6 hours ago.")
+
     wren_project_root: Path = ROOT / "wren_projects"
     wren_home: Path = ROOT / "wren_projects" / ".wren_home"
     wren_memory_backend: str = "lancedb"
@@ -164,6 +171,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "CLAUDE_TIMEOUT_SECONDS", "BENCHMARK_CONFIG", "BENCHMARK_PRIVACY_MODE", "DEBUG",
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
         "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR", "CHATBOT_USER_ID",
+        "FRESHNESS_TABLES", "FRESHNESS_MESSAGE",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -183,6 +191,15 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         benchmark_user_id=_as_int(g("BENCHMARK_USER_ID"), 1),
         benchmark_user_name=g("BENCHMARK_USER_NAME") or "Admin",
         chatbot_user_id=_as_int(g("CHATBOT_USER_ID"), 0),
+        # Present but empty means off, so these fall back only when absent.
+        freshness_tables=tuple(
+            t.strip() for t in (g("FRESHNESS_TABLES")
+                                if g("FRESHNESS_TABLES") is not None
+                                else ",".join(Settings.freshness_tables)).split(",")
+            if t.strip()),
+        freshness_message=(g("FRESHNESS_MESSAGE")
+                           if g("FRESHNESS_MESSAGE") is not None
+                           else Settings.freshness_message).strip(),
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),
