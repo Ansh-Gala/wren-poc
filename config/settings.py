@@ -79,6 +79,20 @@ class Settings:
     freshness_message: str = ("This data is not updated in real time. "
                               "Last updated 6 hours ago.")
 
+    # Saved chats: the two tables Drupal writes (sql_chat, sql_chat_turn),
+    # with the same columns and the same prefix. A login of its own, never the
+    # read-only one, which must not be able to read them. No user means no
+    # saved chats: answers still work, and nothing is written.
+    history_db_host: str = "localhost"
+    history_db_port: int = 5432
+    history_db_name: str = ""
+    history_db_user: str = ""
+    history_db_password: str = field(repr=False, default="")
+    # py_: Python's own tables in the Drupal database; vf_ is Drupal's.
+    chat_table_prefix: str = "py_"
+    # All users together, per calendar month, in effective tokens. 0 is none.
+    monthly_token_limit: int = 0
+
     wren_project_root: Path = ROOT / "wren_projects"
     wren_home: Path = ROOT / "wren_projects" / ".wren_home"
     wren_memory_backend: str = "lancedb"
@@ -124,7 +138,8 @@ class Settings:
 
     def secrets(self) -> list[str]:
         """Non-empty secret values, for the redacting log formatter."""
-        return [s for s in (self.pg_password, self.pg_readonly_password) if s]
+        return [s for s in (self.pg_password, self.pg_readonly_password,
+                            self.history_db_password) if s]
 
     def project_dir(self, config_name: str) -> Path:
         return self.wren_project_root / f"config_{config_name.upper()}"
@@ -174,6 +189,9 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
         "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR", "CHATBOT_USER_ID",
         "FRESHNESS_TABLES", "FRESHNESS_MESSAGE",
+        "HISTORY_DATABASE_HOST", "HISTORY_DATABASE_PORT", "HISTORY_DATABASE_NAME",
+        "HISTORY_DATABASE_USER", "HISTORY_DATABASE_PASSWORD", "CHAT_TABLE_PREFIX",
+        "MONTHLY_TOKEN_LIMIT",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -202,6 +220,16 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         freshness_message=(g("FRESHNESS_MESSAGE")
                            if g("FRESHNESS_MESSAGE") is not None
                            else Settings.freshness_message).strip(),
+        # The history lives beside the data unless told otherwise; only the
+        # login has no fallback, so saved chats are always a decision.
+        history_db_host=g("HISTORY_DATABASE_HOST") or g("DATABASE_HOST") or "localhost",
+        history_db_port=_as_int(g("HISTORY_DATABASE_PORT") or g("DATABASE_PORT"), 5432),
+        history_db_name=g("HISTORY_DATABASE_NAME") or g("DATABASE_NAME") or "",
+        history_db_user=(g("HISTORY_DATABASE_USER") or "").strip(),
+        history_db_password=g("HISTORY_DATABASE_PASSWORD") or "",
+        chat_table_prefix=(g("CHAT_TABLE_PREFIX")
+                           if g("CHAT_TABLE_PREFIX") is not None else "py_").strip(),
+        monthly_token_limit=max(0, _as_int(g("MONTHLY_TOKEN_LIMIT"), 0)),
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),

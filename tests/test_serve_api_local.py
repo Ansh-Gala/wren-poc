@@ -122,7 +122,8 @@ from pipeline.lean_runner import TurnResult  # noqa: E402
 
 NOTE = "This data is not updated in real time."
 SETTINGS = SimpleNamespace(chatbot_user_id=0, freshness_tables=("vf_report_task_summary",),
-                           freshness_message=NOTE)
+                           freshness_message=NOTE, history_db_user="",
+                           chat_table_prefix="vf_", monthly_token_limit=0)
 
 
 def _turn(**fields) -> TurnResult:

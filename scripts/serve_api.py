@@ -20,17 +20,22 @@ stays as short as the rest of the project's.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import mimetypes
+import re
 import threading
 import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import _bootstrap  # noqa: F401
 
-from pipeline.context import ConversationState
+from pipeline.chat_store import CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore
+from pipeline.context import ConversationState, remember_question
 from pipeline.context_pills import context_pills, drop_by_ref
 from pipeline.evaluator import SHOWN_ROWS, first_rows
 from pipeline.followup import ACTION_TYPES, Action, apply_action, label_for_ref
@@ -54,6 +59,16 @@ UI_DIR = ROOT / "ui"
 DEBUG_LOG_TURNS = 50
 
 log = get_logger("serve_api")
+
+# All users together have used this month's budget (MONTHLY_TOKEN_LIMIT).
+# The sentence and the code are Drupal's TokenLimitException's; HTTP 429.
+TOKEN_LIMIT_MESSAGE = ("You have exceeded your monthly token limit. "
+                       "Please try again next month.")
+TOKEN_LIMIT_CODE = "monthly_token_limit"
+
+
+class TokenLimitError(Exception):
+    pass
 
 
 # --------------------------------------------------------------- sessions --
@@ -100,8 +115,11 @@ def conversation_for(session_id: str) -> Conversation:
 # ------------------------------------------------------------ state shape --
 
 def state_snapshot(state: ConversationState) -> dict:
-    """The conversation state as the console's right-hand rail renders it."""
+    """The conversation state as the console's right-hand rail renders it.
+    The keys of Drupal's ConversationState::snapshot."""
     return {
+        "goal": state.active_goal,
+        "subject": state.active_subject,
         "entity": state.active_entity,
         "tables": list(state.active_tables),
         "filters": dict(state.active_filters),
@@ -179,6 +197,7 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "normalized_question": r.normalized_question,
         "repairs": r.repairs,
         "resumed_from": r.resumed_from,
+        "resumed_answering": r.resumed_answering,
         "preflight_clarified": r.preflight_clarified,
 
         # Written before the query runs: on an error it would describe an
@@ -208,6 +227,9 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "state": after,
         "state_mutations": state_mutations(before, after),
 
+        # Debug only. Grouped: a model id means something only with its mode
+        # and provider.
+        "llm": {"mode": r.llm_mode, "provider": r.llm_provider, "model": r.llm_model},
         "tokens": {
             "prompt": r.prompt_tokens,
             "cache_read": r.cache_read_tokens,
@@ -342,12 +364,34 @@ class Runtime:
         if not question and not drop_ref:
             raise ValueError("question is required")
         debug = bool(payload.get("debug"))
+        session_id = payload.get("session_id") or "default"
+        store = ChatStore(self.settings, self.settings.chatbot_user_id)
 
-        conversation = conversation_for(payload.get("session_id") or "default")
+        # Before the state is touched: a refused question costs nothing and
+        # never enters the recent-questions window.
+        self.assert_within_monthly_limit(store)
+
+        conversation = conversation_for(session_id)
 
         with conversation.lock:
-            if payload.get("reset_context"):
+            reset = bool(payload.get("reset_context"))
+            if reset:
                 conversation.reset()
+
+            # The recent questions and the recap come from the chat's turns,
+            # not from memory, so a chat reopened after a restart still knows
+            # what it was about. On a reset this turn is the new start. The
+            # turn number is counted from the rows, so it continues them.
+            loaded = store.load(session_id)
+            if loaded["chat_id"] is not None:
+                conversation.turn_index = loaded["turn_index"]
+                state = conversation.state
+                state.recent_questions = []
+                state.rolling_recap = None
+                if not reset:
+                    for asked in loaded["history"]["questions"]:
+                        remember_question(state, asked)
+                    state.rolling_recap = loaded["history"]["recap"]
 
             # A clicked suggestion carries a structured action. Applying it
             # here means the context the model sees already reflects the
@@ -405,14 +449,32 @@ class Runtime:
                 # is personal. A cached lookup is cheap.
                 identity=resolve_identity(self.settings, self.settings.chatbot_user_id),
             )
+            if reset:
+                result.context_reset = True
             conversation.turn_index += 1
             after = state_snapshot(conversation.state)
             pills = context_pills(conversation.state)
             self.record(result, question, after)
+            full = to_response(result, question, before, after, self.settings, pills)
+
+            # Inside the lock: the next question reads its recent questions
+            # from these rows, and must not load before this one lands.
+            chat_id = store.save(session_id, question)
+            # Lets the page ask for every row. Only now: the chat id does not
+            # exist until save().
+            if chat_id is not None and isinstance(full.get("result"), dict) \
+                    and full["result"].get("truncated"):
+                full["result"] = {**full["result"],
+                                  "download": {"chat_id": chat_id, "turn": turn_index + 1}}
+            store.record_turn(chat_id, turn_index, question, result, full, conversation.state)
 
         log.info("  %-10s %-22s %s", result.decision,
                  result.failure_category or result.followup_type, question[:48])
-        full = to_response(result, question, before, after, self.settings, pills)
+        if debug and store.enabled:
+            # After the turn is recorded, so the figure includes this question.
+            usage = self.token_usage(store)
+            if usage is not None:
+                full["token_usage"] = usage
 
         # Bounded: a long session should not grow without limit, and nobody
         # scrolls back past fifty answers to read their SQL. Under the lock
@@ -423,6 +485,33 @@ class Runtime:
         # Debug off is the default, and it is enforced here rather than in the
         # page: a field the browser receives has already left the server.
         return full if debug else public_response(full)
+
+    def assert_within_monthly_limit(self, store: ChatStore) -> None:
+        """Refuse when all users together have reached this month's limit.
+
+        A usage figure that cannot be read lets the question through: a broken
+        counter must not take the chatbot down. The last question allowed can
+        go over by its own cost, which is only known once it has run.
+        """
+        limit = self.settings.monthly_token_limit
+        if limit == 0 or not store.enabled:
+            return
+        try:
+            used = store.monthly_effective_tokens()
+        except Exception as exc:
+            log.error("Monthly token usage could not be read, so the question "
+                      "was allowed: %s", exc)
+            return
+        if used >= limit:
+            raise TokenLimitError(TOKEN_LIMIT_MESSAGE)
+
+    def token_usage(self, store: ChatStore) -> dict | None:
+        """This month's usage, for the debug badge. A limit of 0 is none."""
+        try:
+            return {"used": store.monthly_effective_tokens(),
+                    "limit": self.settings.monthly_token_limit}
+        except Exception:
+            return None
 
     def rows_event(self, early: dict, debug: bool) -> dict:
         """The table, before the sentences that explain it have been written.
@@ -455,6 +544,158 @@ class Runtime:
             "result": result,
         }
         return event if debug else public_response(event)
+
+
+# ------------------------------------------------------------- saved chats --
+
+def chat_dates(row: dict) -> dict:
+    """Both forms of a chat's dates: formatted to read, and a timestamp for
+    "2 hours ago". Drupal's d M y h:i A."""
+    out = {}
+    for key in ("created_at", "updated_at"):
+        ts = int(row.get(key) or 0)
+        out[key] = time.strftime(DATE_FORMAT, time.localtime(ts))
+        out[f"{key}_ts"] = ts
+    return out
+
+
+def present_chats(store: ChatStore, limit, offset) -> dict:
+    """GET /chats -- this user's chats, newest activity first. Drupal's
+    ChatsResource. The placeholder title is presentation only."""
+    chats = [{"id": int(row["id"]),
+              "title": row["title"] or "Untitled chat",
+              "turn_count": int(row["turn_count"]),
+              **chat_dates(row)}
+             for row in store.list_chats(limit, offset)]
+    return {"chats": chats, "total": store.count_chats()}
+
+
+def _inert_followup(followup) -> dict:
+    """A replayed clarification with its chips made unclickable: a ref ties a
+    chip to an outstanding clarification, and a transcript has none."""
+    if not isinstance(followup, dict) or not followup.get("suggestions"):
+        return followup if isinstance(followup, dict) else {}
+    return {**followup, "suggestions": [{k: v for k, v in s.items() if k != "ref"}
+                                        for s in followup["suggestions"] if isinstance(s, dict)]}
+
+
+def present_chat(opened: dict, debug: bool) -> dict:
+    """GET /chats/<id> -- one thread, reopened: its turns in order, without
+    the rows, which are never stored. Drupal's ChatResource::present; each
+    turn goes through public_response, the one audited whitelist."""
+    turns = []
+    for row in opened["turns"]:
+        metadata = row.get("metadata") or {}
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata or "{}")
+        clarifying = row["status"] == CLARIFICATION
+        succeeded = row["status"] == SUCCESS
+        result = metadata.get("result") or {}
+        shaped = {
+            "question": row["question"],
+            "clarification": row["llm_response"] if clarifying else None,
+            # Stored raw, so guarded here as on the live path.
+            "explanation": safe_explanation(row["llm_response"]) if succeeded else None,
+            # Already passed through safe_error when stored.
+            "error": None if (clarifying or succeeded) else row["llm_response"],
+            "followup": _inert_followup(metadata.get("followup") or {}),
+            "result": {"row_count": result.get("row_count"),
+                       "truncated": bool(result.get("truncated")),
+                       # Rows are never stored.
+                       "rows": []},
+        }
+        turn = {**public_response(shaped),
+                "sequence_number": int(row["sequence_number"]),
+                # Safe to expose: neither names a table, column or statement.
+                "status": row["status"],
+                "response_type": row["response_type"],
+                "created_at": time.strftime(DATE_FORMAT, time.localtime(int(row["created_at"]))),
+                "created_at_ts": int(row["created_at"])}
+        if debug:
+            timings = row.get("step_timings") or {}
+            turn["generated_sql"] = row["generated_sql"]
+            turn["step_timings"] = json.loads(timings) if isinstance(timings, str) else timings
+            turn["metadata"] = metadata
+        turns.append(turn)
+
+    chat = opened["chat"]
+    return {"chat": {"id": int(chat["id"]),
+                     # Lets the page keep asking in a reopened chat.
+                     "session_id": chat["session_id"],
+                     "title": chat["title"] or "Untitled chat",
+                     "turn_count": len(turns),
+                     **chat_dates(chat)},
+            "turns": turns}
+
+
+# What a refused stored query is told. Never the SQL.
+CSV_REFUSED = "This answer cannot be downloaded."
+
+
+def csv_cell(value) -> str:
+    """One value as CSV text. Text Excel would run as a formula gets a leading
+    quote; numbers, negative ones included, stay as they are."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value)
+    if text and not _is_number(text) and text[0] in "=+-@\t\r":
+        return "'" + text
+    return text
+
+
+def _is_number(text: str) -> bool:
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+def full_csv(settings, store: ChatStore, chat_id, turn) -> tuple[int, dict | bytes]:
+    """GET /chats/<id>/turns/<n>/csv -- every row of one answered question.
+
+    Drupal's CsvController. The question's stored SQL runs again, through the
+    gates the answer passed, with no row cut. Someone else's chat is a 404.
+    Returns (status, JSON body) or (200, the CSV's bytes).
+    """
+    opened = store.open_chat(chat_id) if store.enabled else None
+    if opened is None:
+        return 404, {"error": "No such chat."}
+    sql = ""
+    for row in opened["turns"]:
+        if int(row["sequence_number"]) == int(turn) and row["status"] == SUCCESS:
+            sql = str(row["generated_sql"] or "").strip()
+    if not sql:
+        return 404, {"error": "No such answer."}
+
+    # It passed these once, but it is read back from a table, not from the
+    # turn that checked it.
+    from pipeline.safety import UnsafeSQLError, assert_read_only
+    from pipeline.sql_semantics import check_against_schema
+    try:
+        assert_read_only(sql)
+    except UnsafeSQLError:
+        return 422, {"error": CSV_REFUSED}
+    if not check_against_schema(sql).grounded:
+        return 422, {"error": CSV_REFUSED}
+
+    from database.connection import run_readonly
+    from pipeline.labels import column_labels
+    result = run_readonly(settings, sql)
+    if result.error:
+        # Log, not wire: the raw message names tables and columns.
+        log.error("Full CSV for chat %s question %s failed: %s", chat_id, turn, result.error)
+        return 500, {"error": safe_error(result.error, result.sqlstate)}
+
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(column_labels(result.columns))
+    for row in result.rows:
+        writer.writerow([csv_cell(v) for v in row])
+    # A BOM, so Excel reads the file as UTF-8.
+    return 200, ("﻿" + out.getvalue()).encode("utf-8")
 
 
 # ------------------------------------------------------------------- http --
@@ -532,6 +773,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             answer = self.runtime.ask(payload, on_rows=lambda d: emit("rows", d))
             emit("answer", answer)
+        except TokenLimitError as exc:
+            # Same body as /ask's 429.
+            emit("error", {"error": str(exc), "code": TOKEN_LIMIT_CODE})
         except ValueError as exc:
             emit("error", {"error": str(exc)})
         except Exception as exc:                  # a bad turn must not kill the server
@@ -540,9 +784,12 @@ class Handler(BaseHTTPRequestHandler):
             emit("error", {"error": GENERIC})
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        path, _, query = self.path.partition("?")
         if path == "/health":
             return self._json(200, {"ok": True, "sessions": len(SESSIONS)})
+
+        if path == "/chats" or path.startswith("/chats/"):
+            return self._chats(path, parse_qs(query))
 
         name = "index.html" if path in ("/", "") else path.lstrip("/")
         target = (UI_DIR / name).resolve()
@@ -558,6 +805,49 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")   # it is being edited
         self.end_headers()
         self.wfile.write(body)
+
+    def _chats(self, path: str, query: dict) -> None:
+        """The saved chats: the list, one chat, and one answer's full CSV."""
+        settings = self.runtime.settings
+        store = ChatStore(settings, settings.chatbot_user_id)
+        first = lambda key, default: (query.get(key) or [default])[0]
+        try:
+            if path == "/chats":
+                if not store.enabled:
+                    return self._json(200, {"chats": [], "total": 0})
+                return self._json(200, present_chats(store, first("limit", 50),
+                                                     first("offset", 0)))
+
+            match = re.fullmatch(r"/chats/(\d+)/turns/(\d+)/csv", path)
+            if match:
+                chat_id, turn = int(match.group(1)), int(match.group(2))
+                status, body = full_csv(settings, store, chat_id, turn)
+                if status != 200:
+                    return self._json(status, body)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="chat-{chat_id}-answer-{turn}.csv"')
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-cache, private")
+                self.end_headers()
+                self.wfile.write(body)
+                return None
+
+            match = re.fullmatch(r"/chats/(\d+)", path)
+            if match:
+                opened = store.open_chat(match.group(1)) if store.enabled else None
+                # Someone else's chat is a 404, never a 403: the endpoint does
+                # not confirm that an id exists.
+                if opened is None:
+                    return self._json(404, {"error": "No such chat."})
+                debug = bool(first("debug", "")) and self._local()
+                return self._json(200, present_chat(opened, debug))
+        except Exception:
+            # Log, not wire, as on /ask.
+            log.exception("saved chats failed on %s", path)
+            return self._json(500, {"error": "I couldn't load your chat history."})
+        return self._json(404, {"error": "no such chat path"})
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
@@ -592,6 +882,8 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             return self._json(200, self.runtime.ask(payload))
+        except TokenLimitError as exc:
+            return self._json(429, {"error": str(exc), "code": TOKEN_LIMIT_CODE})
         except ValueError as exc:
             return self._json(400, {"error": str(exc)})
         except Exception as exc:                      # a bad turn must not kill the server

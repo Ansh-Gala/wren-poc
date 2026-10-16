@@ -51,7 +51,7 @@ from claude.parser import (
 from config.logging import get_logger
 from config.settings import Settings
 from database.connection import run_readonly
-from llm_api.factory import get_provider
+from llm_api.factory import get_provider, llm_identity
 
 log = get_logger("lean_runner")
 
@@ -210,6 +210,19 @@ class TurnResult:
     # names the table and column it failed on.
     sqlstate: str | None = None
     raw_output: str = ""
+
+    # Kept for the chat history row, as Drupal keeps them. Who answered: the
+    # CLI is mode "cli", provider "claude-cli"; an API is mode "api" and its
+    # vendor. The model is the one configured.
+    llm_mode: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    timed_out: bool = False
+    parse_strategy: str = "none"
+    # The user said to start over: where the history stops reading questions.
+    context_reset: bool = False
+    # Wall-clock start of the turn, as a unix time, for the history row.
+    turn_started: float = 0.0
 
 
 def _classify_failure(r: TurnResult, expected, actual) -> str:
@@ -535,6 +548,7 @@ def run_turn(
         expected_followup=turn.expect_followup,
         expected_action=turn.expect_action,
     )
+    r.turn_started = time.time()
 
     # 0. Repair the question before anything reads it. A misspelt schema term
     #    is not a hard question, but it reaches the model as a word the schema
@@ -614,6 +628,7 @@ def run_turn(
     # subject is not the same as being told the thread is over.
     if _EXPLICIT_RESET.match(question):
         state.forget_history()
+        r.context_reset = True
 
     r.decision, r.resolved_entity = decision, entity
     if turn.expect_decision is not None:
@@ -704,6 +719,8 @@ def run_turn(
     streaming = {"on_delta": _delta_watcher(settings, executed, on_sql)} if on_sql else {}
     run = provider.ask(question, mcp_config_path, privacy_mode, settings, session,
                        **streaming)
+    r.llm_mode, r.llm_provider, r.llm_model = llm_identity(settings)
+    r.timed_out = run.timed_out
     r.llm_ms = run.duration_ms
     r.llm_wall_ms = run.wall_ms or run.duration_ms
     r.tools_used = list(run.tools_used)
@@ -738,6 +755,7 @@ def run_turn(
     if r.clarification is not None:
         parsed = ParsedSQL(sql=None, strategy="clarification", raw=run.result_text)
     r.generated_sql = parsed.sql
+    r.parse_strategy = parsed.strategy
 
     # Did it do the kind of thing the question called for? A confident query
     # in answer to an unanswerable question is a failure even if it runs, and
@@ -897,6 +915,7 @@ def run_turn(
                         r.repaired_from = parsed.sql
                         parsed = ParsedSQL(sql=fixed, strategy="repair",
                                            raw=parsed.raw)
+                        r.parse_strategy = parsed.strategy
                         r.generated_sql = fixed
                         r.schema_grounded = sc.grounded
                         r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
