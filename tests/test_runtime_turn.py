@@ -91,7 +91,8 @@ def test_a_broken_query_is_still_reported_as_broken(monkeypatch, settings):
 
     assert result.execution_success is False
     assert result.error is not None
-    assert result.failure_category == "SCHEMA_ERROR"
+    # Refused before it ran, for naming a column the schema does not have.
+    assert result.failure_category == "HALLUCINATION"
 
 
 def test_the_follow_up_layer_still_runs(monkeypatch, settings):
@@ -100,11 +101,11 @@ def test_the_follow_up_layer_still_runs(monkeypatch, settings):
         monkeypatch, settings,
         '{"sql": "SELECT initiative_id FROM tms_initiative_flat '
         "WHERE initiative_type = 'AR_YD_Suiting'\"}",
-        question="show the AR_YD_Suiting itmes",
+        question="show the AR_YD_Suiting taks",
     )
 
-    assert [r["corrected"] for r in result.repairs] == ["items"]
-    assert provider.asked == ["show the AR_YD_Suiting items"], "model saw the repair"
+    assert [r["corrected"] for r in result.repairs] == ["tasks"]
+    assert provider.asked == ["show the AR_YD_Suiting tasks"], "model saw the repair"
     assert result.followup_type == "exploration"
     assert result.followup["suggestions"]
 

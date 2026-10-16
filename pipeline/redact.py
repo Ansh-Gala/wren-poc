@@ -1,6 +1,6 @@
 """What a turn is allowed to tell the browser.
 
-Two jobs, both about the boundary rather than about the pipeline.
+One job, the boundary rather than the pipeline: what may reach the browser.
 
 ``safe_error`` replaces a database error with something a person can act on.
 Replacing rather than scrubbing: a raw message names the table and column it
@@ -11,6 +11,9 @@ form nobody anticipated. Discarding the message entirely cannot.
 whitelist, so a field added to the response later is hidden until someone
 decides otherwise -- the alternative leaks by default, which is the wrong way
 round for a payload carrying SQL and schema names.
+
+``safe_clarification`` and ``safe_explanation`` guard the model's own prose,
+which ``names_a_database_object`` reads for the tells of a schema name.
 """
 
 from __future__ import annotations
@@ -24,19 +27,21 @@ from typing import Any
 GENERIC = ("I couldn't process that request. Please try rephrasing your "
            "question.")
 
+_NOT_FOUND = ("I couldn't find the information you asked for. Try asking about "
+              "tasks, initiatives, users, departments or roles.")
+_READ_ONLY = "I can only read data, so I can't make that change."
+
 _BY_SQLSTATE = {
     # query_canceled: the statement timeout fired.
     "57014": ("That question took too long to answer. Try narrowing it down -- "
               "a single business unit, or a shorter date range."),
     # undefined_column / undefined_table: the query named something absent.
-    "42703": ("I couldn't find the information you asked for. Try asking about "
-              "tasks, initiatives, users, departments or roles."),
-    "42P01": ("I couldn't find the information you asked for. Try asking about "
-              "tasks, initiatives, users, departments or roles."),
+    "42703": _NOT_FOUND,
+    "42P01": _NOT_FOUND,
     # syntax_error, and the read-only refusals.
     "42601": GENERIC,
-    "42501": ("I can only read data, so I can't make that change."),
-    "55000": ("I can only read data, so I can't make that change."),
+    "42501": _READ_ONLY,
+    "55000": _READ_ONLY,
 }
 
 # A person-readable reason per kind of model failure. There is no code to

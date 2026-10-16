@@ -28,6 +28,9 @@ class FakeClient:
         self.sent, self.response, self.error = None, response, error
         self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
 
+    def close(self):
+        pass
+
     def _create(self, **kwargs):
         self.sent = kwargs
         if self.error is not None:

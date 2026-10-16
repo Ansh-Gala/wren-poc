@@ -92,9 +92,8 @@ def assert_read_only(sql: str) -> None:
 
     statement = statements[0]
 
-    if not isinstance(statement, (exp.Select, exp.Union, exp.Subquery)) and not (
-        isinstance(statement, exp.Query)
-    ):
+    # Select, Union and Subquery are all Queries.
+    if not isinstance(statement, exp.Query):
         raise UnsafeSQLError(
             f"statement is {type(statement).__name__}, expected a query"
         )

@@ -26,11 +26,11 @@ import yaml
 from pipeline.context import (
     ConversationState, _EXPLICIT_RESET, accept_recap, classify_turn,
     detect_entity, remember_question,
-    is_complete_request, render_context, update_state,
+    is_complete_request, render_context, update_state, without_entity_filters,
 )
 from pipeline.identity import CallerIdentity, render_identity
 from pipeline.followup import (
-    FollowUp, clarify_entity, decide, label_for_ref, resolve_clarification,
+    FollowUp, clarify_entity, decide, resolve_clarification,
 )
 from pipeline.normalize import normalize
 from pipeline.evaluator import (
@@ -38,7 +38,8 @@ from pipeline.evaluator import (
     first_rows, result_summary,
 )
 from pipeline.lean_suite import Conversation, SuiteTurn
-from pipeline.sql_semantics import compare as compare_semantics
+from pipeline.chart_check import MAX_ROWS as CHART_MAX_ROWS, TIMEOUT_MS as CHART_TIMEOUT_MS
+from pipeline.sql_semantics import check_against_schema, compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
 from pipeline.safety import UnparseableSQLError, UnsafeSQLError, assert_read_only
 from claude.prompts import build_repair_question
@@ -240,6 +241,9 @@ def _classify_failure(r: TurnResult, expected, actual) -> str:
         return "PROMPT_ERROR"
     if not r.sql_valid:
         return "SQL_SYNTAX_ERROR"
+    # Refused before it ran, for naming what the schema does not have.
+    if not r.schema_grounded:
+        return "HALLUCINATION"
     if not r.execution_success:
         err = (r.error or "").lower()
         if "does not exist" in err and "column" in err:
@@ -348,9 +352,7 @@ def _attach_followup(
     # support one. r already carries it -- set before this is reached on every
     # path -- so this needs no new argument.
     followup = decide(state, row_count, r.clarification, r.actual_result,
-                      getattr(r, 'clarification_options', None) or [],
-                      getattr(r, 'next_questions', None) or [],
-                      getattr(r, 'clarify_about', None))
+                      r.clarification_options, r.next_questions, r.clarify_about)
     r.followup_type = followup.type
     r.followup = followup.to_dict()
     # Set after update_state, which resets the block and would clear it.
@@ -379,7 +381,7 @@ def _attach_followup(
 # waiting for a table.
 #
 # The execution is published into a memo that run_turn's own call sites read,
-# rather than run_turn being restructured around it. run_turn is 857 lines and
+# rather than run_turn being restructured around it. run_turn is long, and
 # every accuracy figure in results/ was produced by it; the alternative to a
 # memo was either rewriting that or running the user's query twice.
 
@@ -408,9 +410,6 @@ def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
     main answer is never touched, and the chart never falls back to the main
     rows.
     """
-    from pipeline.chart_check import MAX_ROWS, TIMEOUT_MS
-    from pipeline.sql_semantics import check_against_schema
-
     chart = r.chart
     if not isinstance(chart, dict) or "invalid" in chart or "sql" not in chart:
         return
@@ -429,14 +428,14 @@ def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
     if not check_against_schema(sql).grounded:
         r.chart_error = "ungrounded"
         return
-    result = _execute(settings, sql, TIMEOUT_MS, memo)
+    result = _execute(settings, sql, CHART_TIMEOUT_MS, memo)
     if not result.ok:
         # query_canceled: the statement timeout fired.
         r.chart_error = "timeout" if result.sqlstate == "57014" else "db_error"
         return
     # More rows than the cap mark the result truncated, which chart_check
     # refuses, and keep the rest out of the turn result.
-    r.chart_result = {**result_summary(result, max_rows=MAX_ROWS),
+    r.chart_result = {**result_summary(result, max_rows=CHART_MAX_ROWS),
                       "duration_ms": result.duration_ms}
 
 
@@ -455,15 +454,7 @@ def _execute_early(settings: Settings, text: str, memo: dict,
     would reopen it behind run_turn's back.
     """
     sql = partial_sql(text)
-    if not sql:
-        return
-
-    from pipeline.sql_semantics import check_against_schema
-    if not check_against_schema(sql).grounded:
-        return
-    try:
-        assert_read_only(sql)
-    except UnsafeSQLError:
+    if not sql or _gated(sql) is None:
         return
 
     res = _execute(settings, sql, settings.statement_timeout_ms)
@@ -522,6 +513,25 @@ def _reads_as_zero(value) -> bool:
     return str(value) == "0"
 
 
+def _gated(sql: str):
+    """The schema check, when `sql` passes both gates; else None."""
+    sc = check_against_schema(sql)
+    if not sc.grounded:
+        return None
+    try:
+        assert_read_only(sql)
+    except UnsafeSQLError:
+        return None
+    return sc
+
+
+def _add_tokens(r: TurnResult, run) -> None:
+    r.prompt_tokens += run.prompt_tokens
+    r.completion_tokens += run.completion_tokens
+    r.cache_read_tokens += run.cache_read_tokens
+    r.cache_write_tokens += run.cache_write_tokens
+
+
 def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mode,
                     r: TurnResult, executed):
     """The one repair: ask again with the error, gate the answer, run it.
@@ -546,13 +556,8 @@ def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mod
         return None
     # The corrected statement goes through the same two gates as the first
     # one. A repair must not become the way round them.
-    from pipeline.sql_semantics import check_against_schema
-    sc = check_against_schema(fixed)
-    try:
-        assert_read_only(fixed)
-    except UnsafeSQLError:
-        return None
-    if not sc.grounded:
+    sc = _gated(fixed)
+    if sc is None:
         return None
     retried = _execute(settings, fixed, settings.statement_timeout_ms, executed)
     r.db_ms += retried.duration_ms
@@ -577,7 +582,7 @@ def _repair(
     settings: Settings,
     mcp_config_path,
     privacy_mode: str,
-    r: TurnResult | None = None,
+    r: TurnResult,
 ) -> tuple[str | None, float]:
     """One more attempt, with the database's complaint attached.
 
@@ -607,11 +612,7 @@ def _repair(
         mcp_config_path, privacy_mode, settings, None,
     )
     # Counted before any return: a repair that fails still cost tokens.
-    if r is not None:
-        r.prompt_tokens += run.prompt_tokens
-        r.completion_tokens += run.completion_tokens
-        r.cache_read_tokens += run.cache_read_tokens
-        r.cache_write_tokens += run.cache_write_tokens
+    _add_tokens(r, run)
     if not run.ok or not run.result_text:
         return None, run.duration_ms
     fixed = parse_sql(run.result_text).sql
@@ -746,31 +747,16 @@ def run_turn(
     if turn.expect_decision is not None:
         r.decision_match = decision == turn.expect_decision
 
-    # 2. A new block sees no context at all; a switch drops the old subject's
-    #    filters, which is the whole point of detecting one.
-    if context_mode == "none":
-        context = ""
-    elif context_mode == "history":
-        context = ""          # provider replays session.turns instead
+    # 2. The context block. A rebase keeps the shape of the question before it
+    #    but drops the old subject's filters; every other decision renders the
+    #    state as update_state left it.
+    if context_mode in ("none", "history"):
+        context = ""          # history: the provider replays session.turns
     else:
-        # A rebase keeps its context: the subject changed but the question
-        # relies on the shape of the one before it.
-        if decision in ("new_block", "switch", "clarification_response"):
-            # Normally a fresh block sees nothing. The exception is a turn
-            # answering a question the system asked in prose: the state is
-            # empty after a clarification, so without this the reply arrives
-            # with no trace of what it is replying to.
-            # A switch no longer needs a different block. The filters that
-            # had to be dropped on a switch are not in the block any more.
-            context = render_context(state)
-        else:
-            if decision == "rebase":
-                state.active_filters = {
-                    col: pred for col, pred in state.active_filters.items()
-                    if state.active_entity is None or state.active_entity not in pred
-                }
-                state.active_entity = entity
-            context = render_context(state)
+        if decision == "rebase":
+            state.active_filters = without_entity_filters(state)
+            state.active_entity = entity
+        context = render_context(state)
     # Who is asking rides at the top of the same block, on every turn --
     # including the first, which has no conversation context at all. It is not
     # conversation state: it does not accumulate, a switch does not drop it,
@@ -783,7 +769,9 @@ def run_turn(
     # Named for this turn only; the SQL that runs now carries the change.
     state.dropped_filters = []
 
-    session.context_block = context or None
+    # In history mode a block would replace the replayed turns, so none is
+    # set; the identity is lost there, and "my tasks" asks who is asking.
+    session.context_block = None if context_mode == "history" else (context or None)
     if context_mode != "history":
         # Providers fall back to replaying turns when no block is supplied;
         # in state mode that would double-count, and in none mode it would
@@ -837,10 +825,7 @@ def run_turn(
     r.llm_wall_ms = run.wall_ms or run.duration_ms
     r.tools_used = list(run.tools_used)
     r.tool_call_count = len(run.tools_used)
-    r.prompt_tokens = run.prompt_tokens
-    r.completion_tokens = run.completion_tokens
-    r.cache_read_tokens = run.cache_read_tokens
-    r.cache_write_tokens = run.cache_write_tokens
+    _add_tokens(r, run)
     r.raw_output = run.result_text
     if run.error:
         r.error = run.error
@@ -887,7 +872,6 @@ def run_turn(
     # because invented SQL fails at execution in a way that looks like any
     # other error.
     if parsed.sql:
-        from pipeline.sql_semantics import check_against_schema
         _t = time.perf_counter()
         sc = check_against_schema(parsed.sql)
         r.schema_check_ms = (time.perf_counter() - _t) * 1000
@@ -916,12 +900,18 @@ def run_turn(
     if turn.expect_behavior == "zero_or_clarify":
         if r.clarification is not None and parsed.sql is None:
             r.behavior_match = r.result_match = r.semantic_match = True
+        elif parsed.sql and not (r.sql_valid and r.schema_grounded):
+            # Refused by a gate, so never run: the gates hold on this path too.
+            r.behavior_match = r.result_match = r.semantic_match = False
+            r.failure_category = ("HALLUCINATION" if not r.schema_grounded
+                                  else "SQL_SYNTAX_ERROR")
         elif parsed.sql:
             res = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
+            r.db_ms += res.duration_ms
             r.actual_result = result_summary(res, max_rows=None)
             r.execution_success = res.ok
-            empty = res.ok and (
-                not res.rows or (len(res.rows) == 1 and _reads_as_zero(res.rows[0][0])))
+            empty = res.ok and (not res.rows or (
+                len(res.rows) == 1 and res.rows[0] and _reads_as_zero(res.rows[0][0])))
             r.behavior_match = r.result_match = r.semantic_match = bool(empty)
             if not empty:
                 # Rows came back for a value that does not exist, so a filter
@@ -1118,7 +1108,7 @@ def run_turn(
     #    follows the SQL that was actually produced, so a wrong query is
     #    visible in the next turn's context rather than silently corrected.
     update_state(
-        state if decision == "follow_up" else state,
+        state,
         question,
         parsed.sql or turn.expected_sql,
         len(actual.rows) if actual is not None and actual.ok else None,

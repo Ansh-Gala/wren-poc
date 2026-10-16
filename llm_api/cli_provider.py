@@ -48,8 +48,9 @@ def system_prompt_file(text: str) -> str:
     path = pathlib.Path(tempfile.gettempdir()) / f"wren_system_prompt_{digest}.txt"
     if not path.exists():
         # Write beside the target and move into place, so a reader never sees
-        # a half-written prompt if two runs start at once.
-        tmp = path.with_suffix(f".{os.getpid()}.part")
+        # a half-written prompt if two runs start at once. Per thread: the
+        # warm pool's threads all write it at start-up.
+        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.part")
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
     return str(path)
@@ -76,7 +77,7 @@ def claude_version(command: str = "claude") -> str | None:
 
 def build_command(
     question: str,
-    mcp_config_path: Path,
+    mcp_config_path: pathlib.Path,
     privacy_mode: str,
     settings: Settings,
     session: Session | None = None,
@@ -299,7 +300,7 @@ class CLILocalProvider(LLMProvider):
     def ask(
         self,
         question: str,
-        mcp_config_path: Path,
+        mcp_config_path: pathlib.Path,
         privacy_mode: str,
         settings: Settings,
         session: Session | None = None,

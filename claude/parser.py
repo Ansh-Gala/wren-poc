@@ -15,6 +15,8 @@ import re
 import sqlglot
 from sqlglot import exp
 
+from pipeline.chart_check import (COLOUR, MAX_SERIES, ONE_VALUE_TYPES, PHP_TRIM as _PHP_TRIM,
+                                  TITLE_LENGTH, TYPES)
 from pipeline.models import ParsedSQL
 
 _SQL_START = re.compile(r"\b(SELECT|WITH)\b", re.IGNORECASE)
@@ -391,10 +393,6 @@ def partial_sql(text: str) -> str | None:
     return parsed.sql
 
 
-# PHP's trim(): only these characters, not every Unicode space.
-_PHP_TRIM = " \t\n\r\0\x0b"
-
-
 def _is_php_list(value: dict) -> bool:
     """Whether PHP would decode this JSON object as a list: keys "0".."n-1".
     An empty object is one too."""
@@ -411,8 +409,6 @@ def parse_chart(text: str) -> dict | None:
     written; the turn decides whether it is SQL, because a malformed chart
     query drops the whole chart, not just its query.
     """
-    from pipeline.chart_check import COLOUR, MAX_SERIES, ONE_VALUE_TYPES, TITLE_LENGTH, TYPES
-
     for obj in _json_objects(text):
         chart = obj.get("chart")
         if chart is None or chart is False:

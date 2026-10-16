@@ -1,4 +1,4 @@
-"""Where a row can be followed: the issue it is, and the file it holds.
+"""Where a row can be followed: the issue it is, the file it holds, its task.
 
 The same problem `initiative.py` solves, for the two views added on
 16 September 2026. `columns` is stripped from a response when debug is off --

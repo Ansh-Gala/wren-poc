@@ -186,7 +186,7 @@ def _drive(monkeypatch, reply, question):
 
     reached = []
 
-    def _tripwire(settings, sql, timeout_ms=None, readonly_role=True):
+    def _tripwire(settings, sql, timeout_ms=None):
         reached.append(sql)
         raise AssertionError("the database was queried: %s" % sql)
 

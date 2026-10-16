@@ -344,14 +344,11 @@ def _stream(streaming: bool) -> str:
                 on_rows({"sql": "SELECT 1"})
             return {"answer": "done"}
 
-    body = b'{"question": "q"}'
     handler = api.Handler.__new__(api.Handler)
-    handler.runtime, handler.client_address = Rt(), ("127.0.0.1", 0)
-    handler.headers = {"Content-Length": str(len(body))}
-    handler.rfile, handler.wfile = io.BytesIO(body), io.BytesIO()
+    handler.runtime, handler.wfile = Rt(), io.BytesIO()
     handler.send_response = handler.send_header = lambda *a: None
     handler.end_headers = lambda: None
-    handler._stream()
+    handler._stream({"question": "q"})
     return handler.wfile.getvalue().decode()
 
 

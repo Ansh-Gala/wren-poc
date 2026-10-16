@@ -79,16 +79,15 @@ class Settings:
     freshness_message: str = ("This data is not updated in real time. "
                               "Last updated 6 hours ago.")
 
-    # Saved chats: the two tables Drupal writes (sql_chat, sql_chat_turn),
-    # with the same columns and the same prefix. A login of its own, never the
-    # read-only one, which must not be able to read them. No user means no
-    # saved chats: answers still work, and nothing is written.
+    # Saved chats: Python's own copies of Drupal's two chat tables, the same
+    # columns under the py_ prefix, in the same database. A login of its own,
+    # never the read-only one, which must not be able to read them. No user
+    # means no saved chats: answers still work, and nothing is written.
     history_db_host: str = "localhost"
     history_db_port: int = 5432
     history_db_name: str = ""
     history_db_user: str = ""
     history_db_password: str = field(repr=False, default="")
-    # py_: Python's own tables in the Drupal database; vf_ is Drupal's.
     chat_table_prefix: str = "py_"
     # All users together, per calendar month, in effective tokens. 0 is none.
     monthly_token_limit: int = 0
@@ -123,8 +122,8 @@ class Settings:
     benchmark_config: str = "D"
     benchmark_privacy_mode: str = "strict"
     debug: bool = False
-    
-    llm_provider: str = "cli" # 'cli' or 'openai'
+
+    llm_provider: str = "cli"   # cli, anthropic, openai, groq or gemini
     cli_lean: bool = False
     # Drupal's stream_answers: off, /ask/stream sends only the final answer.
     stream_answers: bool = True
@@ -172,6 +171,13 @@ def _as_int(value: str | None, default: int) -> int:
         return default
 
 
+def _as_float(value: str | None, default: float) -> float:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _as_path(value: str | None, default: Path) -> Path:
     if not value:
         return default
@@ -206,6 +212,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
             values[key] = os.environ[key]
 
     g = values.get
+    provider = (g("LLM_PROVIDER") or "cli").strip().lower()
     project_root = _as_path(g("WREN_PROJECT_ROOT"), ROOT / "wren_projects")
 
     return Settings(
@@ -252,31 +259,31 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         benchmark_config=(g("BENCHMARK_CONFIG") or "D").strip().upper(),
         benchmark_privacy_mode=(g("BENCHMARK_PRIVACY_MODE") or "strict").strip().lower(),
         debug=_as_bool(g("DEBUG"), False),
-        llm_provider=(g("LLM_PROVIDER") or "cli").strip().lower(),
+        llm_provider=provider,
         cli_lean=_as_bool(g("CLI_LEAN"), False),
         stream_answers=_as_bool(g("STREAM_ANSWERS"), True),
-        cli_pool_size=int(g("CLI_POOL_SIZE") or 4),
-        cli_pool_warmup_seconds=float(g("CLI_POOL_WARMUP_SECONDS") or 3.0),
+        cli_pool_size=_as_int(g("CLI_POOL_SIZE"), 4),
+        cli_pool_warmup_seconds=_as_float(g("CLI_POOL_WARMUP_SECONDS"), 3.0),
         # Each branch falls back to "" -- naming a provider whose key is absent
         # is a configuration mistake, and it should be reported as one rather
         # than raising AttributeError from inside the loader, before any code
         # that could say what was wrong has run.
         openai_api_key=(
-            (g("GROQ_API_KEY") or "") if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
-            else (g("GEMINI_API_KEY") or "") if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"
+            (g("GROQ_API_KEY") or "") if provider == "groq"
+            else (g("GEMINI_API_KEY") or "") if provider == "gemini"
             else g("OPENAI_API_KEY") or g("GROQ_API_KEY") or g("GEMINI_API_KEY") or ""
         ).strip(),
         openai_base_url=(
             g("OPENAI_BASE_URL") or (
-                "https://api.groq.com/openai/v1" if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
-                else "https://generativelanguage.googleapis.com/v1beta/openai/" if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"
+                "https://api.groq.com/openai/v1" if provider == "groq"
+                else "https://generativelanguage.googleapis.com/v1beta/openai/" if provider == "gemini"
                 else None
             )
         ),
         openai_model=(
             g("OPENAI_MODEL") or (
-                "llama-3.3-70b-versatile" if (g("LLM_PROVIDER") or "").strip().lower() == "groq"
-                else "gemini-1.5-pro" if (g("LLM_PROVIDER") or "").strip().lower() == "gemini"
+                "llama-3.3-70b-versatile" if provider == "groq"
+                else "gemini-1.5-pro" if provider == "gemini"
                 else "gpt-4o"
             )
         ).strip(),

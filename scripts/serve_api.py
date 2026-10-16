@@ -35,7 +35,8 @@ from urllib.parse import parse_qs
 import _bootstrap  # noqa: F401
 
 from pipeline.chart_check import build as build_chart, note as chart_note_for
-from pipeline.chat_store import CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore
+from pipeline.chat_store import (CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore,
+                                 safe_session_id)
 from pipeline.context import ConversationState, remember_question
 from pipeline.context_pills import context_pills, drop_by_ref
 from pipeline.evaluator import SHOWN_ROWS, first_rows
@@ -99,14 +100,17 @@ class Conversation:
         # Full responses for recent turns, so switching debug on can fill in
         # answers already on screen without re-running anything. Kept here
         # rather than sent and hidden: with debug off the SQL must not reach
-        # the browser at all, which is the whole point of the switch.
+        # the browser at all, which is the whole point of the switch. Its own
+        # lock: reading or appending it must not wait for a whole turn.
         self.debug_log: list[dict] = []
+        self.debug_lock = threading.Lock()
 
     def reset(self) -> None:
         self.state = ConversationState()
         self.session = Session(session_id=self.id, turns=[])
         self.turn_index = 0
-        self.debug_log.clear()
+        with self.debug_lock:
+            self.debug_log.clear()
 
 
 SESSIONS: dict[str, Conversation] = {}
@@ -207,6 +211,27 @@ def _no_chart(reason: str) -> tuple[None, str, str | None]:
     return None, reason, chart_note_for(reason)
 
 
+def shown_result(actual_result, settings) -> dict | None:
+    """The rows a reader is shown, with the fields the grid reads beside them.
+
+    At most SHOWN_ROWS rows; row_count keeps the whole count. with_initiative
+    and with_links are innermost: both need the real column names, and every
+    wrapper around them only adds fields.
+    """
+    shown = first_rows(actual_result, SHOWN_ROWS)
+    columns = (shown or {}).get("columns")
+    return with_column_labels(with_links(with_initiative(shown, columns, settings), columns))
+
+
+def with_freshness(result, settings, ran: list) -> dict | None:
+    """The "not live" note, when rows came back from a table that lags."""
+    if isinstance(result, dict) and result.get("rows") and settings is not None:
+        note = freshness_note(settings, ran)
+        if note:
+            return {**result, "freshness": note}
+    return result
+
+
 def to_response(r: TurnResult, asked: str, before: dict, after: dict,
                 settings=None, pills: list[dict] | None = None) -> dict:
     """TurnResult -> the contract documented at the top of ui/api.js.
@@ -220,27 +245,18 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
     # debug, alongside the SQL it belongs to.
     error = safe_error(r.error, getattr(r, "sqlstate", None))
 
-    # At most SHOWN_ROWS rows; row_count keeps the whole count. with_initiative
-    # and with_links are innermost: both need the real column names, and every
-    # wrapper around them only adds fields.
-    shown = first_rows(r.actual_result, SHOWN_ROWS)
-    columns = (shown or {}).get("columns")
-    result = with_presentation(
-        with_column_labels(with_links(with_initiative(shown, columns, settings), columns)),
-        after.get("tables"), r.grouped)
+    result = with_presentation(shown_result(r.actual_result, settings),
+                               after.get("tables"), r.grouped)
     chart, chart_reason, chart_note = chart_for(r, result)
     if isinstance(result, dict) and chart is not None:
         result = {**result, "chart": chart}
     if isinstance(result, dict) and chart_note is not None:
         result = {**result, "chart_note": chart_note}
-    if isinstance(result, dict) and result.get("rows") and settings is not None:
-        # Read from the SQL that ran, the chart's own included.
-        ran = [r.generated_sql]
-        if chart is not None and isinstance(r.chart, dict):
-            ran.append(r.chart.get("sql") or "")
-        note = freshness_note(settings, ran)
-        if note:
-            result = {**result, "freshness": note}
+    # Read from the SQL that ran, the chart's own included.
+    ran = [r.generated_sql]
+    if chart is not None and isinstance(r.chart, dict):
+        ran.append(r.chart.get("sql") or "")
+    result = with_freshness(result, settings, ran)
     chart_query = r.chart_result if isinstance(r.chart_result, dict) else None
 
     return {
@@ -469,7 +485,9 @@ class Runtime:
         if not question and not drop_ref:
             raise ValueError("question is required")
         debug = bool(payload.get("debug"))
-        session_id = payload.get("session_id") or "default"
+        # Cleaned once, here: the saved chat is keyed by the cleaned id, so the
+        # in-memory session and its lock must be too.
+        session_id = safe_session_id(payload.get("session_id"))
         store = ChatStore(self.settings, self.settings.chatbot_user_id)
 
         # Before the state is touched: a refused question costs nothing and
@@ -506,7 +524,7 @@ class Runtime:
             # turn takes the ordinary path and there is no second way for a
             # query to be built.
             action = payload.get("action")
-            if action and action.get("type") in ACTION_TYPES:
+            if isinstance(action, dict) and action.get("type") in ACTION_TYPES:
                 try:
                     apply_action(conversation.state, Action(
                         type=action["type"],
@@ -588,9 +606,9 @@ class Runtime:
                 full["token_usage"] = usage
 
         # Bounded: a long session should not grow without limit, and nobody
-        # scrolls back past fifty answers to read their SQL. Under the lock
+        # scrolls back past fifty answers to read their SQL. Under its lock
         # because /debug reads this list from another thread.
-        with conversation.lock:
+        with conversation.debug_lock:
             conversation.debug_log.append({**full, "turn_index": turn_index})
             del conversation.debug_log[:-DEBUG_LOG_TURNS]
         # Debug off is the default, and it is enforced here rather than in the
@@ -637,15 +655,9 @@ class Runtime:
         Grouping lands with the finished answer, which carries the whole
         result again.
         """
-        summary = first_rows(early.get("actual_result"), SHOWN_ROWS)
-        columns = (summary or {}).get("columns")
-        result = with_column_labels(
-            with_links(with_initiative(summary, columns, self.settings), columns))
         # The same note the answer will carry, so it arrives with the table.
-        if isinstance(result, dict) and result.get("rows"):
-            note = freshness_note(self.settings, [early.get("generated_sql")])
-            if note:
-                result = {**result, "freshness": note}
+        result = with_freshness(shown_result(early.get("actual_result"), self.settings),
+                                self.settings, [early.get("generated_sql")])
         event = {
             "generated_sql": early.get("generated_sql"),
             "sql_valid": early.get("sql_valid"),
@@ -659,14 +671,21 @@ class Runtime:
 
 # ------------------------------------------------------------- saved chats --
 
+UNTITLED = "Untitled chat"
+
+
+def formatted_date(ts) -> str:
+    """Drupal's d M y h:i A, in local time."""
+    return time.strftime(DATE_FORMAT, time.localtime(int(ts or 0)))
+
+
 def chat_dates(row: dict) -> dict:
     """Both forms of a chat's dates: formatted to read, and a timestamp for
-    "2 hours ago". Drupal's d M y h:i A."""
+    "2 hours ago"."""
     out = {}
     for key in ("created_at", "updated_at"):
-        ts = int(row.get(key) or 0)
-        out[key] = time.strftime(DATE_FORMAT, time.localtime(ts))
-        out[f"{key}_ts"] = ts
+        out[key] = formatted_date(row.get(key))
+        out[f"{key}_ts"] = int(row.get(key) or 0)
     return out
 
 
@@ -674,7 +693,7 @@ def present_chats(store: ChatStore, limit, offset) -> dict:
     """GET /chats -- this user's chats, newest activity first. Drupal's
     ChatsResource. The placeholder title is presentation only."""
     chats = [{"id": int(row["id"]),
-              "title": row["title"] or "Untitled chat",
+              "title": row["title"] or UNTITLED,
               "turn_count": int(row["turn_count"]),
               **chat_dates(row)}
              for row in store.list_chats(limit, offset)]
@@ -720,7 +739,7 @@ def present_chat(opened: dict, debug: bool) -> dict:
                 # Safe to expose: neither names a table, column or statement.
                 "status": row["status"],
                 "response_type": row["response_type"],
-                "created_at": time.strftime(DATE_FORMAT, time.localtime(int(row["created_at"]))),
+                "created_at": formatted_date(row["created_at"]),
                 "created_at_ts": int(row["created_at"])}
         if debug:
             timings = row.get("step_timings") or {}
@@ -733,7 +752,7 @@ def present_chat(opened: dict, debug: bool) -> dict:
     return {"chat": {"id": int(chat["id"]),
                      # Lets the page keep asking in a reopened chat.
                      "session_id": chat["session_id"],
-                     "title": chat["title"] or "Untitled chat",
+                     "title": chat["title"] or UNTITLED,
                      "turn_count": len(turns),
                      **chat_dates(chat)},
             "turns": turns}
@@ -817,6 +836,19 @@ def full_csv(settings, store: ChatStore, chat_id, turn) -> tuple[int, dict | byt
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 
 
+def failure(exc: Exception, what: str) -> tuple[int, dict]:
+    """A failed turn as a status and a body, the same for /ask and the stream.
+
+    Log, not wire: the raw message names tables and columns.
+    """
+    if isinstance(exc, TokenLimitError):
+        return 429, {"error": str(exc), "code": TOKEN_LIMIT_CODE}
+    if isinstance(exc, ValueError):
+        return 400, {"error": str(exc)}
+    log.exception(what)
+    return 500, {"error": GENERIC}
+
+
 def _local_client(address: str) -> bool:
     return address in _LOOPBACK
 
@@ -843,7 +875,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _stream(self) -> None:
+    def _read_json(self) -> dict | None:
+        """The request body as a JSON object, or None once a 400 is sent.
+
+        Read for every POST, so no body is left on a kept-alive connection to
+        be taken for the next request. Debug is honoured only on this machine.
+        """
+        try:
+            length = max(0, int(self.headers.get("Content-Length") or 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._json(400, {"error": f"bad request body: {exc}"})
+            return None
+        if not isinstance(payload, dict):
+            self._json(400, {"error": "bad request body: expected a JSON object"})
+            return None
+        if not self._local():
+            payload["debug"] = False
+        return payload
+
+    def _stream(self, payload: dict) -> None:
         """POST /ask/stream -- the table first, the rest when it is written.
 
         Two Server-Sent Events:
@@ -861,14 +912,6 @@ class Handler(BaseHTTPRequestHandler):
         when the headers go out, and closing the connection to end the stream
         is the older and simpler of the two ways to say so.
         """
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError) as exc:
-            return self._json(400, {"error": f"bad request body: {exc}"})
-        if isinstance(payload, dict) and not self._local():
-            payload["debug"] = False
-
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -887,15 +930,12 @@ class Handler(BaseHTTPRequestHandler):
             answer = self.runtime.ask(payload, on_rows=(lambda d: emit("rows", d))
                                       if streaming else None)
             emit("answer", answer)
-        except TokenLimitError as exc:
-            # Same body as /ask's 429.
-            emit("error", {"error": str(exc), "code": TOKEN_LIMIT_CODE})
-        except ValueError as exc:
-            emit("error", {"error": str(exc)})
+        except (BrokenPipeError, ConnectionResetError):
+            # The reader left. The turn is saved; there is no one to tell.
+            return
         except Exception as exc:                  # a bad turn must not kill the server
-            # Log, not wire: the raw message names tables and columns.
-            log.exception("streamed turn failed")
-            emit("error", {"error": GENERIC})
+            # Same body as /ask's, without its status: the stream has begun.
+            emit("error", failure(exc, "streamed turn failed")[1])
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -908,7 +948,7 @@ class Handler(BaseHTTPRequestHandler):
         name = "index.html" if path in ("/", "") else path.lstrip("/")
         target = (UI_DIR / name).resolve()
         # Nothing outside ui/ is servable, whatever the path says.
-        if not str(target).startswith(str(UI_DIR.resolve())) or not target.is_file():
+        if not target.is_relative_to(UI_DIR.resolve()) or not target.is_file():
             return self._json(404, {"error": f"no such file: {name}"})
 
         body = target.read_bytes()
@@ -955,16 +995,21 @@ class Handler(BaseHTTPRequestHandler):
                 # not confirm that an id exists.
                 if opened is None:
                     return self._json(404, {"error": "No such chat."})
-                debug = bool(first("debug", "")) and self._local()
+                # PHP's !empty(): "0" is off, as on Drupal.
+                debug = first("debug", "") not in ("", "0") and self._local()
                 return self._json(200, present_chat(opened, debug))
         except Exception:
             # Log, not wire, as on /ask.
             log.exception("saved chats failed on %s", path)
-            return self._json(500, {"error": "I couldn't load your chat history."})
+            return self._json(500, {"error": "I couldn't load your chat history."
+                                    if path == "/chats" else "I couldn't load that chat."})
         return self._json(404, {"error": "no such chat path"})
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        payload = self._read_json()
+        if payload is None:
+            return None
 
         if path == "/debug":
             # What the server kept for turns it has already answered. Reads
@@ -972,38 +1017,31 @@ class Handler(BaseHTTPRequestHandler):
             # SQL and the real column names, so only this machine may ask.
             if not self._local():
                 return self._json(403, {"error": "/debug answers only on this machine"})
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                payload = json.loads(self.rfile.read(length) or b"{}")
-            except (ValueError, json.JSONDecodeError) as exc:
-                return self._json(400, {"error": f"bad request body: {exc}"})
-            conversation = conversation_for(payload.get("session_id") or "default")
-            with conversation.lock:
-                return self._json(200, {"turns": list(conversation.debug_log)})
+            with SESSIONS_LOCK:
+                conversation = SESSIONS.get(safe_session_id(payload.get("session_id")))
+            if conversation is None:
+                return self._json(200, {"turns": []})
+            with conversation.debug_lock:
+                turns = list(conversation.debug_log)
+            return self._json(200, {"turns": turns})
 
         if path == "/ask/stream":
-            return self._stream()
+            return self._stream(payload)
 
         if path != "/ask":
             return self._json(404, {"error": "POST /ask"})
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError) as exc:
-            return self._json(400, {"error": f"bad request body: {exc}"})
-        if isinstance(payload, dict) and not self._local():
-            payload["debug"] = False
-
-        try:
             return self._json(200, self.runtime.ask(payload))
-        except TokenLimitError as exc:
-            return self._json(429, {"error": str(exc), "code": TOKEN_LIMIT_CODE})
-        except ValueError as exc:
-            return self._json(400, {"error": str(exc)})
         except Exception as exc:                      # a bad turn must not kill the server
-            # Log, not wire: the raw message names tables and columns.
-            log.exception("turn failed")
-            return self._json(500, {"error": GENERIC})
+            return self._json(*failure(exc, "turn failed"))
+
+    def finish(self):
+        # This thread's database connection ends with its HTTP connection.
+        try:
+            super().finish()
+        finally:
+            from database.connection import close_thread_connection
+            close_thread_connection()
 
 
 def main() -> int:

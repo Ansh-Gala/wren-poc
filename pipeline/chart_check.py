@@ -84,6 +84,9 @@ STATUS_COLOURS = {
 # The app's colour codes, as tms_task_flat.initiative_color holds them.
 STATUS_CODES = {"a_bl": "black", "b_re": "red", "c_ye": "yellow", "d_gr": "green",
                 "e_wh": "white"}
+# PHP's trim(): only these characters, not every Unicode space.
+PHP_TRIM = " \t\n\r\0\x0b"
+
 _STATUS_WORD = re.compile(r"\b(" + "|".join(STATUS_COLOURS) + r")\b", re.IGNORECASE)
 
 
@@ -129,7 +132,8 @@ def build(chart: dict, source: dict, labels: list) -> dict:
         label = row[category]
         if label is not None and not _is_scalar(label):
             return _no("malformed")
-        label = EMPTY_LABEL if label is None or _php_str(label).strip() == "" else _php_str(label)
+        label = EMPTY_LABEL if label is None or _php_str(label).strip(PHP_TRIM) == "" \
+            else _php_str(label)
         # A NULL and a blank, or a real "Not set", land on one label: refused.
         if label in categories:
             return _no("not_one_row_per_category")
@@ -219,7 +223,7 @@ def _colours(wanted: dict, names: dict) -> dict:
 def _status_colour(label: str) -> str | None:
     """A whole word only, so "Reduced" is not red, and exactly one: a label
     naming two colours is not either of them. Or a whole colour code."""
-    code = label.strip().lower()
+    code = label.strip(PHP_TRIM).lower()
     if code in STATUS_CODES:
         return STATUS_COLOURS[STATUS_CODES[code]]
     found = {m.lower() for m in _STATUS_WORD.findall(label)}
@@ -244,7 +248,7 @@ def _pivot(chart: dict, columns: list, rows: list, labels: list):
         if (row[series] is not None and not _is_scalar(row[series])) or \
                 (row[category] is not None and not _is_scalar(row[category])):
             return "malformed"
-        name = EMPTY_LABEL if row[series] is None or _php_str(row[series]).strip() == "" \
+        name = EMPTY_LABEL if row[series] is None or _php_str(row[series]).strip(PHP_TRIM) == "" \
             else _php_str(row[series])
         key = "\0" if row[category] is None else _php_str(row[category])
         if key not in categories:
@@ -300,9 +304,14 @@ def _php_str(value) -> str:
     if isinstance(value, bool):
         return "1" if value else ""
     if isinstance(value, float):
-        if math.isfinite(value) and value.is_integer() and abs(value) < 1e15:
-            return str(int(value))
-        return repr(value)
+        # PHP's precision=14, and its exponent form: 1.0E+15, 1.0E-5.
+        text = format(value, ".14G")
+        if "E" in text:
+            mantissa, exponent = text.split("E")
+            if "." not in mantissa:
+                mantissa += ".0"
+            text = f"{mantissa}E{exponent[0]}{int(exponent[1:])}"
+        return text
     return str(value)
 
 

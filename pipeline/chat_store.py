@@ -1,4 +1,4 @@
-"""Where a chat lives after its turn: the two tables Drupal writes.
+"""Where a chat lives after its turn: py_sql_chat and py_sql_chat_turn.
 
 Ported from the Drupal port's ConversationStore and TurnOutcome. The tables
 are copies of Drupal's -- sql_chat and sql_chat_turn, the same columns and
@@ -29,6 +29,7 @@ from datetime import datetime
 
 import psycopg
 from psycopg import sql as pgsql
+from psycopg.rows import dict_row
 
 from config.logging import get_logger
 from pipeline.context import RECENT_QUESTIONS, ConversationState, _EXPLICIT_RESET
@@ -247,15 +248,14 @@ class ChatStore:
     def list_chats(self, limit=50, offset=0) -> list[dict]:
         """This user's chats, most recently answered first."""
         limit = max(1, min(200, _int(limit, 50)))
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(self._q(
                 "SELECT c.id, c.title, c.created_at, c.updated_at,"
                 " (SELECT COUNT(*) FROM {turns} t WHERE t.chat_id = c.id) AS turn_count"
                 " FROM {chats} c WHERE c.uid = %s"
                 " ORDER BY c.updated_at DESC, c.id DESC LIMIT %s OFFSET %s"),
                 (self.uid, limit, max(0, _int(offset, 0))))
-            names = [d.name for d in cur.description]
-            return [dict(zip(names, row)) for row in cur.fetchall()]
+            return cur.fetchall()
 
     def count_chats(self) -> int:
         with self._connect() as conn, conn.cursor() as cur:
@@ -269,18 +269,16 @@ class ChatStore:
         ownership check returned, so no change can drop that check and still
         get rows.
         """
-        with self._connect() as conn, conn.cursor() as cur:
+        with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(self._q(
                 "SELECT id, session_id, title, created_at, updated_at FROM {chats}"
                 " WHERE id = %s AND uid = %s"), (_int(chat_id, 0), self.uid))
-            row = cur.fetchone()
-            if row is None:
+            chat = cur.fetchone()
+            if chat is None:
                 return None
-            chat = dict(zip([d.name for d in cur.description], row))
             cur.execute(self._q("SELECT * FROM {turns} WHERE chat_id = %s ORDER BY sequence_number"),
                         (chat["id"],))
-            names = [d.name for d in cur.description]
-            return {"chat": chat, "turns": [dict(zip(names, t)) for t in cur.fetchall()]}
+            return {"chat": chat, "turns": cur.fetchall()}
 
     def monthly_effective_tokens(self) -> int:
         """Effective tokens every user together has used this calendar month.
@@ -334,7 +332,7 @@ _STAGES = (("normalize", "normalize_ms"), ("llm", "llm_wall_ms"),
 def step_timings(r) -> str:
     """When this question started and finished, and what each step took."""
     started, total = float(r.turn_started or 0), float(r.latency_ms or 0)
-    sql_ms = (r.actual_result or {}).get("duration_ms") if isinstance(r.actual_result, dict) else None
+    sql_ms = r.actual_result.get("duration_ms") if isinstance(r.actual_result, dict) else None
     return json.dumps({
         "started": stamp(started) if started > 0 else None,
         "ended": stamp(started + total / 1000) if started > 0 else None,
@@ -352,6 +350,7 @@ def metadata_for(r, question: str, state: ConversationState | None = None) -> st
     and column names are never stored: shape and cost only."""
     result = r.actual_result if isinstance(r.actual_result, dict) else {}
     followup = r.followup if isinstance(r.followup, dict) else {}
+    chart_result = getattr(r, "chart_result", None)
     normalized = str(r.normalized_question or "")
     metadata = {
         "llm": {"mode": r.llm_mode, "provider": r.llm_provider, "model": r.llm_model},
@@ -383,8 +382,8 @@ def metadata_for(r, question: str, state: ConversationState | None = None) -> st
             # Why a requested chart was not drawn ("ok" when it was), and how
             # long its own query took. None when no chart was asked for.
             "chart_reason": getattr(r, "chart_reason", None),
-            "chart_query_ms": (r.chart_result or {}).get("duration_ms")
-            if isinstance(getattr(r, "chart_result", None), dict) else None,
+            "chart_query_ms": chart_result.get("duration_ms")
+            if isinstance(chart_result, dict) else None,
         },
         # Shape, never content. None means no query ran, unlike 0.
         "result": {"row_count": int(result["row_count"]) if "row_count" in result else None,

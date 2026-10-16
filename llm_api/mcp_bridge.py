@@ -1,24 +1,17 @@
-import asyncio
 import os
-import sys
-from pathlib import Path
-from typing import Any, AsyncGenerator, Callable, Dict, List
+from typing import Any, Dict
 
 from config.settings import Settings
-from wren_setup.mcp_config import build_mcp_config, wren_executable
+from wren_setup.mcp_config import build_mcp_config
 
 from mcp.client.stdio import stdio_client, StdioServerParameters
 from mcp.client.session import ClientSession
-from mcp.types import CallToolResult, Tool
+from mcp.types import Tool
 
 from contextlib import asynccontextmanager
 
 class WrenMCPBridge:
     def __init__(self, config_name: str, privacy_mode: str, settings: Settings):
-        self.config_name = config_name
-        self.privacy_mode = privacy_mode
-        self.settings = settings
-        
         # Build the exact same env and args as the CLI would use
         config = build_mcp_config(config_name, privacy_mode, settings)
         server_config = config["mcpServers"]["wren"]

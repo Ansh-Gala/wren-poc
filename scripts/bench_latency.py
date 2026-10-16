@@ -144,7 +144,7 @@ def main() -> int:
             # not conversational follow-up, and carrying state would let one
             # turn's filters change the next turn's SQL.
             state = ConversationState()
-            session = Session(session_id=f"bench{len(rows)}", lean=True)
+            session = Session(session_id=f"bench{len(rows)}")
             turn = SuiteTurn(id=f"bench{len(rows)}", question=q, expected_sql=None,
                              category="bench", conversation_id=f"bench{len(rows)}",
                              turn_index=0)

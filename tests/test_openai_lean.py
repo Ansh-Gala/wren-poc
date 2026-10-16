@@ -55,6 +55,9 @@ def calls(monkeypatch):
         def __init__(self, **kwargs):
             self.chat = types.SimpleNamespace(completions=FakeCompletions())
 
+        async def close(self):
+            pass
+
     monkeypatch.setattr(openai_provider, "AsyncOpenAI", FakeClient)
 
     # Constructing the bridge spawns the Wren MCP server. In lean mode nothing
@@ -115,6 +118,10 @@ def test_a_missing_key_is_reported_rather_than_thrown(calls):
     assert calls == []
 
 
+async def _closed():
+    pass
+
+
 def test_an_empty_reply_is_not_ok(monkeypatch, calls):
     class Empty:
         async def create(self, **kwargs):
@@ -126,6 +133,7 @@ def test_an_empty_reply_is_not_ok(monkeypatch, calls):
 
     monkeypatch.setattr(openai_provider, "AsyncOpenAI",
                         lambda **k: types.SimpleNamespace(
-                            chat=types.SimpleNamespace(completions=Empty())))
+                            chat=types.SimpleNamespace(completions=Empty()),
+                            close=_closed))
     run = OpenAIProvider().ask("q", None, "strict", _settings())
     assert not run.ok and run.error

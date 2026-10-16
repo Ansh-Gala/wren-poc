@@ -55,8 +55,9 @@ class AnthropicProvider(LLMProvider):
             return ClaudeRun(ok=False, error="No Anthropic model chosen. Set ANTHROPIC_MODEL.")
 
         started = time.perf_counter()
+        client = _client(settings)
         try:
-            response = _client(settings).beta.messages.create(
+            response = client.beta.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=MAX_OUTPUT_TOKENS,
                 # The schema is identical on every question, so mark it
@@ -77,6 +78,8 @@ class AnthropicProvider(LLMProvider):
         except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:
             return ClaudeRun(ok=False, duration_ms=_ms(started), timed_out=isinstance(
                 exc, anthropic.APITimeoutError), error=f"anthropic request failed: {exc}")
+        finally:
+            client.close()          # its connection pool, made for this one call
 
         elapsed = _ms(started)
         usage = response.usage

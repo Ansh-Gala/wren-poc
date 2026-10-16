@@ -100,7 +100,7 @@ def converse(monkeypatch, tmp_path):
                                 columns=["n"], rows=[(1,)], duration_ms=0.0))
 
         state = ConversationState()
-        session = Session(session_id="t", turns=[], context_block="", lean=True)
+        session = Session(session_id="t", turns=[], context_block="")
         results = []
         for index, (question, _) in enumerate(script):
             turn = SuiteTurn(id=f"t.{index}", question=question,

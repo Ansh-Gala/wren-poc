@@ -45,7 +45,9 @@ def connect(settings: Settings, readonly: bool = False) -> psycopg.Connection:
 # answer runs one or two statements, so this was up to 220ms of every turn
 # spent saying hello. Per-thread rather than a shared pool because psycopg
 # connections are not thread-safe and the HTTP server is threaded; a thread
-# gets its own or it gets nothing.
+# gets its own or it gets nothing. The server makes a thread per HTTP
+# connection and closes its database connection when that one ends, so reuse
+# lasts for one browser connection, or for a whole benchmark run.
 #
 # The connection is still used exactly as before: READ ONLY transaction, a
 # statement timeout, and a rollback after every query. Reuse changes how
@@ -102,7 +104,6 @@ def run_readonly(
     settings: Settings,
     sql: str,
     timeout_ms: int | None = None,
-    readonly_role: bool = True,
 ) -> QueryResult:
     """Execute one statement under a READ ONLY transaction and a hard timeout.
 
@@ -112,7 +113,7 @@ def run_readonly(
     timeout = timeout_ms or settings.statement_timeout_ms
     started = time.perf_counter()
     try:
-        conn = _reusable(settings, readonly_role)
+        conn = _reusable(settings, True)
         try:
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION READ ONLY")

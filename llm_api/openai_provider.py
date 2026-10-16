@@ -4,18 +4,16 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-import nest_asyncio
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolMessageParam
+from openai.types.chat import ChatCompletionMessageParam
 
 from pipeline.models import ClaudeRun, Session
 from config.settings import Settings
 from wren_setup.mcp_config import allowed_tools, to_claude_name, to_mcp_name
+from llm_api.cli_pool import MAX_OUTPUT_TOKENS
 from llm_api.provider import LLMProvider
 from llm_api.mcp_bridge import WrenMCPBridge
 from claude.prompts import build_lean_system_prompt, build_system_prompt, build_user_prompt
-
-nest_asyncio.apply()
 
 # An agent loop with no ceiling is both a hang risk and an unbounded bill: every
 # turn resends the whole conversation. Real runs settle in 2-3 tool calls, so
@@ -30,7 +28,7 @@ MAX_TOOL_RESULT_CHARS = 8000
 # A ceiling on the lean reply, which is a SELECT and a few sentences. The same
 # figure the Drupal port uses for every transport (LlmProviderInterface::
 # MAX_TOKENS), so a model is not given more room here than it gets there.
-LEAN_MAX_TOKENS = 4000
+LEAN_MAX_TOKENS = MAX_OUTPUT_TOKENS
 
 
 def _limits(settings: Settings) -> dict:
@@ -122,6 +120,8 @@ class OpenAIProvider(LLMProvider):
                 error=str(e),
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
+        finally:
+            await client.close()     # its connection pool, made for this one call
 
         elapsed_ms = (time.perf_counter() - started) * 1000
 
@@ -189,7 +189,8 @@ class OpenAIProvider(LLMProvider):
         
         bridge = WrenMCPBridge(settings.benchmark_config, privacy_mode, settings)
         
-        async with bridge.get_session() as mcp_session:
+        # The client too: its connection pool is made for this one question.
+        async with client, bridge.get_session() as mcp_session:
             tools_response = await mcp_session.list_tools()
             
             allowed = set(allowed_tools(privacy_mode))
@@ -284,8 +285,10 @@ class OpenAIProvider(LLMProvider):
                 
             elapsed_ms = (time.perf_counter() - started) * 1000
             
+            # Every turn asked for a tool: there is no answer to report.
             return ClaudeRun(
-                ok=True,
+                ok=bool(result_text),
+                error=None if result_text else f"no final answer after {MAX_TURNS} turns",
                 duration_ms=elapsed_ms,
                 result_text=result_text,
                 tools_used=tools_used,

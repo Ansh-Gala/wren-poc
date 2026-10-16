@@ -93,6 +93,12 @@ def normalize_rows(rows: list[tuple]) -> list[tuple]:
     return [tuple(normalize_value(v) for v in row) for row in rows]
 
 
+def _comparable(expected: QueryResult | None, actual: QueryResult | None) -> bool:
+    """Both results exist and neither is an error."""
+    return (expected is not None and actual is not None
+            and expected.error is None and actual.error is None)
+
+
 def _matches(expected: list[tuple], actual: list[tuple], ordered: bool) -> bool:
     if ordered:
         return expected == actual
@@ -104,9 +110,7 @@ def compare_results(
     actual: QueryResult,
     ordered: bool = False,
 ) -> bool:
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
 
     n = len(expected.columns)
@@ -214,16 +218,16 @@ def compare_row_subset(
 
     Scoring it as wrong would understate the semantic layer badly, since the
     hard part (which rows) was right and the easy part (which columns) is
-    genuinely ambiguous in the question. Scoring it as right would hide real
-    errors. So it is reported as a SEPARATE metric, and the failure is
-    classified EXTRA_COLUMNS rather than being folded into the accuracy number.
+    genuinely ambiguous in the question. The lean runner counts it as a match
+    and names it, with match_mode "superset".
 
-    True when every expected column can be matched to some actual column with
-    the same values in the same row order.
+    True when every expected column can be matched to a distinct actual column
+    holding the same values -- in the same order when ``ordered``, as the same
+    multiset otherwise -- and the projected rows then match. Columns are
+    matched greedily, first fit, as Drupal's Comparator does; two actual
+    columns holding the same values can make it miss a match that exists.
     """
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
     if len(actual.columns) < len(expected.columns):
         return False
@@ -241,37 +245,21 @@ def compare_row_subset(
     exp_cols = [[row[i] for row in exp_rows] for i in range(n_exp)]
     act_cols = [[row[j] for row in act_rows] for j in range(n_act)]
 
-    if not ordered:
-        # Rows may come back in a different order. Align on the first expected
-        # column, then require the rest to agree under that same alignment.
-        exp_tuples = [tuple(row) for row in exp_rows]
-        used: set[int] = set()
-        chosen: list[int] = []
-        for i in range(n_exp):
-            for j in range(n_act):
-                if j in used:
-                    continue
-                if Counter(act_cols[j]) == Counter(exp_cols[i]):
-                    used.add(j)
-                    chosen.append(j)
-                    break
-            else:
-                return False
-        projected = [tuple(row[j] for j in chosen) for row in act_rows]
-        return Counter(projected) == Counter(exp_tuples)
-
-    used = set()
-    chosen = []
+    used: set[int] = set()
+    chosen: list[int] = []
     for i in range(n_exp):
         for j in range(n_act):
-            if j not in used and act_cols[j] == exp_cols[i]:
+            if j in used:
+                continue
+            same = (act_cols[j] == exp_cols[i]) if ordered                 else Counter(act_cols[j]) == Counter(exp_cols[i])
+            if same:
                 used.add(j)
                 chosen.append(j)
                 break
         else:
             return False
     projected = [tuple(row[j] for j in chosen) for row in act_rows]
-    return projected == [tuple(row) for row in exp_rows]
+    return _matches(exp_rows, projected, ordered)
 
 
 def compare_projection_agnostic(
@@ -293,9 +281,7 @@ def compare_projection_agnostic(
     must be shared and the row counts must agree, which keeps this from
     degenerating into "any query with the right number of rows passes".
     """
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
     if len(expected.rows) != len(actual.rows):
         return False

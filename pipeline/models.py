@@ -138,4 +138,3 @@ class Session:
     # Rendered by pipeline.context. When set, providers send this instead of
     # replaying `turns`, which keeps prompt size flat across a long thread.
     context_block: str | None = None
-    lean: bool = False

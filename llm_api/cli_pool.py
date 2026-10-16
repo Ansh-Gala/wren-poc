@@ -51,6 +51,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from config.settings import DEFAULT_EFFORT_LEVEL, effort_level as _effort_level
+from pipeline.models import ClaudeRun
 
 # The output cap every transport gets, as in the Drupal port.
 MAX_OUTPUT_TOKENS = 4000
@@ -74,7 +75,6 @@ def cli_environment(config_dir: str = "") -> dict[str, str]:
     if config_dir:
         env["CLAUDE_CONFIG_DIR"] = config_dir
     return env
-from pipeline.models import ClaudeRun
 
 # Where the warm-up curve above flattens. Paid on a background thread, so it
 # costs wall clock only when the pool is empty and someone is waiting.
@@ -94,7 +94,7 @@ DEFAULT_WARMUP_SECONDS = 3.0
 DEFAULT_POOL_SIZE = 4
 
 # How long to wait for a `result` event before giving up on a process. Far
-# below CLAUDE_TIMEOUT_SECONDS (180s by default): a wedged CLI holding an HTTP
+# below CLAUDE_TIMEOUT_SECONDS (500s by default): a wedged CLI holding an HTTP
 # request for three minutes is a worse failure than a fast error.
 DEFAULT_REPLY_TIMEOUT = 90.0
 
@@ -153,9 +153,9 @@ class _Warm:
             self.proc.terminate()
         except Exception:
             pass
-        # stdin is ours to close and nothing is blocked on it. stdout and
-        # stderr are left to the drain thread and to garbage collection: the
-        # child is already terminating, so they are about to hit EOF anyway.
+        # stdin is ours to close and nothing is blocked on it. stdout is
+        # left to the drain thread and to garbage collection: the child is
+        # already terminating, so it is about to hit EOF anyway.
         try:
             if self.proc.stdin:
                 self.proc.stdin.close()
@@ -241,7 +241,9 @@ class ClaudePool:
             proc = subprocess.Popen(
                 self._argv(),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                # Nothing reads stderr; a pipe nobody drains can fill and
+                # stall a process that sits warm for a long time.
+                stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                 errors="replace", bufsize=1,
                 env=self._environment(),
             )

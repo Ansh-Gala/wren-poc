@@ -575,6 +575,15 @@ def classify_turn(
     return "follow_up", state.active_entity
 
 
+def without_entity_filters(state: ConversationState) -> dict:
+    """The filters left when a rebase drops the ones naming the old subject.
+
+    Drupal's ConversationContext::withoutEntityFilters.
+    """
+    return {col: pred for col, pred in state.active_filters.items()
+            if state.active_entity is None or state.active_entity not in pred}
+
+
 def update_state(
     state: ConversationState,
     question: str,
@@ -600,10 +609,7 @@ def update_state(
         state.reset()
     elif decision == "rebase":
         # Keep the shape, drop only what identified the old subject.
-        state.active_filters = {
-            col: pred for col, pred in state.active_filters.items()
-            if state.active_entity is None or state.active_entity not in pred
-        }
+        state.active_filters = without_entity_filters(state)
         # The record under discussion is precisely what a rebase replaces, so
         # it goes with the old subject's filters. The goal does not: "what
         # about John?" after "show me Amit's delayed tasks" still wants delayed
