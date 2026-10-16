@@ -272,8 +272,10 @@ def test_a_bare_fragment_still_continues_the_block():
     turns across the three suites depend on it.
     """
     state = _thread_about_business_objects()
+    # Not "How many tasks?": it names tasks, a subject of its own, and
+    # Drupal's ConversationContext starts a new block on it too.
     for fragment in ("How many?", "How many are there?", "Make that 10",
-                     "Show their status too", "How many tasks?"):
+                     "Show their status too"):
         decision, _ = classify_turn(fragment, state, GAZ)
         assert decision == "follow_up", f"{fragment!r} should continue the block"
 

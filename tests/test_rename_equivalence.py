@@ -1,4 +1,9 @@
+import pytest
+
 from scripts.verify_rename_equivalence import verify_pairs
+
+# verify_pairs runs both queries on the live database.
+pytestmark = pytest.mark.integration
 
 
 def test_identical_queries_agree():

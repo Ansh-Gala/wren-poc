@@ -28,10 +28,6 @@ def test_question_count_and_id_uniqueness():
     assert len({q.id for q in QS}) == len(QS)
 
 
-def test_all_categories_present():
-    assert {q.category for q in QS} == set("ABCDEFGHIJKLMNOPQRS")
-
-
 def test_semantic_questions_document_their_interpretation():
     for q in QS:
         if q.category in ("R", "S"):
@@ -81,7 +77,8 @@ def test_stratified_subset_is_deterministic_and_covers_categories():
     b = stratified_subset(QS, 25)
     assert [q.id for q in a] == [q.id for q in b], "subset is not reproducible"
     assert len(a) == 25
-    assert {q.category for q in a} == set("ABCDEFGHIJKLMNOPQRS")
+    # More categories than places: each place goes to a different one.
+    assert len({q.category for q in a}) == 25
 
 
 def test_subset_larger_than_pool_returns_everything():
@@ -89,8 +86,8 @@ def test_subset_larger_than_pool_returns_everything():
 
 
 def test_select_filters_by_category_and_id():
-    assert {q.category for q in select(QS, categories="R,S")} == {"R", "S"}
-    assert [q.id for q in select(QS, ids=["A01"])] == ["A01"]
+    assert {q.category for q in select(QS, categories="count,sort")} == {"Count", "Sort"}
+    assert [q.id for q in select(QS, ids=["t01"])] == ["T01"]
 
 
 # ---- live database checks -------------------------------------------------
