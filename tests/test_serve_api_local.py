@@ -358,3 +358,12 @@ def _stream(streaming: bool) -> str:
 def test_streaming_off_sends_only_the_answer():
     assert "event: rows" in _stream(True) and "event: answer" in _stream(True)
     assert "event: rows" not in _stream(False) and "event: answer" in _stream(False)
+
+
+def test_the_console_log_keeps_counts_not_rows(runtime, tmp_path):
+    rt, _ = runtime
+    rt.log_path, rt.log_lock = tmp_path / "turns.jsonl", threading.Lock()
+    rt.record(_turn(actual_result=_rows(3), chart_result=BY_DEPT), "q", {})
+    row = json.loads(rt.log_path.read_text(encoding="utf-8"))
+    assert row["actual_result"]["rows"] == [] and row["actual_result"]["row_count"] == 3
+    assert row["chart_result"]["rows"] == [] and row["chart_result"]["columns"] == ["department", "n"]

@@ -437,6 +437,10 @@ class Runtime:
         if self.log_path is None:
             return
         row = logged(result)
+        # The saved chat keeps the answer. The log keeps how the turn went,
+        # not people's data: columns and counts, no rows.
+        for key in ("actual_result", "chart_result"):
+            row[key] = first_rows(row.get(key), 0)
         row.update({
             "asked_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "session_id": result.conversation_id,
