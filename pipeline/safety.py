@@ -53,6 +53,10 @@ class UnsafeSQLError(Exception):
     """Raised when generated SQL is not provably read-only."""
 
 
+class UnparseableSQLError(UnsafeSQLError):
+    """The parser could not read the SQL: unproven, not proven unsafe."""
+
+
 def _strip_noise(sql: str) -> str:
     """Remove comments and string literals before the keyword screen.
 
@@ -77,7 +81,7 @@ def assert_read_only(sql: str) -> None:
     try:
         statements = [s for s in sqlglot.parse(sql, read="postgres") if s is not None]
     except Exception as exc:
-        raise UnsafeSQLError(f"could not parse SQL: {exc}") from exc
+        raise UnparseableSQLError(f"could not parse SQL: {exc}") from exc
 
     if not statements:
         raise UnsafeSQLError("no statement found")

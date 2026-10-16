@@ -14,6 +14,7 @@ wrong decision is visible on the turn that made it rather than the turn after.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from dataclasses import asdict, dataclass, field
@@ -39,7 +40,7 @@ from pipeline.evaluator import (
 from pipeline.lean_suite import Conversation, SuiteTurn
 from pipeline.sql_semantics import compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
-from pipeline.safety import UnsafeSQLError, assert_read_only
+from pipeline.safety import UnparseableSQLError, UnsafeSQLError, assert_read_only
 from claude.prompts import build_repair_question
 from claude.parser import (
     partial_sql,
@@ -508,6 +509,67 @@ def _delta_watcher(settings: Settings, memo: dict,
     return on_delta
 
 
+def _reads_as_zero(value) -> bool:
+    """Drupal's ``(string) $rows[0][0] === '0'``, on PostgreSQL's text for it.
+
+    A count of 0 and the text '0' are nothing; 0.00 from a numeric is a value.
+    """
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        # float8 zero prints as "0", negative zero as "-0".
+        return value == 0 and math.copysign(1.0, value) > 0
+    return str(value) == "0"
+
+
+def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mode,
+                    r: TurnResult, executed):
+    """The one repair: ask again with the error, gate the answer, run it.
+
+    Returns (fixed SQL, its schema check, its result) when the corrected
+    statement passed both gates and ran; None leaves the first failure
+    standing, because that is the one the user's question produced.
+    """
+    # Set before the call, not after: this counts how often a turn needed a
+    # second attempt, which is the figure worth having. Whether the attempt
+    # produced anything usable is repair_succeeded.
+    r.repair_attempted = True
+    try:
+        fixed, cost_ms = _repair(question, sql, error, settings, mcp_config_path,
+                                 privacy_mode, r)
+    except Exception:
+        # The original failure is still reported; a repair that cannot run
+        # must not turn a failed query into a crash.
+        fixed, cost_ms = None, 0.0
+    r.repair_ms = cost_ms
+    if not fixed:
+        return None
+    # The corrected statement goes through the same two gates as the first
+    # one. A repair must not become the way round them.
+    from pipeline.sql_semantics import check_against_schema
+    sc = check_against_schema(fixed)
+    try:
+        assert_read_only(fixed)
+    except UnsafeSQLError:
+        return None
+    if not sc.grounded:
+        return None
+    retried = _execute(settings, fixed, settings.statement_timeout_ms, executed)
+    r.db_ms += retried.duration_ms
+    return (fixed, sc, retried) if retried.ok else None
+
+
+def _take_repair(r: TurnResult, parsed: ParsedSQL, fixed: str, sc) -> ParsedSQL:
+    """The turn now carries the corrected statement; the first is kept."""
+    r.repair_succeeded = True
+    r.repaired_from = parsed.sql
+    r.parse_strategy = "repair"
+    r.generated_sql = fixed
+    r.schema_grounded = sc.grounded
+    r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
+    return ParsedSQL(sql=fixed, strategy="repair", raw=parsed.raw)
+
+
 def _repair(
     question: str,
     sql: str,
@@ -832,12 +894,15 @@ def run_turn(
         r.schema_grounded = sc.grounded
         r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
 
+    unreadable = None
     if parsed.sql:
         _t = time.perf_counter()
         try:
             assert_read_only(parsed.sql)
             r.sql_valid = True
         except UnsafeSQLError as exc:
+            if isinstance(exc, UnparseableSQLError):
+                unreadable = str(exc)
             r.error = r.error or f"unsafe SQL: {exc}"
             # "Please try rephrasing" is the wrong advice for someone asking
             # what the tables are -- rephrasing cannot help, because the
@@ -856,7 +921,7 @@ def run_turn(
             r.actual_result = result_summary(res, max_rows=None)
             r.execution_success = res.ok
             empty = res.ok and (
-                not res.rows or (len(res.rows) == 1 and res.rows[0][0] == 0))
+                not res.rows or (len(res.rows) == 1 and _reads_as_zero(res.rows[0][0])))
             r.behavior_match = r.result_match = r.semantic_match = bool(empty)
             if not empty:
                 # Rows came back for a value that does not exist, so a filter
@@ -904,6 +969,20 @@ def run_turn(
         r.expected_result = result_summary(expected)
 
     actual = None
+    # SQL the parser cannot read. Drupal's gate matches patterns, so there the
+    # database rejects such a statement as a syntax error and the one repair
+    # runs. Here the parser refused it first and nothing was repaired -- even
+    # valid PostgreSQL that sqlglot cannot read. It is still never run: the
+    # repair goes on the parser's words, and its answer must pass both gates.
+    if unreadable and repair_mode:
+        repaired = _second_attempt(question, parsed.sql, unreadable, settings,
+                                   mcp_config_path, privacy_mode, r, executed)
+        if repaired:
+            fixed, sc, actual = repaired
+            r.sql_valid = True
+            r.error = r.sqlstate = None
+            parsed = _take_repair(r, parsed, fixed, sc)
+
     # Grounding is a gate, not a note.
     #
     # The check above already knew the query named something the described
@@ -925,52 +1004,21 @@ def run_turn(
         r.sqlstate = r.sqlstate or "42703"
         r.execution_success = False
     elif r.sql_valid and parsed.sql:
-        actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
-        r.db_ms += actual.duration_ms
+        # Already run when it was the repair of an unreadable statement.
+        if actual is None:
+            actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
+            r.db_ms += actual.duration_ms
 
-        # The database rejected the statement, and it said why. Tell the model
-        # and let it try once more. Only here: a refusal above is a decision
-        # this pipeline made on purpose, and asking the model to work around
-        # one would be asking it to defeat a gate.
-        if not actual.ok and actual.error and repair_mode:
-            # Set before the call, not after: this counts how often a turn
-            # needed a second attempt, which is the figure worth having.
-            # Whether the attempt produced anything usable is repair_succeeded.
-            r.repair_attempted = True
-            try:
-                fixed, cost_ms = _repair(question, parsed.sql, actual.error,
-                                         settings, mcp_config_path, privacy_mode, r)
-            except Exception:
-                # The original failure is still reported below; a repair that
-                # cannot run must not turn a database error into a crash.
-                fixed, cost_ms = None, 0.0
-            r.repair_ms = cost_ms
-            if fixed:
-                # The corrected statement goes through the same two gates as
-                # the first one. A repair must not become the way round them.
-                from pipeline.sql_semantics import check_against_schema
-                sc = check_against_schema(fixed)
-                safe = True
-                try:
-                    assert_read_only(fixed)
-                except UnsafeSQLError:
-                    safe = False
-                if sc.grounded and safe:
-                    retried = _execute(settings, fixed, settings.statement_timeout_ms, executed)
-                    r.db_ms += retried.duration_ms
-                    if retried.ok:
-                        # Only on success. A second failure leaves the first
-                        # one standing, because that is the one the user's
-                        # question actually produced.
-                        r.repair_succeeded = True
-                        r.repaired_from = parsed.sql
-                        parsed = ParsedSQL(sql=fixed, strategy="repair",
-                                           raw=parsed.raw)
-                        r.parse_strategy = parsed.strategy
-                        r.generated_sql = fixed
-                        r.schema_grounded = sc.grounded
-                        r.hallucinated = sorted(sc.unknown_tables | sc.unknown_columns)
-                        actual = retried
+            # The database rejected the statement, and it said why. Tell the
+            # model and let it try once more. Only here: a refusal above is a
+            # decision this pipeline made on purpose, and asking the model to
+            # work around one would be asking it to defeat a gate.
+            if not actual.ok and actual.error and repair_mode:
+                repaired = _second_attempt(question, parsed.sql, actual.error, settings,
+                                           mcp_config_path, privacy_mode, r, executed)
+                if repaired:
+                    fixed, sc, actual = repaired
+                    parsed = _take_repair(r, parsed, fixed, sc)
 
         # Every row, as Drupal keeps them: the follow-up layer reads the whole
         # answer. What is shown, or written to a log, is cut later.

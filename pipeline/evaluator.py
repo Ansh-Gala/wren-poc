@@ -72,8 +72,12 @@ def normalize_value(value: Any) -> Any:
         except (ValueError, OverflowError):
             return str(value)
     if isinstance(value, datetime):
-        # Midnight timestamps and plain dates describe the same day.
-        if value.hour == value.minute == value.second == value.microsecond == 0:
+        # Midnight timestamps and plain dates describe the same day -- when
+        # the midnight is UTC's or has no zone, as Drupal's Comparator reads
+        # it. Midnight in Kolkata is still the previous day in UTC.
+        offset = value.utcoffset()
+        if (value.hour == value.minute == value.second == value.microsecond == 0
+                and (offset is None or not offset)):
             return value.date().isoformat()
         return value.isoformat(sep=" ")
     if isinstance(value, date):
