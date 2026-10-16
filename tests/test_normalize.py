@@ -19,14 +19,17 @@ def test_corrects_a_typo_against_schema_vocabulary():
 def test_repairs_a_single_transposed_or_dropped_letter():
     """The commonest typo of all, and a similarity ratio just misses it.
 
-    "itmes" and "items" score 0.80 against a 0.82 threshold, as do "tsaks",
+    "roels" and "roles" score 0.80 against a 0.82 threshold, as do "tsaks",
     "usres" and "colur" -- every one a single adjacent transposition or one
     dropped letter. Raising the ratio far enough to catch them would also
     start rewriting genuinely different words, so distance is measured
     directly instead.
     """
     for typed, meant in [
-        ("show the AR_YD_Suiting itmes", "items"),
+        # Was "itmes" -> "items" until 16 October 2026: "items" was a
+        # vocabulary word only through an item_code column of the old
+        # attributes table, which the Drupal sync removed.
+        ("show the roels in Sales", "roles"),
         ("show open tsaks", "tasks"),
         ("how many usres are there", "users"),
         ("show items by colur", "color"),
@@ -135,4 +138,4 @@ def test_a_negating_prefix_is_never_repaired_away():
 def test_lowercase_typos_are_still_repaired_after_the_capital_rule():
     """Regression guard: the fix must only ever remove repairs, never add."""
     assert normalize("give me my actie task").question == "give me my active task"
-    assert normalize("show the AR_YD_Suiting itmes").question.endswith("items")
+    assert "roles" in normalize("show the roels in Sales").question.split()
