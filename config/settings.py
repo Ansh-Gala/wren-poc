@@ -199,6 +199,8 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "HISTORY_DATABASE_HOST", "HISTORY_DATABASE_PORT", "HISTORY_DATABASE_NAME",
         "HISTORY_DATABASE_USER", "HISTORY_DATABASE_PASSWORD", "CHAT_TABLE_PREFIX",
         "MONTHLY_TOKEN_LIMIT", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
+        "GROQ_API_KEY", "GEMINI_API_KEY", "CLI_POOL_SIZE", "CLI_POOL_WARMUP_SECONDS",
+        "BENCHMARK_USER_ID", "BENCHMARK_USER_NAME", "STREAM_ANSWERS",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]

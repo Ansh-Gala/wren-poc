@@ -64,3 +64,26 @@ def test_naming_a_provider_without_its_key_is_a_config_error_not_a_crash(tmp_pat
 
     assert settings.llm_provider == "groq"
     assert settings.openai_api_key == ""
+
+
+def test_every_setting_can_be_overridden_from_the_environment():
+    """A name missing from the override list is silently .env-only."""
+    import re
+    from pathlib import Path
+
+    import config.settings as module
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    read = set(re.findall(r'\bg\("([A-Z0-9_]+)"\)', source))
+    block = source[source.index("for key in list(values) + ["):]
+    listed = set(re.findall(r'"([A-Z0-9_]+)"', block[:block.index("]:")]))
+    assert read - listed == set()
+
+
+def test_the_environment_wins_over_the_file(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("CLI_POOL_SIZE=4\nBENCHMARK_USER_ID=1\nSTREAM_ANSWERS=true\n")
+    monkeypatch.setenv("CLI_POOL_SIZE", "0")
+    monkeypatch.setenv("BENCHMARK_USER_ID", "9")
+    monkeypatch.setenv("STREAM_ANSWERS", "false")
+    s = load_settings(env)
+    assert (s.cli_pool_size, s.benchmark_user_id, s.stream_answers) == (0, 9, False)
