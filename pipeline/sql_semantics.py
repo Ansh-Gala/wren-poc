@@ -459,12 +459,9 @@ def _schema_index() -> tuple[frozenset[str], dict[str, frozenset[str]]]:
     between callers -- a caller that mutated it would corrupt every later
     schema check, and the failure would look like a hallucination report.
     """
-    from pathlib import Path
+    from pipeline import metadata
 
-    import yaml
-
-    path = Path(__file__).resolve().parents[1] / "metadata" / "schema_description.yaml"
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    doc = metadata.schema()
     tables: set[str] = set()
     columns: dict[str, frozenset[str]] = {}
     for table, spec in (doc.get("tables") or {}).items():

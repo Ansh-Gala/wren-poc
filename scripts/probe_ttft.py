@@ -48,6 +48,7 @@ if str(ROOT) not in sys.path:
 
 from claude.parser import sql_value_end as find_sql_end  # noqa: E402
 from claude.prompts import build_lean_system_prompt, build_user_prompt  # noqa: E402
+from pipeline.metadata import enable_site_metadata  # noqa: E402
 
 # The same ceiling the Drupal transport uses, so a model is not given more room
 # here than it gets in production.
@@ -200,6 +201,7 @@ def main() -> int:
                          "results/<today>/ttft_<model>.json")
     args = ap.parse_args()
 
+    enable_site_metadata()
     key = os.environ.get(args.api_key_env, "").strip()
     if not key:
         print(f"{args.api_key_env} is not set in the environment.", file=sys.stderr)

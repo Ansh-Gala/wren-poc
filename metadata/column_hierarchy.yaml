@@ -35,7 +35,6 @@ tables:
     - initiative_id
     - initiative_status
     - initiative_type
-    - business_unit
     - initiative_color
     - initiative_client_due_at
     - days_to_due_date
@@ -46,6 +45,7 @@ tables:
     - workflow_code
     - current_active_milestone
     hidden:
+    - business_unit
     - initiative_note
     - workflow_id
     - short_closed_by
@@ -72,7 +72,6 @@ tables:
     - task_sla_status
     - task_elapsed_days
     - next_followup_at
-    - initiative_ref_id
     - initiative_type
     hidden:
     - task_machine_code
@@ -85,19 +84,18 @@ tables:
     - is_initiative_delayed
     - task_reopen_at
     - task_display_status
+    - tms_initiative_flat
+    - business_unit
+    - initiative_ref_id
+    - tms_task_flat
+    - instant_closer
+    - is_followup
+    - initiative_color
     row_groups:
     - task_department
     value_columns:
     - column: task_elapsed_days
       aggFunc: avg
-  tms_initiative_attributes_flat:
-    priority:
-    - initiative_id
-    - category
-    - season
-    - program
-    - stage
-    hidden: []
   tms_user_flat:
     priority:
     - user_id
@@ -116,12 +114,12 @@ tables:
     priority:
     - tag_name
     - file_name
-    - initiative_id
     - task_id
+    - initiative_id
     - attachment_created_at
     - file_size
-    - folder_path
     hidden:
+    - folder_path
     - file_uri
     - entity_type
     - entity_id
@@ -139,6 +137,7 @@ tables:
   tms_task_issue_flat:
     priority:
     - issue_title
+    - last_comment
     - issue_status
     - issue_category_name
     - issue_sub_department
@@ -147,7 +146,6 @@ tables:
     - issue_created_at
     hidden:
     - issue_description
-    - last_comment
     - issue_hold_days
     - issue_updated_by_user_id
     - issue_created_by_user_id
@@ -156,3 +154,36 @@ tables:
     value_columns:
     - column: comment_count
       aggFunc: sum
+  # No row_groups or value_columns: a grid sum over open_* would add weeks
+  # together, and the open counts are snapshots that must never be summed.
+  vf_report_task_summary:
+    priority:
+    - week_of_month
+    - name
+    - assigned_role
+    - task_display_name
+    - bo_type
+    - field_1
+    - bucket
+    - open_green
+    - open_yellow
+    - open_red
+    - open_black
+    - close_green
+    - close_yellow
+    - close_red
+    - close_black
+    hidden:
+    - dt
+    - assigned_uid
+    - report_type
+    - last_week_dt
+    - open_white
+    - close_white
+    - field_2
+    - field_3
+    - field_4
+    - field_5
+    - field_6
+    - field_7
+    - field_8

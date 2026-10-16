@@ -59,3 +59,29 @@ pairs:
       SELECT role, department
       FROM tms_role_flat
       WHERE department ILIKE '%Sales%'
+
+  - nl: How have open and delayed tasks changed week by week?
+    source: poc
+    sql: |
+      SELECT timezone('Asia/Kolkata', to_timestamp(dt))::date AS week_start,
+             SUM(open_green + open_yellow + open_red + open_black) AS open_tasks,
+             SUM(CASE WHEN TRIM(bucket) IN ('B1', 'B2', 'B3')
+                      THEN open_green + open_yellow + open_red + open_black ELSE 0 END) AS delayed_tasks
+      FROM vf_report_task_summary
+      WHERE report_type IS NULL
+      GROUP BY dt
+      ORDER BY dt
+
+  - nl: Open tasks by department and colour in the latest week
+    source: poc
+    sql: |
+      SELECT COALESCE(r.department, 'No department') AS department,
+             SUM(s.open_green) AS green, SUM(s.open_yellow) AS yellow,
+             SUM(s.open_red) AS red, SUM(s.open_black) AS black
+      FROM vf_report_task_summary s
+      LEFT JOIN (SELECT role, MAX(department) AS department FROM tms_role_flat GROUP BY role) r
+        ON r.role = s.assigned_role
+      WHERE s.report_type IS NULL
+        AND s.dt = (SELECT MAX(dt) FROM vf_report_task_summary)
+      GROUP BY 1
+      ORDER BY 1

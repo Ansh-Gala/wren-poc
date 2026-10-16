@@ -22,11 +22,8 @@ import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from functools import lru_cache
-from pathlib import Path
 
-import yaml
-
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
+from pipeline import metadata
 
 # Below this many characters a typo is indistinguishable from a different
 # word: "ope" is one edit from "open", "one" and "top".
@@ -108,7 +105,7 @@ def load_vocabulary() -> frozenset[str]:
     so that ``initiative_status`` contributes "business", "object" and
     "status" -- the words a person actually types.
     """
-    doc = yaml.safe_load((META_DIR / "schema_description.yaml").read_text(encoding="utf-8")) or {}
+    doc = metadata.schema()
     words: set[str] = set()
 
     def add(text: str) -> None:

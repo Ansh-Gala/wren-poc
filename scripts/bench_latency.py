@@ -40,6 +40,7 @@ from config.settings import load_settings  # noqa: E402
 from pipeline.context import ConversationState  # noqa: E402
 from pipeline.lean_runner import load_gazetteer, run_turn  # noqa: E402
 from pipeline.lean_suite import SuiteTurn  # noqa: E402
+from pipeline.metadata import enable_site_metadata  # noqa: E402
 from pipeline.models import Session  # noqa: E402
 
 # Chosen to exercise different branches rather than to be representative of
@@ -128,6 +129,7 @@ def main() -> int:
                     help="a previous --out file, to print a before/after table")
     args = ap.parse_args()
 
+    enable_site_metadata()
     questions = args.questions or DEFAULT_QUESTIONS
     settings = load_settings()
     gazetteer = load_gazetteer()

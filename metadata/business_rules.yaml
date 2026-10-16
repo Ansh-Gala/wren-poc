@@ -44,6 +44,18 @@ rules:
     AND task_status = ''open'': delayed is not a lifecycle status, so the active-first default still applies
     on top of it. "my task status breakdown" is assigned_user_id = <that id> GROUP BY task_status. The
     only invariant across all of them is assigned_user_id = <that id>.'
+- name: my_issues
+  definition: 'My issues means issues assigned to the signed-in user and still open. "Pending" issues
+    are the open ones too. The signed-in user is the one named in the SIGNED-IN USER block above the question:
+    compare tms_task_issue_flat.issue_assigned_user_id to the id given there, written into the query as
+    a literal, never as a bind placeholder. If there is no such block, do not guess a user and do not
+    pick a default one -- reply with a clarification saying you cannot tell who is asking.'
+  sql_fragment: tms_task_issue_flat.issue_assigned_user_id = <the id in the SIGNED-IN USER block> AND
+    tms_task_issue_flat.issue_status = 'open'
+  scope: 'The open condition applies only to the bare concept "my issues" or "my pending issues". When
+    the question supplies its own status, that status decides: "my resolved issues" is issue_assigned_user_id
+    = <that id> AND issue_status = ''resolved''. Issues the person raised are a different question, answered
+    from issue_created_by_user_id, and only when the question says raised, created or reported by me.'
 - name: my_department
   definition: '"My department", "our department", "my team" and "our team" mean the departments listed
     in the SIGNED-IN USER block above the question. Filter the department column of whichever table the
@@ -166,3 +178,52 @@ rules:
     file_name, even when the question does not ask for it. file_uri is what turns the file name into
     a download link; without it the person sees a name they cannot open.'
   scope: Listings of attachments only. A count of attachments needs no file_uri.
+- name: tasks_carry_initiative_id
+  definition: 'Whenever a query lists tasks from tms_task_flat, select tms_task_flat.initiative_id alongside
+    the task''s own columns, even when the question does not ask for it. initiative_id is the Initiative
+    (Order, BO, Business Object) the task belongs to; without it the person cannot tell which Initiative
+    a task is for, or open it.'
+  scope: Listings of tasks only, including a listing that joins tms_task_flat to another table. A count,
+    a total or a breakdown by group needs no initiative_id.
+- name: weekly_history_routing
+  definition: 'vf_report_task_summary is the only place that holds how many tasks or Initiatives were
+    OPEN in a past week, and their colour and delay bucket then, so questions about open work over time
+    -- week by week, a trend, last week, compared with an earlier week -- are answered from it. A
+    question about the work as it stands now -- "how many tasks are open", "my tasks", "which tasks are
+    delayed" -- is answered from tms_task_flat, as before, even when it says "this week". Counts of
+    tasks or Initiatives CREATED or CLOSED in a period come from their own dates in tms_task_flat
+    (created_at, task_closed_at) and tms_initiative_flat (initiative_created_at), which hold every
+    record exactly; use the weekly report''s close_* columns only when the question names the weekly
+    report.'
+- name: weekly_history_row_kinds
+  definition: 'vf_report_task_summary holds task rows (report_type IS NULL) and Initiative rows (report_type
+    = ''initiative''). Every query on it filters exactly one kind and never adds the two together. Task
+    rows answer questions about tasks, by person, role, department, task step, unit or lateness. Initiative
+    rows answer how many Initiatives were open, by type or category, and carry no person, role, task
+    or lateness.'
+- name: weekly_history_counts
+  definition: 'In vf_report_task_summary, open tasks in a week = open_green + open_yellow + open_red +
+    open_black; closed tasks in a week = close_green + close_yellow + close_red + close_black; delayed
+    open tasks in a week = the open total over rows where TRIM(bucket) IN (''B1'', ''B2'', ''B3''). Sum
+    these over the rows of one week. The open counts are snapshots: never sum them across weeks -- for
+    a period, show one row per week, or take the latest week. Closed counts may be summed across weeks.'
+- name: weekly_history_colours
+  definition: 'The colour columns of vf_report_task_summary split a count by the colour of the task or
+    Initiative. They say nothing about lateness on their own: delayed or late work comes from bucket
+    only. A question about colours shows the four colours as separate columns.'
+- name: weekly_history_weeks
+  definition: 'In vf_report_task_summary, a week is one dt value. The latest week is MAX(dt) -- not the
+    current date, because snapshots can stop -- and last week is the highest dt below it. A month is
+    month and year together. Show a week as timezone(''Asia/Kolkata'', to_timestamp(dt))::date. A result
+    with one row per week is ordered by dt, oldest first, whatever the newest-first default says. A range
+    such as "the last 4 weeks" counts back from the latest week, and may still find no rows.'
+- name: weekly_history_department
+  definition: 'To show the department of a weekly count, join vf_report_task_summary.assigned_role to
+    (SELECT role, MAX(department) AS department FROM tms_role_flat GROUP BY role) with a LEFT JOIN, and
+    show COALESCE(department, ''No department''). tms_role_flat repeats some roles, so joining it directly
+    counts those tasks twice, and a few roles have no department at all.'
+- name: weekly_history_people
+  definition: 'To show the person of a weekly count, join vf_report_task_summary.assigned_uid to tms_user_flat.user_id
+    and show user_name, not the login in name. When ranking or comparing people, leave out assigned_uid
+    = 2 (NA, unassigned work). "My" weekly work is assigned_uid = the id in the SIGNED-IN USER block,
+    written as a literal.'

@@ -13,7 +13,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent / "scripts"))
 import _bootstrap  # noqa
 from claude.prompts import build_lean_system_prompt, build_user_prompt
+from pipeline.metadata import enable_site_metadata
 
+enable_site_metadata()
 question = " ".join(sys.argv[1:]) or "Which workflow has the most tasks?"
 out = pathlib.Path(__file__).parent / "_out"
 out.mkdir(exist_ok=True)

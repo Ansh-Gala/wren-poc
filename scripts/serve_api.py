@@ -38,6 +38,7 @@ from pipeline.initiative import with_initiative
 from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
+from pipeline.metadata import enable_site_metadata
 from pipeline.models import Session
 from pipeline.redact import public_response, safe_error
 from config.logging import get_logger, register_secrets
@@ -558,6 +559,8 @@ def main() -> int:
                          "'' disables logging")
     args = ap.parse_args()
 
+    # Before Runtime: it builds the system prompt for the warm pool.
+    enable_site_metadata()
     Handler.runtime = Runtime(args)
     settings = Handler.runtime.settings
     mode = "lean (no MCP)" if settings.cli_lean else f"MCP config {args.config}"

@@ -18,11 +18,8 @@ the prompt would have to move in lockstep with it.
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 
-import yaml
-
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
+from pipeline import metadata
 
 
 @lru_cache(maxsize=1)
@@ -33,10 +30,7 @@ def _config() -> dict:
     deployment without the file should show columns in the order the query
     projected them rather than fail to answer.
     """
-    path = META_DIR / "column_hierarchy.yaml"
-    if not path.is_file():
-        return {}
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return metadata.column_hierarchy()
 
 
 def _spec(tables: list[str] | None) -> dict:

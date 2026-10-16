@@ -17,6 +17,7 @@ from pathlib import Path
 import _bootstrap  # noqa: F401
 
 from pipeline.lean_runner import run_suite
+from pipeline.metadata import enable_site_metadata
 from benchmark.suite import all_turns, load_suite, select
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
@@ -251,6 +252,7 @@ def main() -> int:
                          "thread verbatim, state = compact structured context")
     args = ap.parse_args()
 
+    enable_site_metadata()
     settings = load_settings()
     register_secrets(settings.secrets())
     log = get_logger("run_lean_suite", settings.debug)

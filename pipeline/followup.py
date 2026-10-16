@@ -27,10 +27,8 @@ import re
 import secrets
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
-from pathlib import Path
 
-import yaml
-
+from pipeline import metadata
 from pipeline.column_order import hidden_names
 from pipeline.labels import column_phrase
 from pipeline.redact import names_a_database_object
@@ -217,8 +215,6 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
 
 # ------------------------------------------------------------------ schema --
 
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
-
 # Columns worth sorting by, most interesting first. Name fragments rather than
 # literal columns so this stays true for both tms_initiative_flat and
 # tms_task_flat without listing either.
@@ -231,8 +227,7 @@ _NOT_GROUPABLE = frozenset({"initiative_type", "workflow_code", "workflow_name"}
 
 @lru_cache(maxsize=1)
 def _schema() -> dict:
-    return yaml.safe_load(
-        (META_DIR / "schema_description.yaml").read_text(encoding="utf-8")) or {}
+    return metadata.schema()
 
 
 @lru_cache(maxsize=1)
@@ -249,8 +244,7 @@ def _rule_predicates() -> tuple[tuple[str, str, str, str], ...]:
     equality. Multi-condition rules like my_tasks are skipped: they are not a
     filter a user can toggle.
     """
-    doc = yaml.safe_load(
-        (META_DIR / "business_rules.yaml").read_text(encoding="utf-8")) or {}
+    doc = metadata.rules()
     out = []
     pattern = re.compile(r"^(\w+)\.(\w+)\s*=\s*'([^']*)'$")
     for rule in doc.get("rules") or []:

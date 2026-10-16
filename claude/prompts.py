@@ -311,21 +311,16 @@ def build_lean_system_prompt() -> str:
     prompt is compared byte for byte against the PHP port, so it is not a
     file anyone edits casually.
     """
-    from pathlib import Path
-
-    import yaml
-
-    meta_dir = Path(__file__).resolve().parents[1] / "metadata"
-    load = lambda n: yaml.safe_load((meta_dir / n).read_text(encoding="utf-8")) or {}
+    from pipeline import metadata
     from pipeline.context import CONTEXT_GUIDANCE
 
     return (
         LEAN_SYSTEM_PROMPT
         + CONTEXT_GUIDANCE
         + chr(10) + "# SCHEMA" + chr(10) + chr(10)
-        + _render_schema(load("schema_description.yaml"))
-        + _render_rules(load("business_rules.yaml"))
-        + _render_examples(load("question_sql_pairs.yaml"))
+        + _render_schema(metadata.schema())
+        + _render_rules(metadata.rules())
+        + _render_examples(metadata.pairs())
     )
 
 

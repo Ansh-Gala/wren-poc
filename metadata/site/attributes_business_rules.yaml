@@ -1,0 +1,11 @@
+# Attributes business rules: rules about tms_initiative_attributes_flat.
+#
+# Write the rules below. Same shape as vf_sql_chatbot's
+# metadata/business_rules.yaml: a 'rules' list, each with 'name' and
+# 'definition', and 'sql_fragment' or 'scope' if needed.
+#
+# A rule whose sql_fragment is a single "table.column = 'value'" becomes a
+# filter chip in the chat. Put the SQL in the definition instead when that
+# is not wanted.
+
+rules: []

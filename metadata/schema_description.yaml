@@ -186,166 +186,6 @@ tables:
       open_tasks_list:
         type: VARCHAR
         description: List of open task names associated with the Initiative.
-  tms_initiative_attributes_flat:
-    description: Dynamic JSON attributes for the Initiative, such as season, category, quality, etc.
-    primary_key: initiative_id
-    columns:
-      initiative_id:
-        type: INTEGER
-        description: Unique identifier of the Initiative.
-      category:
-        type: VARCHAR
-        description: Category attribute for the Initiative.
-      attribute_initiative_type:
-        type: VARCHAR
-        description: 'Attribute initiative type. Empty in this database: NULL in every row, so it cannot
-          answer a question.'
-      end_date:
-        type: VARCHAR
-        description: End date attribute, stored as text.
-      season:
-        type: VARCHAR
-        description: 'Season attribute for the Initiative. Sparsely populated: only 16 of 307 rows have
-          a value, and they all belong to the AR_NPD_YD_SALESPLAN, AR_SALESPLAN_Shirting and AR_SALESPLAN_Suiting
-          types.'
-        values:
-        - Autumn
-        - Dummy01
-        - S6002
-        - S6010
-        - Summer
-        - Winter
-      program:
-        type: VARCHAR
-        description: 'Program attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      request_receipt_date:
-        type: VARCHAR
-        description: 'Request receipt date attribute, stored as text. Empty in this database: NULL in
-          every row, so it cannot answer a question.'
-      pi_date:
-        type: VARCHAR
-        description: PI date attribute, stored as text.
-      stage:
-        type: VARCHAR
-        description: 'Stage attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      data_color:
-        type: VARCHAR
-        description: 'Colour attribute recorded on the Initiative data. Empty in this database: NULL in
-          every row, so it cannot answer a question.'
-      brandix_t_a:
-        type: VARCHAR
-        description: 'Brandix T&A attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      csbd_date:
-        type: VARCHAR
-        description: 'CSBD date attribute, stored as text. Empty in this database: NULL in every row,
-          so it cannot answer a question.'
-      batch_no:
-        type: VARCHAR
-        description: 'Batch number attribute. Empty in this database: NULL in every row, so it cannot
-          answer a question.'
-      item_code:
-        type: VARCHAR
-        description: 'Item code attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      volume:
-        type: VARCHAR
-        description: Volume attribute.
-        values:
-        - '1'
-        - '100'
-        - '12'
-        - '132'
-        - '15'
-        - '2'
-        - V1086
-        - Vol001
-      event:
-        type: VARCHAR
-        description: Event attribute.
-      channel:
-        type: VARCHAR
-        description: Channel attribute.
-        values:
-        - '101'
-        - '12'
-        - DTR
-        - TAS
-        - WS
-      vendor:
-        type: VARCHAR
-        description: Vendor attribute.
-      total_qty:
-        type: VARCHAR
-        description: Total quantity attribute.
-      moq:
-        type: VARCHAR
-        description: Minimum order quantity attribute.
-      number_of_options:
-        type: VARCHAR
-        description: Number of options attribute.
-      count:
-        type: VARCHAR
-        description: Count attribute. Quote this identifier in SQL; it collides with the COUNT function.
-      merchant_name:
-        type: VARCHAR
-        description: Merchant name attribute.
-      person:
-        type: VARCHAR
-        description: Person attribute.
-      assign_date:
-        type: VARCHAR
-        description: Assign date attribute, stored as text.
-      quality:
-        type: VARCHAR
-        description: 'Quality attribute for the Initiative. Empty in this database: NULL in every row,
-          so it cannot answer a question.'
-      buyer:
-        type: VARCHAR
-        description: 'Buyer attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      mcode_won_number:
-        type: VARCHAR
-        description: 'MCode/WON number attribute. Empty in this database: NULL in every row, so it cannot
-          answer a question.'
-      ex_mill_date:
-        type: VARCHAR
-        description: 'Ex-mill date attribute, stored as text. Empty in this database: NULL in every row,
-          so it cannot answer a question.'
-      garment_desc:
-        type: VARCHAR
-        description: 'Garment description attribute. Empty in this database: NULL in every row, so it
-          cannot answer a question.'
-      matching_instruction:
-        type: VARCHAR
-        description: 'Matching instruction attribute. Empty in this database: NULL in every row, so it
-          cannot answer a question.'
-      fabric_description:
-        type: VARCHAR
-        description: 'Fabric description attribute. Empty in this database: NULL in every row, so it cannot
-          answer a question.'
-      dye_part:
-        type: VARCHAR
-        description: 'Dye part attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      shade:
-        type: VARCHAR
-        description: 'Shade attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      internal_or_confirmed:
-        type: VARCHAR
-        description: 'Internal-or-confirmed attribute. Empty in this database: NULL in every row, so it
-          cannot answer a question.'
-      division:
-        type: VARCHAR
-        description: 'Division attribute. Empty in this database: NULL in every row, so it cannot answer
-          a question.'
-      style_or_garment_code:
-        type: VARCHAR
-        description: 'Style or garment code attribute. Empty in this database: NULL in every row, so it
-          cannot answer a question.'
   tms_task_flat:
     description: Flat TMS task table containing task identity, assignment, status, dates, SLA/buffer,
       workflow/process context, Initiative context, and task-related business fields.
@@ -447,7 +287,8 @@ tables:
         description: Timestamp when the task was assigned.
       task_closed_at:
         type: TIMESTAMP
-        description: Timestamp when the task was closed.
+        description: Timestamp when the task was closed. Kept when a task is reopened, so a few open tasks
+          still have one; a count of closed tasks needs task_status = 'closed' as well.
       task_reopen_at:
         type: TIMESTAMP
         description: Timestamp when the task was reopened.
@@ -460,12 +301,10 @@ tables:
       task_sla_hours:
         type: DOUBLE
         description: Allowed task duration / SLA buffer, in hours.
-      task_elapsed_hours:
-        type: DECIMAL
-        description: Elapsed task duration in hours, already calculated by the view.
       task_elapsed_days:
-        type: DOUBLE
-        description: Elapsed task duration in days, already calculated by the view.
+        type: DECIMAL
+        description: Elapsed task duration in days, rounded to 2 decimal places (e.g. 186.86), already
+          calculated by the view.
       is_delayed_open_task:
         type: VARCHAR
         description: '''Yes'' when an open task has breached SLA, else ''Not Applicable''.'
@@ -656,7 +495,8 @@ tables:
       max_file_size:
         type: VARCHAR
         description: Maximum upload size the tag permits, in bytes, held as text. Configuration of the
-          tag. It is not this file's size, which is file_size.
+          tag. It is not this file's size, which is file_size, and file_size is in KB, so multiply
+          file_size by 1024 before comparing the two.
         values:
         - '2097152'
         - '20971520'
@@ -686,9 +526,10 @@ tables:
         type: VARCHAR
         description: Storage URI of the uploaded file.
       file_size:
-        type: BIGINT
-        description: Size of this uploaded file in bytes. This is the real size of the file; max_file_size
-          is the tag's limit.
+        type: DECIMAL
+        description: Size of this uploaded file in KB (1 KB = 1024 bytes), rounded to 2 decimal places
+          (e.g. 17.95), already calculated by the view. This is the real size of the file; max_file_size
+          is the tag's limit, in bytes.
       entity_type:
         type: VARCHAR
         description: Empty in this database, '' in every row, because the view selects only rows where
@@ -823,17 +664,153 @@ tables:
       last_comment_at:
         type: TIMESTAMP
         description: When the most recent comment was posted. NULL for issues with no comments.
+  vf_report_task_summary:
+    description: 'Weekly history of open and closed work, one snapshot per week. The only table that
+      can answer how counts changed over time -- week by week, last week, a past month -- so use it for
+      trends and past weeks, and tms_task_flat for the current state. The current week''s snapshot is
+      rebuilt a few times a day. It holds two kinds of row that must never be added together: report_type
+      IS NULL rows count tasks, report_type = ''initiative'' rows count distinct Initiatives. Every query
+      filters one kind. The open_* columns are counts at the moment of the snapshot, so never SUM them
+      across weeks: take one week, or one row per week. The close_* columns count what closed during
+      that week, so they can be summed over a range. Weeks are not continuous here: there is no snapshot
+      between 13 April and 27 July 2026, and the latest is 24 August 2026, so the latest week is MAX(dt),
+      not the current date, and a range such as "the last 4 weeks" can return nothing.'
+    columns:
+      dt:
+        type: INTEGER
+        description: 'The week, as the Unix epoch of Monday 00:00 India time. Order and compare weeks by
+          this column. To show the week as a date use timezone(''Asia/Kolkata'', to_timestamp(dt))::date,
+          which gives the Monday of that week. The latest week is the row with MAX(dt); last week is the
+          next lower dt.'
+      assigned_uid:
+        type: INTEGER
+        description: User the counted tasks are assigned to. Joins to tms_user_flat.user_id, which holds
+          the full name to show. 2 is NA, meaning unassigned. 0 on Initiative rows, which have no user.
+      name:
+        type: VARCHAR
+        description: Login name of the assigned user, not the full name. Show tms_user_flat.user_name
+          instead. Empty on Initiative rows.
+      assigned_role:
+        type: VARCHAR
+        description: Role the counted tasks are assigned to. Matches tms_role_flat.role, which gives the
+          department. Empty on Initiative rows.
+      task_display_name:
+        type: VARCHAR
+        description: Name of the task step being counted. Empty on Initiative rows.
+      unit:
+        type: VARCHAR
+        description: Business unit of the Initiative. Empty on Initiative rows.
+        values:
+        - PVH
+        - unit1
+      open_green:
+        type: INTEGER
+        description: Open at the snapshot with colour green. On task rows it counts tasks, on Initiative
+          rows distinct Initiatives. Never sum across weeks.
+      open_yellow:
+        type: INTEGER
+        description: Open at the snapshot with colour yellow. Same rules as open_green.
+      open_red:
+        type: INTEGER
+        description: Open at the snapshot with colour red. Same rules as open_green.
+      open_black:
+        type: INTEGER
+        description: Open at the snapshot with colour black. Same rules as open_green.
+      close_green:
+        type: INTEGER
+        description: Tasks closed during that week with colour green. Can be summed across weeks. Use it
+          on task rows only; on Initiative rows it is not a reliable count.
+      close_yellow:
+        type: INTEGER
+        description: Tasks closed during that week with colour yellow. Same rules as close_green.
+      close_red:
+        type: INTEGER
+        description: Tasks closed during that week with colour red. Same rules as close_green.
+      close_black:
+        type: INTEGER
+        description: Tasks closed during that week with colour black. Same rules as close_green.
+      bo_type:
+        type: VARCHAR
+        description: Initiative type, the same vocabulary as tms_initiative_flat.initiative_type.
+      report_type:
+        type: VARCHAR
+        description: Which kind of row this is. NULL for task rows, 'initiative' for Initiative rows.
+          Every query filters on it.
+        values:
+        - initiative
+      field_1:
+        type: VARCHAR
+        description: Category of the Initiative.
+        values:
+        - Apparel
+        - Apparel2
+        - Apparel6
+        - Clothing
+        - event01
+        - Heather
+        - Pants
+        - Prints
+        - Shirting
+        - Suiting
+      field_2:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_3:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_4:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_5:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_6:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_7:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      field_8:
+        type: VARCHAR
+        description: Empty in this database, '' in every row. Do not use it.
+      week:
+        type: VARCHAR
+        description: Week of the month as a label, W1 to W5. Not unique across months; use dt.
+      week_of_month:
+        type: VARCHAR
+        description: Week label such as 'W5 - Aug 26'. It sorts wrongly as text, so never ORDER BY it
+          and never use it as a chart's time axis; use dt.
+      last_week_dt:
+        type: INTEGER
+        description: Empty in this database, NULL in every row. Do not use it.
+      month:
+        type: VARCHAR
+        description: Month of the week as a three-letter name, such as 'Aug'. Use it with year.
+      year:
+        type: INTEGER
+        description: Year of the week.
+      bucket:
+        type: VARCHAR
+        description: 'How late the counted open tasks are, on task rows only. B1 is up to 7 days past
+          the SLA, B2 is 7 to 15 days, B3 is more than 15 days. NULL or a blank means not late. Delayed
+          work is TRIM(bucket) IN (''B1'', ''B2'', ''B3''). Lateness comes from this column only, never
+          from the colour columns.'
+        values:
+        - B1
+        - B2
+        - B3
+      open_white:
+        type: INTEGER
+        description: Empty in this database, 0 in every row. Do not use it.
+      close_white:
+        type: INTEGER
+        description: Empty in this database, 0 in every row. Do not use it.
 relationships:
 - name: task_initiative
   from: tms_task_flat.initiative_id
   to: tms_initiative_flat.initiative_id
   join_type: MANY_TO_ONE
   description: A task belongs to an Initiative.
-- name: initiative_attributes
-  from: tms_initiative_attributes_flat.initiative_id
-  to: tms_initiative_flat.initiative_id
-  join_type: ONE_TO_ONE
-  description: Attributes for an initiative.
 - name: attachment_initiative
   from: tms_attachment_flat.initiative_id
   to: tms_initiative_flat.initiative_id
@@ -850,6 +827,11 @@ relationships:
   join_type: MANY_TO_ONE
   description: An issue is raised against a task. Join through here to reach the Initiative, which the
     issue view does not carry.
+- name: weekly_history_user
+  from: vf_report_task_summary.assigned_uid
+  to: tms_user_flat.user_id
+  join_type: MANY_TO_ONE
+  description: The user a weekly task count belongs to. Task rows only; Initiative rows have 0 here.
 ambiguities:
 - subject: initiative synonyms
   note: Initiative, Order, BO, and Business Object all refer to tms_initiative_flat.

@@ -134,46 +134,48 @@ def test_suggestion_ids_are_unique_within_a_turn():
 
 # --------------------------------------------- reflecting the rows returned --
 
-_ONE_UNIT = {
-    "columns": ["initiative_id", "business_unit"],
-    "rows": [[1, "unit1"], [2, "unit1"], [3, "unit1"]],
+# initiative_color, not business_unit: the column hierarchy hides
+# business_unit, and a hidden column is never offered as a grouping.
+_ONE_COLOUR = {
+    "columns": ["initiative_id", "initiative_color"],
+    "rows": [[1, "Green"], [2, "Green"], [3, "Green"]],
 }
-_TWO_UNITS = {
-    "columns": ["initiative_id", "business_unit"],
-    "rows": [[1, "unit1"], [2, "unit2"], [3, "unit1"]],
+_TWO_COLOURS = {
+    "columns": ["initiative_id", "initiative_color"],
+    "rows": [[1, "Green"], [2, "Red"], [3, "Green"]],
 }
 
 
 def test_grouping_is_not_offered_when_every_row_shares_the_value():
     """One group is not a breakdown.
 
-    The schema says business_unit is enumerated, which is what made it a
-    candidate; the rows say this answer holds one unit, which is what makes
+    The schema says initiative_color is enumerated, which is what made it a
+    candidate; the rows say this answer holds one colour, which is what makes
     grouping by it useless.
     """
-    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_UNIT)
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_COLOUR)
     grouped = [s for s in (followup.suggestions if followup else [])
                if s.action.type == "add_group_by"
-               and s.action.field == "business_unit"]
+               and s.action.field == "initiative_color"]
     assert grouped == []
 
 
 def test_grouping_is_still_offered_when_the_value_varies():
-    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_TWO_UNITS)
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_TWO_COLOURS)
     grouped = [s for s in followup.suggestions
                if s.action.type == "add_group_by"
-               and s.action.field == "business_unit"]
+               and s.action.field == "initiative_color"]
     assert len(grouped) == 1
 
 
 def test_a_sort_is_only_offered_on_a_column_the_answer_contains():
     """Sorting by a column that was not projected asks the user to reorder
     something they cannot see."""
-    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_UNIT)
+    followup = explore(_state_after(_DEFAULTED), row_count=3, result=_ONE_COLOUR)
     sorts = [s for s in (followup.suggestions if followup else [])
              if s.action.type == "set_sort"]
     for s in sorts:
-        assert s.action.field in _ONE_UNIT["columns"]
+        assert s.action.field in _ONE_COLOUR["columns"]
 
 
 def test_omitting_the_result_preserves_the_old_behaviour_exactly():
