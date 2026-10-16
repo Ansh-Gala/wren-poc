@@ -16,7 +16,8 @@ pyyaml>=6.0              # metadata and question files
 python-dotenv>=1.0       # .env loading
 pytest>=8.0              # test suite
 
-# Deliberately absent: anthropic. Claude is reached only via the local
-# Claude Code CLI (subprocess), never the Anthropic API.
+# LLM_PROVIDER=anthropic reaches the Messages API through the official SDK,
+# as the Drupal port's AnthropicApiProvider does. The CLI remains the default.
+anthropic>=1.15.0
 openai>=1.0.0
 nest_asyncio

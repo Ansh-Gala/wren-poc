@@ -135,11 +135,16 @@ class Settings:
     openai_api_key: str = field(repr=False, default="")
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o"
+    # LLM_PROVIDER=anthropic: the Messages API, as Drupal's api_provider
+    # "anthropic" reaches it.
+    anthropic_api_key: str = field(repr=False, default="")
+    anthropic_model: str = "claude-opus-5-5"
 
     def secrets(self) -> list[str]:
         """Non-empty secret values, for the redacting log formatter."""
         return [s for s in (self.pg_password, self.pg_readonly_password,
-                            self.history_db_password) if s]
+                            self.history_db_password, self.openai_api_key,
+                            self.anthropic_api_key) if s]
 
     def project_dir(self, config_name: str) -> Path:
         return self.wren_project_root / f"config_{config_name.upper()}"
@@ -191,7 +196,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "FRESHNESS_TABLES", "FRESHNESS_MESSAGE",
         "HISTORY_DATABASE_HOST", "HISTORY_DATABASE_PORT", "HISTORY_DATABASE_NAME",
         "HISTORY_DATABASE_USER", "HISTORY_DATABASE_PASSWORD", "CHAT_TABLE_PREFIX",
-        "MONTHLY_TOKEN_LIMIT",
+        "MONTHLY_TOKEN_LIMIT", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -230,6 +235,8 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         chat_table_prefix=(g("CHAT_TABLE_PREFIX")
                            if g("CHAT_TABLE_PREFIX") is not None else "py_").strip(),
         monthly_token_limit=max(0, _as_int(g("MONTHLY_TOKEN_LIMIT"), 0)),
+        anthropic_api_key=(g("ANTHROPIC_API_KEY") or "").strip(),
+        anthropic_model=(g("ANTHROPIC_MODEL") or "claude-opus-5-5").strip(),
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),

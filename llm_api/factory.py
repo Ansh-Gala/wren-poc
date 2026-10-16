@@ -6,6 +6,9 @@ def get_provider(settings: Settings) -> LLMProvider:
     if provider == "cli":
         from llm_api.cli_provider import CLILocalProvider
         return CLILocalProvider()
+    elif provider == "anthropic":
+        from llm_api.anthropic_provider import AnthropicProvider
+        return AnthropicProvider()
     elif provider in ("openai", "groq", "gemini"):
         from llm_api.openai_provider import OpenAIProvider
         return OpenAIProvider()
@@ -24,4 +27,6 @@ def llm_identity(settings: Settings) -> tuple[str | None, str | None, str | None
     provider = getattr(settings, "llm_provider", "cli")
     if provider == "cli":
         return "cli", "claude-cli", (getattr(settings, "claude_model", "") or None)
+    if provider == "anthropic":
+        return "api", "anthropic", (getattr(settings, "anthropic_model", "") or None)
     return "api", provider, (getattr(settings, "openai_model", "") or None)

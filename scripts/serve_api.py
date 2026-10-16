@@ -310,23 +310,31 @@ def preflight(settings) -> None:
     model that was decommissioned. Checked once, here, where the message can
     say what to do about it.
     """
-    if settings.llm_provider != "cli":
+    # The transports Drupal offers: the local CLI, or one HTTPS call to an
+    # API. An API needs only its key; the CLI needs to be installed.
+    keys = {"anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
+            "openai": ("OPENAI_API_KEY", settings.openai_api_key),
+            "groq": ("GROQ_API_KEY", settings.openai_api_key),
+            "gemini": ("GEMINI_API_KEY", settings.openai_api_key)}
+    provider = settings.llm_provider
+    if provider in keys:
+        name, key = keys[provider]
+        if not key:
+            raise SystemExit(f"LLM_PROVIDER is {provider!r} but {name} is not set in .env.")
+        if provider == "anthropic":
+            return
+    elif provider != "cli":
         raise SystemExit(
-            f"LLM_PROVIDER is {settings.llm_provider!r}, not 'cli'.\n"
-            "This project is only measured against the local Claude Code CLI; "
-            "every benchmark figure on record was produced with it.\n"
-            "Set LLM_PROVIDER=cli and CLI_LEAN=true in .env, or pass them for "
-            "one run:\n"
-            "  LLM_PROVIDER=cli CLI_LEAN=true python scripts/serve_api.py"
+            f"LLM_PROVIDER is {provider!r}. Use cli, anthropic, openai, groq or gemini."
         )
-
-    from llm_api.cli_provider import detect_claude
-    if not detect_claude(settings.claude_command):
-        raise SystemExit(
-            f"Claude Code CLI not found (looked for {settings.claude_command!r} "
-            "on PATH).\nInstall it from https://claude.com/claude-code, then "
-            "run `claude --version` to confirm."
-        )
+    else:
+        from llm_api.cli_provider import detect_claude
+        if not detect_claude(settings.claude_command):
+            raise SystemExit(
+                f"Claude Code CLI not found (looked for {settings.claude_command!r} "
+                "on PATH).\nInstall it from https://claude.com/claude-code, then "
+                "run `claude --version` to confirm."
+            )
 
     if not settings.cli_lean:
         # The MCP path needs wren_setup, which a lean-only deployment does not
@@ -384,7 +392,8 @@ class Runtime:
         # question. Each needs about three seconds before it can answer, and
         # the server is normally started well before anyone types anything --
         # so the cost lands in dead time instead of on the first arrival.
-        if self.settings.cli_lean and self.settings.cli_pool_size > 0:
+        if (self.settings.llm_provider == "cli" and self.settings.cli_lean
+                and self.settings.cli_pool_size > 0):
             from claude.prompts import build_lean_system_prompt
             from llm_api.cli_provider import _pool_for
             _pool_for(self.settings, build_lean_system_prompt())
