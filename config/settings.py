@@ -64,6 +64,12 @@ class Settings:
     benchmark_user_id: int = 1
     benchmark_user_name: str = "Admin"
 
+    # Who the console answers for. It is a tool for one person, so the id
+    # comes from .env rather than from a login; the name and departments are
+    # read from the database, as Drupal reads them for a session. 0 is
+    # nobody: "my tasks" is then answered with a question, never a default id.
+    chatbot_user_id: int = 0
+
     wren_project_root: Path = ROOT / "wren_projects"
     wren_home: Path = ROOT / "wren_projects" / ".wren_home"
     wren_memory_backend: str = "lancedb"
@@ -157,7 +163,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "WREN_MEMORY_BACKEND", "CLAUDE_CLI_COMMAND", "CLAUDE_MODEL",
         "CLAUDE_TIMEOUT_SECONDS", "BENCHMARK_CONFIG", "BENCHMARK_PRIVACY_MODE", "DEBUG",
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-        "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR",
+        "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR", "CHATBOT_USER_ID",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -176,6 +182,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         statement_timeout_ms=_as_int(g("DATABASE_STATEMENT_TIMEOUT_MS"), 15000),
         benchmark_user_id=_as_int(g("BENCHMARK_USER_ID"), 1),
         benchmark_user_name=g("BENCHMARK_USER_NAME") or "Admin",
+        chatbot_user_id=_as_int(g("CHATBOT_USER_ID"), 0),
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),

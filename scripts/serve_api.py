@@ -33,6 +33,7 @@ import _bootstrap  # noqa: F401
 
 from pipeline.context import ConversationState
 from pipeline.followup import ACTION_TYPES, Action, apply_action
+from pipeline.identity_provider import resolve_identity
 from pipeline.lean_runner import TurnResult, load_gazetteer, run_turn
 from pipeline.initiative import with_initiative
 from pipeline.links import with_links
@@ -365,6 +366,9 @@ class Runtime:
                 context_mode=self.context_mode,
                 on_sql=(lambda early: on_rows(self.rows_event(early, debug)))
                 if on_rows else None,
+                # Every turn: the business rules, not this code, decide what
+                # is personal. A cached lookup is cheap.
+                identity=resolve_identity(self.settings, self.settings.chatbot_user_id),
             )
             conversation.turn_index += 1
             after = state_snapshot(conversation.state)
@@ -413,6 +417,16 @@ class Runtime:
 
 # ------------------------------------------------------------------- http --
 
+# The console is a tool for one person on their own machine. /debug and the
+# debug flag hand back the SQL and the real column names, so they answer only
+# a caller on this machine, even when --host exposes the rest.
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
+
+
+def _local_client(address: str) -> bool:
+    return address in _LOOPBACK
+
+
 class Handler(BaseHTTPRequestHandler):
     runtime: Runtime = None          # set in main()
     protocol_version = "HTTP/1.1"
@@ -420,20 +434,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):   # quieter than the default
         pass
 
-    # CORS is only needed for someone who opened ui/index.html straight off
-    # disk. Served from here it is same-origin, which is why that is the
-    # documented way to run it.
-    def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+    # No CORS headers. The console is served from here, so it is same-origin;
+    # "Access-Control-Allow-Origin: *" let any web page the user had open
+    # read this server's answers.
+
+    def _local(self) -> bool:
+        return _local_client(self.client_address[0])
 
     def _json(self, status: int, body: dict) -> None:
         raw = json.dumps(body, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
-        self._cors()
         self.end_headers()
         self.wfile.write(raw)
 
@@ -460,12 +472,13 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError) as exc:
             return self._json(400, {"error": f"bad request body: {exc}"})
+        if isinstance(payload, dict) and not self._local():
+            payload["debug"] = False
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
-        self._cors()
         self.end_headers()
         self.close_connection = True
 
@@ -480,14 +493,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             emit("error", {"error": str(exc)})
         except Exception as exc:                  # a bad turn must not kill the server
+            # Log, not wire: the raw message names tables and columns.
             log.exception("streamed turn failed")
-            emit("error", {"error": f"{type(exc).__name__}: {exc}"})
-
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self._cors()
-        self.send_header("Content-Length", "0")
-        self.end_headers()
+            emit("error", {"error": safe_error(str(exc))})
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -506,7 +514,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")   # it is being edited
-        self._cors()
         self.end_headers()
         self.wfile.write(body)
 
@@ -515,7 +522,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/debug":
             # What the server kept for turns it has already answered. Reads
-            # only; nothing is generated and nothing is executed.
+            # only; nothing is generated and nothing is executed. It holds the
+            # SQL and the real column names, so only this machine may ask.
+            if not self._local():
+                return self._json(403, {"error": "/debug answers only on this machine"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 payload = json.loads(self.rfile.read(length) or b"{}")
@@ -535,14 +545,17 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError) as exc:
             return self._json(400, {"error": f"bad request body: {exc}"})
+        if isinstance(payload, dict) and not self._local():
+            payload["debug"] = False
 
         try:
             return self._json(200, self.runtime.ask(payload))
         except ValueError as exc:
             return self._json(400, {"error": str(exc)})
         except Exception as exc:                      # a bad turn must not kill the server
+            # Log, not wire: the raw message names tables and columns.
             log.exception("turn failed")
-            return self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            return self._json(500, {"error": safe_error(str(exc))})
 
 
 def main() -> int:
@@ -567,6 +580,9 @@ def main() -> int:
 
     print(f"provider: {settings.llm_provider} / {settings.claude_model or 'default'}   {mode}")
     print(f"database: {settings.pg_database}   context mode: {args.context_mode}")
+    user = resolve_identity(settings, settings.chatbot_user_id)
+    print(f"user: {user.user_id} {user.display_name}" if user else
+          "user: nobody (set CHATBOT_USER_ID in .env to answer 'my tasks')")
     print(f"gazetteer: {len(Handler.runtime.gazetteer)} entity value(s)")
     print()
     print(f"  console   http://{args.host}:{args.port}/")
