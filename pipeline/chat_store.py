@@ -2,13 +2,13 @@
 
 Ported from the Drupal port's ConversationStore and TurnOutcome. The tables
 are copies of Drupal's -- sql_chat and sql_chat_turn, the same columns and
-constraints (database/migrations/2026-10-16_chat_history.sql) -- under the py_
-prefix, in the same database, and what goes into them is the same: a row either
-implementation wrote reads the same in both, but neither sees the other's.
+constraints (database/migrations/2026-10-19_chat_database.sql) -- under the py_
+prefix, in the chat database (HISTORY_DATABASE_*), never the business one.
+Every connection here is made with the HISTORY_DATABASE_USER login.
 
-Ownership is the configured user, never the request: every read and write is
-conditioned on uid, so a session id can only reach that user's own chats.
-Someone else's chat reads as no chat at all.
+uid is the request's user_id. Every read and write is conditioned on it, so a
+session id can only reach that user's own chats. Someone else's chat reads as
+no chat at all.
 
 Working state stays in the server's memory, as it stays in Drupal's
 expiring key-value store. The recent questions and the recap are rebuilt from
@@ -135,14 +135,26 @@ class ChatStore:
 
     @property
     def enabled(self) -> bool:
-        """A login of its own, and somebody to own the chats."""
-        return bool(self.settings.history_db_user) and self.uid > 0
+        """A database and login of its own, and somebody to own the chats."""
+        s = self.settings
+        return bool(s.history_db_name and s.history_db_user) and self.uid > 0
 
     def _connect(self) -> psycopg.Connection:
         s = self.settings
         return psycopg.connect(host=s.history_db_host, port=s.history_db_port,
                                dbname=s.history_db_name, user=s.history_db_user,
                                password=s.history_db_password, connect_timeout=10)
+
+    def reachable(self) -> bool:
+        """Whether the chat login can read both chat tables."""
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(self._q("SELECT 1 FROM {chats} LIMIT 0"))
+                cur.execute(self._q("SELECT 1 FROM {turns} LIMIT 0"))
+            return True
+        except Exception as exc:
+            log.error("Chat database not reachable: %s", exc)
+            return False
 
     def _q(self, text: str) -> pgsql.Composed:
         return pgsql.SQL(text).format(chats=self.chats, turns=self.turns)

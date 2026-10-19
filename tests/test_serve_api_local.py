@@ -1,6 +1,7 @@
 """The console is a tool for one person: what it keeps to this machine.
 
-A real socket, a stub runtime, no database and no model.
+The FastAPI app through its test client, a stub runtime, no database and no
+model.
 """
 
 from __future__ import annotations
@@ -8,11 +9,10 @@ from __future__ import annotations
 import json
 import sys
 import threading
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 # serve_api imports _bootstrap, which sits beside it.
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -20,20 +20,30 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import scripts.serve_api as api  # noqa: E402
+from pipeline.run_access import RunNotAllowed, user_id_from  # noqa: E402
 
 LEAKY = 'relation "tms_secret_table" does not exist at character 15'
 
 
 class StubRuntime:
-    """Records what it was asked; fails when told to."""
+    """Records what it was asked; fails when told to. Authorizes with the
+    real user_id rules, and lets user 7 run and nobody else."""
 
     def __init__(self):
         self.payloads: list[dict] = []
+        self.users: list[int] = []
         self.fail = False
         self.settings = SimpleNamespace(stream_answers=True)
 
-    def ask(self, payload, on_rows=None):
+    def authorize(self, payload):
+        user_id = user_id_from(payload.get("user_id"))
+        if user_id != 7:
+            raise RunNotAllowed("You do not have permission to ask the chatbot.")
+        return user_id
+
+    def ask(self, payload, user_id, on_rows=None):
         self.payloads.append(dict(payload))
+        self.users.append(user_id)
         if self.fail:
             raise RuntimeError(LEAKY)
         return {"question": payload.get("question"), "debug": payload.get("debug")}
@@ -41,67 +51,62 @@ class StubRuntime:
 
 @pytest.fixture
 def server():
+    """The app on this machine: the test client's address is loopback."""
     runtime = StubRuntime()
-    api.Handler.runtime = runtime
+    api.app.state.runtime = runtime
     api.SESSIONS.clear()
-    httpd = api.ThreadingHTTPServer(("127.0.0.1", 0), api.Handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{httpd.server_address[1]}", runtime
-    httpd.shutdown()
-    httpd.server_close()
+    yield TestClient(api.app, client=("127.0.0.1", 50000)), runtime
 
 
-def _post(base, path, body):
-    request = urllib.request.Request(base + path, data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, dict(response.headers), response.read().decode()
-    except urllib.error.HTTPError as exc:
-        return exc.code, dict(exc.headers), exc.read().decode()
+def _post(client, path, body):
+    response = client.post(path, json=body)
+    return response.status_code, dict(response.headers), response.text
+
+
+ME = {"user_id": 7}
 
 
 def test_a_failed_turn_says_something_general(server):
-    base, runtime = server
+    client, runtime = server
     runtime.fail = True
-    status, _, body = _post(base, "/ask", {"question": "anything"})
+    status, _, body = _post(client, "/ask", {**ME, "question": "anything"})
     assert status == 500
     assert "tms_secret_table" not in body and "RuntimeError" not in body
     assert json.loads(body)["error"].startswith("I couldn't process that request")
 
 
 def test_a_failed_streamed_turn_says_something_general(server):
-    base, runtime = server
+    client, runtime = server
     runtime.fail = True
-    _, _, body = _post(base, "/ask/stream", {"question": "anything"})
+    _, _, body = _post(client, "/ask/stream", {**ME, "question": "anything"})
     assert "event: error" in body
     assert "tms_secret_table" not in body and "RuntimeError" not in body
 
 
 def test_no_web_page_may_read_the_answers(server):
-    base, _ = server
-    _, headers, _ = _post(base, "/ask", {"question": "anything"})
+    client, _ = server
+    _, headers, _ = _post(client, "/ask", {**ME, "question": "anything"})
     assert not any(name.lower().startswith("access-control") for name in headers)
 
 
 def test_this_machine_keeps_debug(server):
-    base, runtime = server
-    _, _, body = _post(base, "/ask", {"question": "anything", "debug": True})
+    client, runtime = server
+    _post(client, "/ask", {**ME, "question": "anything", "debug": True})
     assert runtime.payloads[-1]["debug"] is True
-    status, _, _ = _post(base, "/debug", {"session_id": "s"})
+    status, _, _ = _post(client, "/debug", {**ME, "session_id": "s"})
     assert status == 200
 
 
 def test_another_machine_gets_neither_debug_nor_the_debug_log(server, monkeypatch):
-    base, runtime = server
+    client, runtime = server
     monkeypatch.setattr(api, "_local_client", lambda address: False)
 
-    status, _, _ = _post(base, "/debug", {"session_id": "s"})
+    status, _, _ = _post(client, "/debug", {**ME, "session_id": "s"})
     assert status == 403
 
-    _post(base, "/ask", {"question": "anything", "debug": True})
+    _post(client, "/ask", {**ME, "question": "anything", "debug": True})
     assert runtime.payloads[-1]["debug"] is False
-    _post(base, "/ask/stream", {"question": "anything", "debug": True})
+    _post(client, "/ask/stream", {**ME, "question": "anything", "debug": True})
     assert runtime.payloads[-1]["debug"] is False
 
 
@@ -113,6 +118,58 @@ def test_what_counts_as_this_machine(address, local):
     assert api._local_client(address) is local
 
 
+def test_unknown_paths_answer_in_the_servers_shape(server):
+    client, _ = server
+    assert client.get("/../scripts/serve_api.py").status_code == 404
+    response = client.put("/ask")
+    assert response.status_code == 405 and "error" in response.json()
+
+
+# ------------------------------------------------- user_id and run access --
+
+@pytest.mark.parametrize("path", ["/ask", "/ask/stream"])
+@pytest.mark.parametrize("user_id,code", [
+    (None, "user_id_required"), ("", "user_id_required"),
+    ("abc", "user_id_invalid"), (-3, "user_id_invalid"), (0, "user_id_invalid"),
+    (True, "user_id_invalid"), (1.5, "user_id_invalid"),
+])
+def test_a_missing_or_malformed_user_id_is_refused_before_anything_runs(server, path, user_id, code):
+    client, runtime = server
+    body = {"question": "anything"}
+    if user_id is not None:
+        body["user_id"] = user_id
+    status, _, text = _post(client, path, body)
+    assert status == 400 and json.loads(text)["code"] == code
+    assert runtime.payloads == [], "no default user is put in its place"
+
+
+@pytest.mark.parametrize("path", ["/ask", "/ask/stream"])
+def test_a_user_without_a_run_role_is_refused_before_anything_runs(server, path):
+    client, runtime = server
+    status, _, text = _post(client, path, {"user_id": 8, "question": "anything"})
+    assert status == 403 and json.loads(text)["code"] == "run_not_allowed"
+    assert runtime.payloads == []
+
+
+def test_the_turn_runs_for_the_user_the_request_names(server):
+    client, runtime = server
+    _post(client, "/ask", {"user_id": "7", "question": "anything"})
+    assert runtime.users == [7]
+
+
+def test_saved_chats_need_a_user_id_and_the_csv_needs_a_run_role(server, monkeypatch):
+    client, runtime = server
+    runtime.settings = SimpleNamespace(history_db_name="", history_db_user="",
+                                       chat_table_prefix="py_", run_roles=("ticket_owner",))
+    assert client.get("/chats").json()["code"] == "user_id_required"
+    assert client.get("/chats?user_id=7").json() == {"chats": [], "total": 0}
+
+    import pipeline.run_access as access
+    monkeypatch.setattr(access, "user_roles", lambda s, uid: frozenset({"authenticated"}))
+    refused = client.get("/chats/1/turns/1/csv?user_id=7")
+    assert refused.status_code == 403
+
+
 # ------------------------------------------------------- the answer's shape --
 
 from types import SimpleNamespace  # noqa: E402
@@ -122,8 +179,8 @@ from pipeline.followup import FollowUp, Suggestion  # noqa: E402
 from pipeline.lean_runner import TurnResult  # noqa: E402
 
 NOTE = "This data is not updated in real time."
-SETTINGS = SimpleNamespace(chatbot_user_id=0, freshness_tables=("vf_report_task_summary",),
-                           freshness_message=NOTE, history_db_user="",
+SETTINGS = SimpleNamespace(freshness_tables=("vf_report_task_summary",),
+                           freshness_message=NOTE, history_db_name="", history_db_user="",
                            chat_table_prefix="vf_", monthly_token_limit=0)
 
 
@@ -182,6 +239,7 @@ def runtime(monkeypatch):
         return _turn(question=turn.question)
 
     monkeypatch.setattr(api, "run_turn", fake_run_turn)
+    monkeypatch.setattr(api, "resolve_identity", lambda settings, user_id: None)
     api.SESSIONS.clear()
     rt = api.Runtime.__new__(api.Runtime)
     rt.settings, rt.gazetteer, rt.mcp_config_path = SETTINGS, [], None
@@ -191,11 +249,11 @@ def runtime(monkeypatch):
 
 def test_dropping_a_pill_asks_the_goal_again_without_it(runtime):
     rt, asked = runtime
-    state = api.conversation_for("drop").state
+    state = api.conversation_for("drop", 7).state
     state.active_goal = "open tasks in Sales"
     state.active_filters = {"task_status": "task_status = 'open'"}
 
-    rt.ask({"session_id": "drop", "drop_ref": pill_ref("task_status")})
+    rt.ask({"session_id": "drop", "drop_ref": pill_ref("task_status")}, 7)
 
     assert asked == ["open tasks in Sales"]
     assert "task_status" not in state.active_filters
@@ -204,18 +262,18 @@ def test_dropping_a_pill_asks_the_goal_again_without_it(runtime):
 def test_a_drop_with_nothing_to_ask_is_refused(runtime):
     rt, _ = runtime
     with pytest.raises(ValueError):
-        rt.ask({"session_id": "nothing", "drop_ref": "0000000000"})
+        rt.ask({"session_id": "nothing", "drop_ref": "0000000000"}, 7)
 
 
 def test_a_chip_ref_asks_the_reading_it_was_offered_for(runtime):
     rt, asked = runtime
-    state = api.conversation_for("chip").state
+    state = api.conversation_for("chip", 7).state
     state.pending_clarification = FollowUp(
         type="clarification", reason="ambiguous_interpretation", question="Which one?",
         suggestions=[Suggestion(id="a", label="Delayed open tasks", ref="n1:0")])
 
-    rt.ask({"session_id": "chip", "question": "the first one", "option_ref": "n1:0"})
-    rt.ask({"session_id": "chip", "question": "typed text", "option_ref": "stale:9"})
+    rt.ask({"session_id": "chip", "question": "the first one", "option_ref": "n1:0"}, 7)
+    rt.ask({"session_id": "chip", "question": "typed text", "option_ref": "stale:9"}, 7)
 
     assert asked == ["Delayed open tasks", "typed text"]
 
@@ -283,16 +341,16 @@ def test_the_chart_and_the_download_survive_debug_off():
 def test_a_busy_chat_is_waited_for_then_refused(runtime, monkeypatch):
     rt, asked = runtime
     monkeypatch.setattr(api, "LOCK_WAIT_SECONDS", 0.05)
-    conversation = api.conversation_for("busy")
+    conversation = api.conversation_for("busy", 7)
     conversation.lock.acquire()
     try:
         with pytest.raises(RuntimeError, match="still being answered"):
-            rt.ask({"session_id": "busy", "question": "q"})
+            rt.ask({"session_id": "busy", "question": "q"}, 7)
     finally:
         conversation.lock.release()
     assert asked == []
-    rt.ask({"session_id": "busy", "question": "q"})     # released after a turn
-    rt.ask({"session_id": "busy", "question": "q"})
+    rt.ask({"session_id": "busy", "question": "q"}, 7)     # released after a turn
+    rt.ask({"session_id": "busy", "question": "q"}, 7)
     assert asked == ["q", "q"]
 
 
@@ -322,6 +380,8 @@ def test_health_says_what_answers_and_that_all_is_well(monkeypatch):
         "model": "claude-opus-5-5", "provider_ready": True,
         "database": {"ok": True, "name": "tms", "error": None},
         "read_only_role": {"role": "wren_ro", "privileges": ["SELECT"], "select_only": True},
+        "chat_database": {"configured": False, "ok": None, "name": None, "role": None},
+        "run_roles": [],
     }
 
 
@@ -334,22 +394,15 @@ def test_health_fails_on_any_one_check_and_hides_the_database_error(monkeypatch)
 
 
 def _stream(streaming: bool) -> str:
-    import io
-
     class Rt:
         settings = SimpleNamespace(stream_answers=streaming)
 
-        def ask(self, payload, on_rows=None):
+        def ask(self, payload, user_id, on_rows=None):
             if on_rows is not None:
                 on_rows({"sql": "SELECT 1"})
             return {"answer": "done"}
 
-    handler = api.Handler.__new__(api.Handler)
-    handler.runtime, handler.wfile = Rt(), io.BytesIO()
-    handler.send_response = handler.send_header = lambda *a: None
-    handler.end_headers = lambda: None
-    handler._stream({"question": "q"})
-    return handler.wfile.getvalue().decode()
+    return "".join(api.stream_events(Rt(), {"question": "q"}, 7))
 
 
 def test_streaming_off_sends_only_the_answer():

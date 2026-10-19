@@ -46,6 +46,13 @@
     return Boolean(el.debugMode && el.debugMode.checked);
   }
 
+  // Who is asking: the TMS user id from the page address (?user_id=12). Sent
+  // as typed; the server refuses a missing or malformed one rather than
+  // guessing.
+  function userId() {
+    return new URLSearchParams(location.search).get("user_id");
+  }
+
   /* ------------------------------------------------------------ helpers */
 
   function text(tag, className, value) {
@@ -413,6 +420,7 @@
 
     const payload = {
       question: q,
+      user_id: userId(),
       session_id: session.id,
       reset_context: session.resetPending,
       action,
@@ -561,7 +569,7 @@
       const res = await fetch(API.DEBUG_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: session.id }),
+        body: JSON.stringify({ user_id: userId(), session_id: session.id }),
       });
       if (!res.ok) return;
       turns = (await res.json()).turns || [];

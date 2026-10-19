@@ -15,6 +15,8 @@ sqlglot>=29              # read-only safety gate + AST diff for failure classifi
 pyyaml>=6.0              # metadata and question files
 python-dotenv>=1.0       # .env loading
 pytest>=8.0              # test suite
+fastapi>=0.115           # scripts/serve_api.py
+uvicorn>=0.30            # serves it
 
 # LLM_PROVIDER=anthropic reaches the Messages API through the official SDK,
 # as the Drupal port's AnthropicApiProvider does. The CLI remains the default.

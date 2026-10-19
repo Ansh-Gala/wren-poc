@@ -133,7 +133,7 @@ def test_step_timings_carry_the_start_and_each_step():
 
 
 def test_without_a_login_nothing_is_stored_or_read():
-    settings = SimpleNamespace(history_db_user="", chat_table_prefix="vf_")
+    settings = SimpleNamespace(history_db_name="chats", history_db_user="", chat_table_prefix="vf_")
     store = cs.ChatStore(settings, 7)
     assert not store.enabled
     assert store.load("s")["chat_id"] is None
@@ -142,7 +142,7 @@ def test_without_a_login_nothing_is_stored_or_read():
 
 
 def test_nobody_owns_nothing():
-    settings = SimpleNamespace(history_db_user="writer", chat_table_prefix="vf_")
+    settings = SimpleNamespace(history_db_name="chats", history_db_user="writer", chat_table_prefix="vf_")
     assert not cs.ChatStore(settings, 0).enabled
 
 

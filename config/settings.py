@@ -66,11 +66,12 @@ class Settings:
     benchmark_user_id: int = 1
     benchmark_user_name: str = "Admin"
 
-    # Who the console answers for. It is a tool for one person, so the id
-    # comes from .env rather than from a login; the name and departments are
-    # read from the database, as Drupal reads them for a session. 0 is
-    # nobody: "my tasks" is then answered with a question, never a default id.
-    chatbot_user_id: int = 0
+    # Command authorization: the TMS (Drupal) roles whose users may ask a
+    # question, which runs read-only SQL. Read from vf_user__roles in the
+    # business database for the user_id the request names. "authenticated"
+    # is Drupal's implicit role: any user the database knows. Empty means
+    # nobody may ask.
+    run_roles: tuple[str, ...] = ()
 
     # The "not live" note. A query that reads one of these tables carries the
     # sentence above its table. Drupal sets both on its admin form; these are
@@ -79,10 +80,11 @@ class Settings:
     freshness_message: str = ("This data is not updated in real time. "
                               "Last updated 6 hours ago.")
 
-    # Saved chats: Python's own copies of Drupal's two chat tables, the same
-    # columns under the py_ prefix, in the same database. A login of its own,
-    # never the read-only one, which must not be able to read them. No user
-    # means no saved chats: answers still work, and nothing is written.
+    # Persistence identity: the chat database (database 2), separate from the
+    # business database above, with a login of its own that may only read
+    # and write the two chat tables. Nothing here falls back to DATABASE_*.
+    # No name or no user means no saved chats: answers still work, and
+    # nothing is written.
     history_db_host: str = "localhost"
     history_db_port: int = 5432
     history_db_name: str = ""
@@ -147,6 +149,27 @@ class Settings:
                             self.history_db_password, self.openai_api_key,
                             self.anthropic_api_key) if s]
 
+    @property
+    def chats_configured(self) -> bool:
+        return bool(self.history_db_name and self.history_db_user)
+
+    def problems(self) -> list[str]:
+        """Settings that must not be used together. The server refuses to
+        start on any of them."""
+        out = []
+        if self.chats_configured:
+            if (self.history_db_host, self.history_db_port, self.history_db_name) == \
+                    (self.pg_host, self.pg_port, self.pg_database):
+                out.append("HISTORY_DATABASE_* names the business database. Chats "
+                           "need a database of their own.")
+            if self.history_db_user in (self.pg_readonly_user, self.pg_user):
+                out.append("HISTORY_DATABASE_USER must be its own login, not "
+                           "DATABASE_USER or DATABASE_READONLY_USER.")
+        elif self.history_db_name or self.history_db_user:
+            out.append("Saved chats need both HISTORY_DATABASE_NAME and "
+                       "HISTORY_DATABASE_USER.")
+        return out
+
     def project_dir(self, config_name: str) -> Path:
         return self.wren_project_root / f"config_{config_name.upper()}"
 
@@ -200,7 +223,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "WREN_MEMORY_BACKEND", "CLAUDE_CLI_COMMAND", "CLAUDE_MODEL",
         "CLAUDE_TIMEOUT_SECONDS", "BENCHMARK_CONFIG", "BENCHMARK_PRIVACY_MODE", "DEBUG",
         "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-        "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR", "CHATBOT_USER_ID",
+        "CLI_LEAN", "CLAUDE_EFFORT_LEVEL", "CLAUDE_CONFIG_DIR", "CHATBOT_RUN_ROLES",
         "FRESHNESS_TABLES", "FRESHNESS_MESSAGE",
         "HISTORY_DATABASE_HOST", "HISTORY_DATABASE_PORT", "HISTORY_DATABASE_NAME",
         "HISTORY_DATABASE_USER", "HISTORY_DATABASE_PASSWORD", "CHAT_TABLE_PREFIX",
@@ -226,7 +249,8 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         statement_timeout_ms=_as_int(g("DATABASE_STATEMENT_TIMEOUT_MS"), 100000),
         benchmark_user_id=_as_int(g("BENCHMARK_USER_ID"), 1),
         benchmark_user_name=g("BENCHMARK_USER_NAME") or "Admin",
-        chatbot_user_id=_as_int(g("CHATBOT_USER_ID"), 0),
+        run_roles=tuple(r.strip() for r in (g("CHATBOT_RUN_ROLES") or "").split(",")
+                        if r.strip()),
         # Present but empty means off, so these fall back only when absent.
         freshness_tables=tuple(
             t.strip() for t in (g("FRESHNESS_TABLES")
@@ -236,11 +260,11 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         freshness_message=(g("FRESHNESS_MESSAGE")
                            if g("FRESHNESS_MESSAGE") is not None
                            else Settings.freshness_message).strip(),
-        # The history lives beside the data unless told otherwise; only the
-        # login has no fallback, so saved chats are always a decision.
-        history_db_host=g("HISTORY_DATABASE_HOST") or g("DATABASE_HOST") or "localhost",
-        history_db_port=_as_int(g("HISTORY_DATABASE_PORT") or g("DATABASE_PORT"), 5432),
-        history_db_name=g("HISTORY_DATABASE_NAME") or g("DATABASE_NAME") or "",
+        # Its own database: no fallback to DATABASE_*, so the two can never
+        # be the same by accident.
+        history_db_host=(g("HISTORY_DATABASE_HOST") or "localhost").strip(),
+        history_db_port=_as_int(g("HISTORY_DATABASE_PORT"), 5432),
+        history_db_name=(g("HISTORY_DATABASE_NAME") or "").strip(),
         history_db_user=(g("HISTORY_DATABASE_USER") or "").strip(),
         history_db_password=g("HISTORY_DATABASE_PASSWORD") or "",
         chat_table_prefix=(g("CHAT_TABLE_PREFIX")

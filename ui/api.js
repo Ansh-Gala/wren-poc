@@ -10,6 +10,10 @@
      POST <ENDPOINT>
      {
        "question":       "only the active ones",   // exactly what was typed
+       "user_id":        12,                       // the asking TMS user; required.
+                                                   //   400 if missing or not a positive
+                                                   //   whole number, 403 without a
+                                                   //   CHATBOT_RUN_ROLES role
        "session_id":     "qa-1712...",             // stable per conversation
        "reset_context":  false,                    // true right after Reset
        "action":         null,                     // set when a chip was clicked:
@@ -154,6 +158,16 @@ const API = (() => {
 
   const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
+  // The server's own sentence when it sent one ("user_id is required"),
+  // else the status line.
+  async function refusal(res) {
+    try {
+      const body = await res.json();
+      if (body && body.error) return body.error;
+    } catch {}
+    return `backend returned ${res.status} ${res.statusText}`;
+  }
+
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
   async function sendMessageToBackend(payload, { useMock = true } = {}) {
     // window.MOCK is absent in a production build, which drops mock.js. Asking
@@ -170,7 +184,7 @@ const API = (() => {
         signal: controller.signal,
       });
       if (!res.ok) {
-        throw new Error(`backend returned ${res.status} ${res.statusText}`);
+        throw new Error(await refusal(res));
       }
       return normalize(await res.json());
     } catch (err) {
@@ -213,7 +227,7 @@ const API = (() => {
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
-        throw new Error(`backend returned ${res.status} ${res.statusText}`);
+        throw new Error(await refusal(res));
       }
 
       const reader = res.body.getReader();

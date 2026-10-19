@@ -1,9 +1,9 @@
-"""The console's user, with what the database knows about them.
+"""The asking user, with what the database knows about them.
 
 Ported from Drupal's IdentityProvider. There the id comes from the session;
-this console is a tool for one person, so it comes from CHATBOT_USER_ID in
-.env. Everything else -- the name, every department -- is read from the TMS
-views, exactly as Drupal reads it.
+here it is the request's user_id (pipeline/run_access.py). Everything else --
+the name, every department -- is read from the TMS views, exactly as Drupal
+reads it.
 
 Failure is None, never a fallback id: the model then asks who is asking.
 """

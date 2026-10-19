@@ -12,9 +12,10 @@ SQL to compare against. That is the whole design: a console that exercised its
 own copy of the logic would drift from the thing being measured, and would
 then be showing you something other than what the benchmark says.
 
-Deliberately no web framework. This is a local debugging tool for one person
-at a time, and http.server is in the standard library, so the dependency list
-stays as short as the rest of the project's.
+FastAPI, bound to this machine. Every request names its user_id
+(pipeline/run_access.py); asking needs one of CHATBOT_RUN_ROLES. Business
+queries go to DATABASE_* as DATABASE_READONLY_USER; saved chats go to
+HISTORY_DATABASE_* as HISTORY_DATABASE_USER (docs/two-databases.md).
 """
 
 from __future__ import annotations
@@ -23,16 +24,18 @@ import argparse
 import csv
 import io
 import json
-import mimetypes
-import re
+import queue
 import threading
 import time
-from collections.abc import Callable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from urllib.parse import parse_qs
 
 import _bootstrap  # noqa: F401
+
+from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pipeline.chart_check import build as build_chart, note as chart_note_for
 from pipeline.chat_store import (CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore,
@@ -53,6 +56,7 @@ from pipeline.models import Session
 from pipeline.redact import (
     GENERIC, names_a_database_object, public_response, safe_error, safe_explanation,
 )
+from pipeline.run_access import RunNotAllowed, UserIdError, check_run, user_id_from
 from config.logging import get_logger, register_secrets
 from config.settings import load_settings
 from llm_api.factory import llm_identity
@@ -113,15 +117,18 @@ class Conversation:
             self.debug_log.clear()
 
 
-SESSIONS: dict[str, Conversation] = {}
+# Keyed by user and session: one user's session id never reaches another's
+# state, as the saved chat is keyed by both.
+SESSIONS: dict[tuple[int, str], Conversation] = {}
 SESSIONS_LOCK = threading.Lock()
 
 
-def conversation_for(session_id: str) -> Conversation:
+def conversation_for(session_id: str, user_id: int = 0) -> Conversation:
     with SESSIONS_LOCK:
-        if session_id not in SESSIONS:
-            SESSIONS[session_id] = Conversation(session_id)
-        return SESSIONS[session_id]
+        key = (user_id, session_id)
+        if key not in SESSIONS:
+            SESSIONS[key] = Conversation(session_id)
+        return SESSIONS[key]
 
 
 # ------------------------------------------------------------ state shape --
@@ -352,8 +359,9 @@ def health(settings) -> dict:
     database = run_readonly(settings, "SELECT 1")
     posture = read_only_posture(settings)
     ready = provider_problem(settings) is None
+    chats = ChatStore(settings, None).reachable() if settings.chats_configured else None
     return {
-        "ok": database.ok and ready and posture["select_only"],
+        "ok": database.ok and ready and posture["select_only"] and chats is not False,
         "provider": mode,
         # What is answering questions right now.
         "api_provider": vendor if mode == "api" else None,
@@ -370,6 +378,14 @@ def health(settings) -> dict:
             "privileges": posture["privileges"],
             "select_only": posture["select_only"],
         },
+        # Which database and login write the chats. Never the password.
+        "chat_database": {
+            "configured": settings.chats_configured,
+            "ok": chats,
+            "name": settings.history_db_name or None,
+            "role": settings.history_db_user or None,
+        },
+        "run_roles": list(settings.run_roles),
     }
 
 
@@ -383,6 +399,8 @@ def preflight(settings) -> None:
     """
     problem = provider_problem(settings)
     if problem:
+        raise SystemExit(problem)
+    for problem in settings.problems():
         raise SystemExit(problem)
     if settings.llm_provider == "anthropic":
         return
@@ -469,8 +487,16 @@ class Runtime:
         except OSError as exc:      # a full disk must not lose the answer
             log.warning("could not append to %s: %s", self.log_path, exc)
 
-    def ask(self, payload: dict, on_rows: Callable[[dict], None] | None = None) -> dict:
-        """One turn, and the response the console renders.
+    def authorize(self, payload: dict) -> int:
+        """The request's user_id, once they are allowed to run a question.
+        Raises UserIdError or RunNotAllowed; nothing has run yet."""
+        user_id = user_id_from(payload.get("user_id"))
+        check_run(self.settings, user_id)
+        return user_id
+
+    def ask(self, payload: dict, user_id: int,
+            on_rows: Callable[[dict], None] | None = None) -> dict:
+        """One turn for an authorized user, and the response the console renders.
 
         ``on_rows`` is optional. When it is given, the reply is streamed and
         the table is handed over the moment the SQL is complete -- about two
@@ -488,13 +514,13 @@ class Runtime:
         # Cleaned once, here: the saved chat is keyed by the cleaned id, so the
         # in-memory session and its lock must be too.
         session_id = safe_session_id(payload.get("session_id"))
-        store = ChatStore(self.settings, self.settings.chatbot_user_id)
+        store = ChatStore(self.settings, user_id)
 
         # Before the state is touched: a refused question costs nothing and
         # never enters the recent-questions window.
         self.assert_within_monthly_limit(store)
 
-        conversation = conversation_for(session_id)
+        conversation = conversation_for(session_id, user_id)
 
         if not conversation.lock.acquire(timeout=LOCK_WAIT_SECONDS):
             raise RuntimeError("another question is still being answered on this session")
@@ -572,7 +598,7 @@ class Runtime:
                 if on_rows else None,
                 # Every turn: the business rules, not this code, decide what
                 # is personal. A cached lookup is cheap.
-                identity=resolve_identity(self.settings, self.settings.chatbot_user_id),
+                identity=resolve_identity(self.settings, user_id),
             )
             if reset:
                 result.context_reset = True
@@ -843,6 +869,10 @@ def failure(exc: Exception, what: str) -> tuple[int, dict]:
     """
     if isinstance(exc, TokenLimitError):
         return 429, {"error": str(exc), "code": TOKEN_LIMIT_CODE}
+    if isinstance(exc, UserIdError):
+        return 400, {"error": str(exc), "code": exc.code}
+    if isinstance(exc, RunNotAllowed):
+        return 403, {"error": str(exc), "code": exc.code}
     if isinstance(exc, ValueError):
         return 400, {"error": str(exc)}
     log.exception(what)
@@ -853,195 +883,222 @@ def _local_client(address: str) -> bool:
     return address in _LOOPBACK
 
 
-class Handler(BaseHTTPRequestHandler):
-    runtime: Runtime = None          # set in main()
-    protocol_version = "HTTP/1.1"
+def _closing(fn: Callable, *args):
+    """Run fn on a worker thread, and close that thread's database
+    connection after it: the next request may land on another thread."""
+    from database.connection import close_thread_connection
+    try:
+        return fn(*args)
+    finally:
+        close_thread_connection()
 
-    def log_message(self, fmt, *args):   # quieter than the default
-        pass
 
-    # No CORS headers. The console is served from here, so it is same-origin;
-    # "Access-Control-Allow-Origin: *" let any web page the user had open
-    # read this server's answers.
+# No docs pages and no CORS headers. The console is served from here, so it is
+# same-origin; "Access-Control-Allow-Origin: *" let any web page the user had
+# open read this server's answers.
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app.state.runtime = None             # set in main()
 
-    def _local(self) -> bool:
-        return _local_client(self.client_address[0])
 
-    def _json(self, status: int, body: dict) -> None:
-        raw = json.dumps(body, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+def _runtime() -> Runtime:
+    return app.state.runtime
 
-    def _read_json(self) -> dict | None:
-        """The request body as a JSON object, or None once a 400 is sent.
 
-        Read for every POST, so no body is left on a kept-alive connection to
-        be taken for the next request. Debug is honoured only on this machine.
-        """
-        try:
-            length = max(0, int(self.headers.get("Content-Length") or 0))
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError) as exc:
-            self._json(400, {"error": f"bad request body: {exc}"})
-            return None
-        if not isinstance(payload, dict):
-            self._json(400, {"error": "bad request body: expected a JSON object"})
-            return None
-        if not self._local():
-            payload["debug"] = False
+def _json(status: int, body: dict) -> JSONResponse:
+    # Through json.dumps(default=str) first: rows can hold dates and Decimals.
+    return JSONResponse(json.loads(json.dumps(body, default=str)), status_code=status)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Errors in the server's own {"error": ...} shape, not FastAPI's."""
+    return _json(exc.status_code, {"error": str(exc.detail)})
+
+
+def _local(request: Request) -> bool:
+    return request.client is not None and _local_client(request.client.host)
+
+
+async def _read_json(request: Request) -> dict | JSONResponse:
+    """The request body as a JSON object, or the 400 to send instead.
+    Debug is honoured only on this machine."""
+    try:
+        payload = json.loads(await request.body() or b"{}")
+    except (ValueError, json.JSONDecodeError) as exc:
+        return _json(400, {"error": f"bad request body: {exc}"})
+    if not isinstance(payload, dict):
+        return _json(400, {"error": "bad request body: expected a JSON object"})
+    if not _local(request):
+        payload["debug"] = False
+    return payload
+
+
+@app.get("/health")
+def get_health():
+    return _closing(lambda: _json(200, health(_runtime().settings)))
+
+
+def _answer(payload: dict) -> tuple[int, dict]:
+    runtime = _runtime()
+    try:
+        user_id = runtime.authorize(payload)
+        return 200, runtime.ask(payload, user_id)
+    except Exception as exc:                      # a bad turn must not kill the server
+        return failure(exc, "turn failed")
+
+
+@app.post("/ask")
+async def post_ask(request: Request):
+    payload = await _read_json(request)
+    if isinstance(payload, JSONResponse):
         return payload
+    return _json(*await run_in_threadpool(_closing, _answer, payload))
 
-    def _stream(self, payload: dict) -> None:
-        """POST /ask/stream -- the table first, the rest when it is written.
 
-        Two Server-Sent Events:
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
-            event: rows      the query and what it returned
-            event: answer    exactly what POST /ask returns
 
-        `rows` is omitted when the turn clarifies, because a clarification
-        carries no SQL and none is coming. `answer` always arrives and is the
-        whole response, so a client may ignore `rows` entirely and behave as
-        it does today -- which is what keeps this additive rather than a
-        second contract to maintain.
+def stream_events(runtime, payload: dict, user_id: int) -> Iterator[str]:
+    """POST /ask/stream's body -- the table first, the rest when it is written.
 
-        Connection: close rather than chunked. The body's length is not known
-        when the headers go out, and closing the connection to end the stream
-        is the older and simpler of the two ways to say so.
-        """
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.close_connection = True
+    Two Server-Sent Events:
 
-        def emit(event: str, data: dict) -> None:
-            body = json.dumps(data, default=str)
-            self.wfile.write(f"event: {event}\ndata: {body}\n\n".encode("utf-8"))
-            self.wfile.flush()
+        event: rows      the query and what it returned
+        event: answer    exactly what POST /ask returns
 
-        # Kill switch, honoured server-side: when off, only `answer` is sent.
-        streaming = self.runtime.settings.stream_answers
+    `rows` is omitted when the turn clarifies, because a clarification
+    carries no SQL and none is coming. `answer` always arrives and is the
+    whole response, so a client may ignore `rows` entirely.
+
+    The turn runs on a thread of its own and hands events over a queue. If
+    the reader leaves, the turn still finishes and is saved.
+    """
+    events: queue.Queue = queue.Queue()
+    # Kill switch, honoured server-side: when off, only `answer` is sent.
+    on_rows = (lambda d: events.put(("rows", d))) if runtime.settings.stream_answers else None
+
+    def work() -> None:
         try:
-            answer = self.runtime.ask(payload, on_rows=(lambda d: emit("rows", d))
-                                      if streaming else None)
-            emit("answer", answer)
-        except (BrokenPipeError, ConnectionResetError):
-            # The reader left. The turn is saved; there is no one to tell.
-            return
+            events.put(("answer", runtime.ask(payload, user_id, on_rows=on_rows)))
         except Exception as exc:                  # a bad turn must not kill the server
             # Same body as /ask's, without its status: the stream has begun.
-            emit("error", failure(exc, "streamed turn failed")[1])
-
-    def do_GET(self):
-        path, _, query = self.path.partition("?")
-        if path == "/health":
-            return self._json(200, health(self.runtime.settings))
-
-        if path == "/chats" or path.startswith("/chats/"):
-            return self._chats(path, parse_qs(query))
-
-        name = "index.html" if path in ("/", "") else path.lstrip("/")
-        target = (UI_DIR / name).resolve()
-        # Nothing outside ui/ is servable, whatever the path says.
-        if not target.is_relative_to(UI_DIR.resolve()) or not target.is_file():
-            return self._json(404, {"error": f"no such file: {name}"})
-
-        body = target.read_bytes()
-        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")   # it is being edited
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _chats(self, path: str, query: dict) -> None:
-        """The saved chats: the list, one chat, and one answer's full CSV."""
-        settings = self.runtime.settings
-        store = ChatStore(settings, settings.chatbot_user_id)
-        first = lambda key, default: (query.get(key) or [default])[0]
-        try:
-            if path == "/chats":
-                if not store.enabled:
-                    return self._json(200, {"chats": [], "total": 0})
-                return self._json(200, present_chats(store, first("limit", 50),
-                                                     first("offset", 0)))
-
-            match = re.fullmatch(r"/chats/(\d+)/turns/(\d+)/csv", path)
-            if match:
-                chat_id, turn = int(match.group(1)), int(match.group(2))
-                status, body = full_csv(settings, store, chat_id, turn)
-                if status != 200:
-                    return self._json(status, body)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/csv; charset=utf-8")
-                self.send_header("Content-Disposition",
-                                 f'attachment; filename="chat-{chat_id}-answer-{turn}.csv"')
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-cache, private")
-                self.end_headers()
-                self.wfile.write(body)
-                return None
-
-            match = re.fullmatch(r"/chats/(\d+)", path)
-            if match:
-                opened = store.open_chat(match.group(1)) if store.enabled else None
-                # Someone else's chat is a 404, never a 403: the endpoint does
-                # not confirm that an id exists.
-                if opened is None:
-                    return self._json(404, {"error": "No such chat."})
-                # PHP's !empty(): "0" is off, as on Drupal.
-                debug = first("debug", "") not in ("", "0") and self._local()
-                return self._json(200, present_chat(opened, debug))
-        except Exception:
-            # Log, not wire, as on /ask.
-            log.exception("saved chats failed on %s", path)
-            return self._json(500, {"error": "I couldn't load your chat history."
-                                    if path == "/chats" else "I couldn't load that chat."})
-        return self._json(404, {"error": "no such chat path"})
-
-    def do_POST(self):
-        path = self.path.split("?", 1)[0]
-        payload = self._read_json()
-        if payload is None:
-            return None
-
-        if path == "/debug":
-            # What the server kept for turns it has already answered. Reads
-            # only; nothing is generated and nothing is executed. It holds the
-            # SQL and the real column names, so only this machine may ask.
-            if not self._local():
-                return self._json(403, {"error": "/debug answers only on this machine"})
-            with SESSIONS_LOCK:
-                conversation = SESSIONS.get(safe_session_id(payload.get("session_id")))
-            if conversation is None:
-                return self._json(200, {"turns": []})
-            with conversation.debug_lock:
-                turns = list(conversation.debug_log)
-            return self._json(200, {"turns": turns})
-
-        if path == "/ask/stream":
-            return self._stream(payload)
-
-        if path != "/ask":
-            return self._json(404, {"error": "POST /ask"})
-        try:
-            return self._json(200, self.runtime.ask(payload))
-        except Exception as exc:                      # a bad turn must not kill the server
-            return self._json(*failure(exc, "turn failed"))
-
-    def finish(self):
-        # This thread's database connection ends with its HTTP connection.
-        try:
-            super().finish()
+            events.put(("error", failure(exc, "streamed turn failed")[1]))
         finally:
             from database.connection import close_thread_connection
             close_thread_connection()
+            events.put(None)
+
+    threading.Thread(target=work, daemon=True).start()
+    while (item := events.get()) is not None:
+        yield _sse(*item)
+
+
+@app.post("/ask/stream")
+async def post_ask_stream(request: Request):
+    payload = await _read_json(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    runtime = _runtime()
+    # Before the stream opens, so a refusal is a plain status and no SQL runs.
+    try:
+        user_id = await run_in_threadpool(_closing, runtime.authorize, payload)
+    except Exception as exc:
+        return _json(*failure(exc, "streamed turn refused"))
+    return StreamingResponse(stream_events(runtime, payload, user_id),
+                             media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/debug")
+async def post_debug(request: Request):
+    """What the server kept for turns it has already answered. Reads only;
+    nothing is generated and nothing is executed. It holds the SQL and the
+    real column names, so only this machine may ask."""
+    if not _local(request):
+        return _json(403, {"error": "/debug answers only on this machine"})
+    payload = await _read_json(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    try:
+        user_id = user_id_from(payload.get("user_id"))
+    except UserIdError as exc:
+        return _json(*failure(exc, "debug"))
+    with SESSIONS_LOCK:
+        conversation = SESSIONS.get((user_id, safe_session_id(payload.get("session_id"))))
+    if conversation is None:
+        return _json(200, {"turns": []})
+    with conversation.debug_lock:
+        turns = list(conversation.debug_log)
+    return _json(200, {"turns": turns})
+
+
+# ------------------------------------------------------------- saved chats --
+
+def _chats_call(request: Request, what: str, fn: Callable[[ChatStore, int], Response],
+                run: bool = False) -> Response:
+    """A saved-chats request for the user_id in the query string. Listing and
+    reading need only a valid id; `run` also needs a run role."""
+    settings = _runtime().settings
+    try:
+        user_id = user_id_from(request.query_params.get("user_id"))
+        if run:
+            check_run(settings, user_id)
+        return fn(ChatStore(settings, user_id), user_id)
+    except (UserIdError, RunNotAllowed) as exc:
+        return _json(*failure(exc, what))
+    except Exception:
+        # Log, not wire, as on /ask.
+        log.exception("saved chats failed on %s", request.url.path)
+        return _json(500, {"error": what})
+
+
+@app.get("/chats")
+def get_chats(request: Request, limit: str = "50", offset: str = "0"):
+    """This user's chats, newest activity first."""
+    def listed(store: ChatStore, user_id: int) -> Response:
+        if not store.enabled:
+            return _json(200, {"chats": [], "total": 0})
+        return _json(200, present_chats(store, limit, offset))
+    return _closing(_chats_call, request, "I couldn't load your chat history.", listed)
+
+
+@app.get("/chats/{chat_id}")
+def get_chat(request: Request, chat_id: int, debug: str = ""):
+    def opened_chat(store: ChatStore, user_id: int) -> Response:
+        opened = store.open_chat(chat_id) if store.enabled else None
+        # Someone else's chat is a 404, never a 403: the endpoint does not
+        # confirm that an id exists.
+        if opened is None:
+            return _json(404, {"error": "No such chat."})
+        # PHP's !empty(): "0" is off, as on Drupal.
+        return _json(200, present_chat(opened, debug not in ("", "0") and _local(request)))
+    return _closing(_chats_call, request, "I couldn't load that chat.", opened_chat)
+
+
+@app.get("/chats/{chat_id}/turns/{turn}/csv")
+def get_chat_csv(request: Request, chat_id: int, turn: int):
+    """Every row of one answered question. Runs SQL, so it needs a run role."""
+    def download(store: ChatStore, user_id: int) -> Response:
+        status, body = full_csv(_runtime().settings, store, chat_id, turn)
+        if status != 200:
+            return _json(status, body)
+        return Response(body, media_type="text/csv; charset=utf-8", headers={
+            "Content-Disposition": f'attachment; filename="chat-{chat_id}-answer-{turn}.csv"',
+            "Cache-Control": "no-cache, private"})
+    return _closing(_chats_call, request, "I couldn't load that chat.", download, True)
+
+
+# ------------------------------------------------------------------ console --
+
+@app.get("/{name:path}")
+def get_file(name: str):
+    name = name or "index.html"
+    target = (UI_DIR / name).resolve()
+    # Nothing outside ui/ is servable, whatever the path says.
+    if not target.is_relative_to(UI_DIR.resolve()) or not target.is_file():
+        return _json(404, {"error": f"no such file: {name}"})
+    return FileResponse(target, headers={"Cache-Control": "no-store"})   # it is being edited
 
 
 def main() -> int:
@@ -1058,33 +1115,35 @@ def main() -> int:
                          "'' disables logging")
     args = ap.parse_args()
 
+    import uvicorn
+
     # Before Runtime: it builds the system prompt for the warm pool.
     enable_site_metadata()
-    Handler.runtime = Runtime(args)
-    settings = Handler.runtime.settings
+    runtime = app.state.runtime = Runtime(args)
+    settings = runtime.settings
     mode = "lean (no MCP)" if settings.cli_lean else f"MCP config {args.config}"
 
+    # Which database and login each operation uses. Never a password.
     print(f"provider: {settings.llm_provider} / {settings.claude_model or 'default'}   {mode}")
-    print(f"database: {settings.pg_database}   context mode: {args.context_mode}")
-    user = resolve_identity(settings, settings.chatbot_user_id)
-    print(f"user: {user.user_id} {user.display_name}" if user else
-          "user: nobody (set CHATBOT_USER_ID in .env to answer 'my tasks')")
-    print(f"gazetteer: {len(Handler.runtime.gazetteer)} entity value(s)")
+    print(f"business database: {settings.pg_database} on {settings.pg_host}:{settings.pg_port}"
+          f"   queries run as {settings.pg_readonly_user}")
+    print("chat database:     " + (
+        f"{settings.history_db_name} on {settings.history_db_host}:{settings.history_db_port}"
+        f"   written as {settings.history_db_user}" if settings.chats_configured
+        else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
+    print(f"run roles:         {', '.join(settings.run_roles) or 'none (CHATBOT_RUN_ROLES): nobody may ask'}")
+    print(f"context mode: {args.context_mode}   gazetteer: {len(runtime.gazetteer)} entity value(s)")
     print()
-    print(f"  console   http://{args.host}:{args.port}/")
+    print(f"  console   http://{args.host}:{args.port}/?user_id=<TMS user id>")
     print(f"  endpoint  POST http://{args.host}:{args.port}/ask")
-    if Handler.runtime.log_path:
-        print(f"  log       {Handler.runtime.log_path}")
+    if runtime.log_path:
+        print(f"  log       {runtime.log_path}")
     print()
     print("Ctrl+C to stop.")
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nstopping")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     finally:
-        server.server_close()
         # Warm processes are children of this one; without this they outlive
         # a Ctrl+C and sit holding memory.
         from llm_api.cli_provider import shutdown_pools
