@@ -2,7 +2,7 @@
 
 This file tells you where each part of the chatbot is. Each item gives the
 file and the line. The line numbers are correct on 19 October 2026 (branch
-`feat/sync-with-drupal`, commit `e61ec42`). If you change a file, the line
+`feat/sync-with-drupal`, commit `8998e40`). If you change a file, the line
 numbers can move. Search for the function name to find the new line.
 
 ---
