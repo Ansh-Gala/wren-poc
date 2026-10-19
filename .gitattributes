@@ -1,0 +1,8 @@
+# Every text file is stored with LF line endings. Checked out, a file may
+# be LF or CRLF: both read as unchanged, and git does not rewrite them.
+#
+# Byte-exact to Drupal: metadata/*.yaml are LF and metadata/site/*.yaml
+# are CRLF on disk, as the Drupal module and site module have them (the
+# parity tests compare bytes).
+* text=auto eol=lf
+metadata/site/*.yaml text eol=crlf
