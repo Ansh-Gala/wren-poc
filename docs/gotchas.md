@@ -57,6 +57,14 @@ yaml.safe_load(open(a).read()) == yaml.safe_load(open(b).read())   # this is the
 Still copy the file rather than retyping the change: a second hand-edit is how
 the two drift in ways parity *will* catch, loudly, at the worst moment.
 
+**As of 6 October 2026 `column_hierarchy.yaml` content differs.** Drupal
+holds the 25 September "Refactor column hierarchy" commit (`65967c3a2`) and
+Python does not. That one drift is behind parity's four failures (explore,
+explore with a result, display order, hidden columns) and the failing
+`test_the_two_copies_of_the_hierarchy_are_byte_identical`. Both were waved
+off as "the known drift" for days, and the drift was hiding a real bug (§8,
+the YAML slip). A failure you have a story for is still a failure.
+
 Good news: Python turns CRLF into LF when it compiles a `.py` file, so the line
 endings of `prompts.py` do **not** change the built prompt. Only the YAML files
 and the PHP files matter.
@@ -96,6 +104,21 @@ side — easy to update one and forget the other.
 `Redactor`, `Links`, and the REST endpoints. Changing those cannot break parity,
 which also means parity will not catch a mistake in them.
 
+**To prove a refactor changed nothing, run old and new side by side.** What
+worked on 24 September 2026:
+
+- **Comment-only edits:** tokenise both versions with `token_get_all()`, drop
+  `T_COMMENT`/`T_WHITESPACE` (keep `@RestResource(...)`), and compare. Equal
+  tokens means only comments moved; strings and the prompt heredocs included.
+- **Code edits:** `git archive <old-commit>` the module into a temp folder, then
+  run both copies through the same script: the 396 conversations in the parity
+  folder's `context.json`, real `TurnRunner`/`ChatRuntime`, the real read-only
+  database, only the model scripted. Compare every turn result and response.
+  Strip timings and replace the random 12-hex chip token before comparing.
+- **Plant a deliberate change once** to prove the comparison can fail. The first
+  plant sat on a path the inputs never reached and "passed" — a check that
+  cannot fail proves nothing.
+
 ---
 
 ## 3. Drupal: clearing the cache is harder than it looks
@@ -130,6 +153,16 @@ curl -k -s -o /dev/null -w "%{http_code}\n" \
 ```
 
 `403` with a permission message = container is fine. `500` = still broken.
+
+The same truncate works from a script that requires `scripts/bootstrap.php`:
+`\Drupal::database()->truncate('cache_container')->execute();` and so on. Use
+the bare names — Drupal adds the `vf_` prefix itself.
+
+**Testing as a signed-in user without a browser:** in a bootstrap script,
+`\Drupal::service('account_switcher')->switchTo($user)`, use a sentinel
+`session_id`, and clean up only that session: delete its `sql_chat` rows and
+call the store's `reset($sessionId)`. **Never** `keyValueExpirable(...)->deleteAll()`
+— that wipes every user's working context on the live site.
 
 ---
 
@@ -198,9 +231,88 @@ npm run dev      # webpack. NOT create-react-app.
   rebuilding.
 - The chat page is code-split. `SqlChatbotPage` and `ChatResultGrid` land in
   `build/src_pages_SqlChatbotPage_jsx.*.js`, **not** `build/main.*.js`.
+- **But the API paths do not.** They are constants in `src/api/Constants.jsx`,
+  which the whole app shares, so `api/sql-chat/...` is in `build/main.*.js`.
+  Grepping the chat bundle for one finds nothing and looks like a failed build.
+- The chat page's helpers and hooks live in `src/components/SqlChatbot/Utils/`,
+  the way the rest of the repo does it (`DataTables/AGGrid/Utils/`).
 
 **UI testing:** build it, say whether it looks sound, and let the user test it in
 the browser. Do not write UI tests. (Backend tests are still expected.)
+
+**The frontend keeps no test files at all.** The chatbot's eight were deleted
+on 24 September 2026 to match the rest of the repo. Check a change with ESLint,
+a build, and a one-off script in the scratchpad instead.
+
+**ESLint skips `.jsx` files in a folder unless told otherwise.** Point it at
+`src/components/SqlChatbot` and it lints only the `.js` files, then reports
+no problems. Pass the extensions explicitly:
+
+```bash
+npx eslint --no-eslintrc -c .eslintrc.json \
+  --parser-options=ecmaVersion:2022,sourceType:module,ecmaFeatures:{jsx:true} \
+  --ext .js,.jsx src/pages/SqlChatbotPage.jsx src/components/SqlChatbot src/api/SqlChatbotApi.jsx
+```
+
+Five `react-hooks/exhaustive-deps` warnings in `ChatResultGrid.jsx` are old
+ones, not yours.
+
+**Git line endings:** this repo has `core.autocrlf=true`, so the "LF will be
+replaced by CRLF" warnings on every `git add` are harmless.
+
+**Commits:** group related work into one meaningful commit, not one per tweak.
+`feat/sql-chatbot` was squashed and force-pushed on 24 September 2026 into
+three commits: download toast, API client, chatbot page. Commit hashes from
+before that date no longer exist on the remote.
+
+**Never force-push `feat/sql-chatbot` again.** Since 25 September the team
+merges its ag-grid and filter work into it (about 150 commits by 6 October).
+`git fetch` before any squash or rebase: the local branch can look a few
+commits ahead while the remote has moved a long way. Squash only what is
+unpushed, then merge the remote in.
+
+**Installing dependencies.** Since the team's 24 September lock file:
+
+- **Node 16** (`nvm use 16.20.2`). The lock is v2, which is what npm 7/8 write.
+- **`npm ci --legacy-peer-deps`.** Plain `npm ci` stops on an `antd` peer
+  conflict (`@formily/antd` wants `<=4.22.8`); the lock already contains it.
+- **`@ayushvc/diff-checker` is on the private feed** `tms-npm-packages` on
+  `devops.vcgdigital.net`. npm needs a Personal Access Token (Packaging: Read)
+  in the *user* `.npmrc`, one `key=value` per line, as `_password=<base64>`.
+  Git reaches that server with Windows authentication, so there is no git
+  token to reuse, and `vsts-npm-auth` cannot reach a self-hosted server.
+- **`npm ci` empties `node_modules` first.** Never switch Node with `nvm` or
+  start a second npm in the folder while it runs: on 6 October an `nvm use`
+  mid-install killed it and left `node_modules` empty. Stopping the tool call
+  that started npm does not stop npm; check `Get-CimInstance Win32_Process
+  -Filter "Name='node.exe'"`.
+- A missing package after merging the remote shows up as `Module not found`
+  in `npm run dev`, not at merge time.
+- **A failed build still goes live.** Webpack writes `build/` even when it
+  reports an error, so the exit code and the last line are the only warning.
+  On 8 October `qrcode.react` (the team's MFA login) was in `package.json` but
+  not in `node_modules`; the build "finished", and the login page's chunk
+  shipped with a `Cannot find module` inside it. Always read the line
+  `compiled with N errors`. To add one missing package without a full
+  `npm ci`: `npm pack <name>@<version from the lock>`, compare its sha512 with
+  the lock's `integrity`, and untar it into `node_modules/<name>`. Git Bash's
+  `tar` reads `C:` as a host name; pass `--force-local`.
+
+**The app's grid styles are scoped, mostly.** `ag-grid-theme.css` styles the
+app's tables under `.test_datatable_table` (checkboxes, side bar, Columns
+panel). The chat grid does not have that class, so it gets ag-grid's Alpine
+defaults instead. The exceptions are unscoped and `!important`, and they do
+reach the chat: `.ag-virtual-list-item` is forced to 32px tall, while ag-grid
+places list rows `--ag-list-item-height` apart, so the Columns panel's rows
+overlapped and were cut off. The chat grid now sets that variable to 28px and
+the item height to it. Look for an unscoped rule first when one part of the
+chat grid looks wrong.
+
+**Hiding a cell's border hides its column line.** ag-grid draws the line
+between columns as the cell's `border-right` (`--ag-cell-horizontal-border`).
+Making link cells' borders transparent, to hide the focus box after a click,
+removed the Initiative Id column's lines for good. Scope such a rule to
+`.ag-cell-focus` / `.ag-cell-range-single-cell` and put `border-right` back.
 
 ---
 
@@ -232,6 +344,20 @@ tr -cd '\000-\010\013\014\016-\037' < FILE | wc -c     # must be 0
 
 Build backslashes explicitly (`chr(92)`) when a regex is involved, and re-read
 the line to confirm.
+
+Python run from a shell heredoc loses one level of backslashes too:
+`'\\'` arrives as `'\'`. It bit twice on 24 September 2026. Write such scripts
+to a file with an editor instead, and build backslashes with `chr(92)`.
+
+**A literal newline inside a PHP string is a second trap.** `ClaudeCliProvider`
+had `strrpos($seen, "<real line break>")`. It works on an LF checkout, but this
+repo has `core.autocrlf=true`, so a CRLF checkout silently turns it into `"\r\n"`
+and the stream reader stops splitting lines. Always write `"\n"`.
+
+A raw NUL byte is the same trap with a different symptom. One sat inside a
+`join("…")` in the frontend's `chatGridLayout.js`. The code ran fine, but git
+treated the file as binary: `grep` printed "Binary file matches" and diffs were
+unreadable. Write it as the escape `"\u0000"` instead. The check above catches it.
 
 ---
 
@@ -285,6 +411,29 @@ Drupal prompts matched.
 **`check.php` files are in their own namespace.** Reference service classes
 fully qualified (`\Drupal\vf_sql_chatbot\Service\Foo`), not bare.
 
+**The IDE's "Undefined type Symfony/Guzzle/Psr" errors in the module are
+noise.** It does not index Drupal's `vendor/`. `php -l` and the checks are the
+real test.
+
+**A YAML list item where a key belongs parses fine and breaks quietly.** In
+`column_hierarchy.yaml` the heading `row_groups:` became `- row_groups`
+(25 September). That made `row_groups` and `task_department` two more entries
+in `hidden`: the grid stopped showing the department, and grouping by it was
+lost. Nothing validates the file. After editing it, ask the real code:
+`\Drupal::service('vf_sql_chatbot.column_order')->presentation($columns, [$table])`
+returns `order` and `hidden` (positions, not names).
+
+**Never print a credentials file, not even "redacted".** A `sed` that hid
+`_password=` missed a hand-written `password=` and put a feed token in the
+transcript (6 October). Print key names only: `grep -o '^[^=]*=' FILE`.
+
+**Drupal history:** `Tms-Sql-Chatbot-Testing` was squashed and force-pushed on
+24 September 2026 into eight commits (metadata and prompt; SQL reading and
+safety; providers; conversation; turn and storage; module and API; tests;
+scripts). Commit hashes from before that no longer exist on the remote. The
+module keeps its `tests/` — they are the backend's proof and still run — but
+the frontend keeps none.
+
 ---
 
 ## 9. Facts about the data
@@ -333,7 +482,7 @@ boundary, which cannot tell where a chip came from.
 ## 11. Grounding is the gate, not a label
 
 `check_against_schema` / `SchemaChecker` says whether the query only touches
-tables the schema file describes. That answer now **decides whether the query
+tables **and columns** the schema file describes. That answer now **decides whether the query
 runs** (`lean_runner.py`, `TurnRunner.php`).
 
 Two consequences worth knowing:
@@ -341,6 +490,10 @@ Two consequences worth knowing:
 - **`schema_description.yaml` is now the boundary of what is answerable.** A
   table missing from it is not "wrong answer", it is "refused". Adding a table
   to the database is not enough; it has to be described.
+- **An unknown column is refused before the database sees it**, so it never
+  reaches the SQL-repair retry, which only runs on a database error. To test
+  the repair path, use a grounded query the database rejects, such as
+  `SELECT COUNT(*) / 0 AS n FROM tms_task_flat`.
 - **A CTE is not a missing table.** `WITH x AS (...) SELECT FROM x` used to be
   reported as ungrounded on both sides, on purpose, because it only affected a
   label. Once the label became the gate, that would have refused every `WITH`
@@ -373,7 +526,13 @@ this section used to claim. Do not chase them:
 Every one of them is the **Initiative rename**, not a defect. They were written
 against a schema that no longer exists.
 
-**Check the count, not the list.** `27 failed, N passed` means you broke
+**Since 6 October it is 28.** The extra one is
+`tests/test_column_order.py::test_the_two_copies_of_the_hierarchy_are_byte_identical`,
+and it is **not** harmless: it is the `column_hierarchy.yaml` drift from §1,
+which was hiding the §8 YAML slip. It goes away when the two copies are
+re-synced.
+
+**Check the count, not the list.** `28 failed, N passed` means you broke
 nothing. The way to be sure a failure is yours:
 
 ```bash
@@ -383,10 +542,8 @@ git stash -u && python -m pytest tests/ -q | tail -2 && git stash pop
 If the count is the same before and after, it is not yours. This takes thirty
 seconds and has settled the question twice.
 
-**Frontend tests:** run them as `npx jest <path> --env=jsdom`. Invoked without
-it they fail with `document is not defined` — `react-scripts test` sets the
-environment and a direct `jest` call does not. **16 fail there too**, also
-pre-existing.
+**Frontend tests:** there are none any more (see §5). Only the untouched
+create-react-app `src/App.test.js` is left, and it is not ours.
 
 ---
 
@@ -461,6 +618,18 @@ is untouched and still returns one body.
   wrong still works locally, where the whole body arrives at once, and fails on
   a slow connection. Both readers are tested at one byte per chunk.
 
+- **The live site currently has streaming OFF** (`stream_answers: false`, as of
+  24 September 2026). So `/api/sql-chat/ask/stream` sends only `answer`, and
+  "no `rows` event" is the setting, not a bug. To test the streaming path
+  without touching the live setting, override it in-process in a bootstrap
+  script: `$GLOBALS['config']['vf_sql_chatbot.settings']['stream_answers'] = TRUE;`
+  then `\Drupal::configFactory()->reset('vf_sql_chatbot.settings');`.
+- **Capturing the stream in a script:** the emitter calls `ob_flush()`, so the
+  events bypass your `ob_start()` and go straight to stdout. Redirect the
+  script's output to a file and read that.
+- **Permission is enforced by the route** (`_permission` in `routing.yml`),
+  before `StreamController` runs. The controller has no check of its own.
+
 **Groq cannot run this system.** The free tier caps the org at 8,000 tokens per
 minute and one request is 10,548, so every call is rejected before a model sees
 it — not a throttle to wait out. Fitting would mean cutting 24% of the prompt,
@@ -470,15 +639,154 @@ which `results/v3_*` already tried at 8–20% accuracy.
 
 ## 15. Two design rules that are easy to break
 
-**Never put raw user questions into the prompt as history.** It was tried and
-removed. When a user says *"forget the department"*, that counts as an ordinary
-follow-up — so a window of past messages would still be showing "open tasks for
-Sales" on the very turn that removed the filter, and the model keeps filtering.
-The model's own `explanation` is no safer; it is specified to read "the open
-tasks for the Sales department". Two tests guard this. Carry a **rolling
-summary** instead, which is rewritten from scratch each turn.
+**Raw user questions travel only as a safety net under the recap.** An
+unbounded window of past messages was tried and removed: when a user says
+*"forget the department"*, a window still showing "open tasks for Sales" kept
+the model filtering. The main carrier is the **rolling recap**, rewritten from
+scratch each turn. Since 22 September (`0c146bb`) the **last 10 questions**
+(`RECENT_QUESTIONS`, 160 characters each) travel too, because a summary can
+lose a detail like "last week". The old risk is still real: a question that
+named a filter the user has since dropped can pull it back, and that is
+exactly what the next rule had to fix. The model's own `explanation` is never
+carried.
+
+**Dropping a context pill only reaches the model if it is named.** The model
+never sees the state, so taking a filter off the state changes nothing it
+reads. Left to the question's wording ("Remove the filter ... and show the
+same results"), the open-by-default rule put a dropped `task_status = 'open'`
+back in 4 of 10 runs (chat 123, 6 October 2026). `dropByRef` now records the
+predicate in `droppedFilters`, `renderContext` names it for that one turn, and
+`runTurn` clears it: 0 of 10 after. Python has the field and the rendering
+(so the two renderers stay identical) but no pills of its own.
 
 **User identity never comes from the browser.** It is read from the Drupal
 session on the server. A user id sent from the client can be edited in devtools,
 which turns "show my tasks" into "show anyone's tasks". If the user cannot be
 identified, ask — never fall back to a default id.
+
+---
+
+## 16. The monthly token limit
+
+Set on `/admin/config/system/sql-chatbot-llm`. **0 means no limit.** One
+budget for all users together, counted from 00:00 on the 1st.
+
+- **Counted from `sql_chat_turn.effective_tokens`**, written by `recordTurn()`
+  with `TurnOutcome::effectiveTokens()`: prompt minus cache reads, plus a
+  tenth of the cache reads, plus the reply. Rows from before 6 October 2026
+  were filled in from their metadata by `update_9011`.
+- **Checked before anything else** in `ChatRuntime::ask()`: before the state
+  loads, so a refused question never enters the recent-questions window and
+  costs nothing. Refusal is HTTP 429 with `code: monthly_token_limit`.
+- **It can go over by one question.** A question's cost is only known after
+  it runs.
+- **PHP-only:** the Drupal `repairSql()` adds the retry's tokens to the turn.
+  Python's `lean_runner._repair` still drops them. Do not "fix" the two back
+  into step.
+- **Testing it costs nothing** with a scripted provider: replace
+  `vf_sql_chatbot.provider_factory` in the container before asking for the
+  runtime, and override the limit in memory with
+  `$GLOBALS['config']['vf_sql_chatbot.settings']['monthly_token_limit']`.
+  Never save a test limit to config: it would lock out the live site.
+- **If the chatbot refuses every question with the token message, check the
+  live limit first.** On 6 October the limit was set to 198,000 while the
+  month's usage was already past 199,000, so every question was refused. That
+  is the feature working, not a bug. Read both numbers with a bootstrap
+  script: the config's `monthly_token_limit` and
+  `conversation_store->monthlyEffectiveTokens()`.
+- **Debug mode shows usage in the top bar** ("NN% used", or "Unlimited" when
+  the limit is 0). The pill is read from the latest answer, so it is empty
+  until a question has been asked with debug on.
+
+---
+
+## 17. Recent questions and the recap come from the database (PHP only)
+
+Since 6 October 2026 the Drupal module rebuilds the last-10-questions window
+and the recap from `sql_chat_turn` on every turn, so an old chat reopened
+after an hour still remembers what it was about. The rest of the working state
+(filters, previous SQL, goal, pending clarification) is still in the 1-hour
+key-value store.
+
+- **Read by `ConversationStore::history()`**, called from `load()`, and applied
+  in `ChatRuntime::ask()` through `rememberQuestion()`, so the clip is shared.
+  The window uses `metadata.pipeline.normalized_question` when it is set (a
+  resumed "4" becomes the whole question) and otherwise the `question` column.
+  The recap is the newest row's `metadata.state.rolling_recap`. A row whose
+  `state` was shed for size is skipped.
+- **Resets cut the window.** The cut is a "forget that"-style phrase in the
+  question, or `metadata.pipeline.context_reset`, which is written by both
+  `TurnRunner` (the phrase) and `ChatRuntime` (`reset_context`). On a
+  `reset_context` turn the history is not applied at all, because the marker
+  row is not written yet.
+- **`recordTurn()` now runs inside the session lock**, so the next turn cannot
+  load before this turn's row exists. A history row that fails to save is
+  missing from the next window.
+- **`ConversationStore::load()` returns `history` raw.** It does not set it on
+  the state. `verify_chat_history.php` relies on `load()` round-tripping the
+  key-value state byte for byte.
+- **PHP-only.** Python's `lean_runner` still keeps both in its own state. Do
+  not "fix" the two back into step. Parity does not cover this.
+- **Check:** `php scripts/verify_chat_history.php --write` (section "recent
+  questions and recap, from the turns").
+
+---
+
+## 18. Time, size and cache limits (Drupal, since 6 October 2026)
+
+- **LLM call timeout: 500 s** (`claude_timeout_seconds`, all three
+  transports). Worked back from PHP's `max_execution_time = 1200`: a turn
+  can make two model calls (answer, then SQL repair) and two 100 s queries.
+  Raising it further means raising PHP's limit first.
+- **Postgres: 100 s** (`statement_timeout_ms = 100000`, applied with `SET
+  LOCAL` per query).
+- **Session lock lives 1200 s** (`ChatRuntime::LOCK_TTL`). It used to live
+  30 s, shorter than a turn, so a long turn could lose its lock halfway.
+  The wait for a busy session is still 30 s (`LOCK_WAIT`).
+- **Output cap: 4000 tokens** (`LlmProviderInterface::MAX_TOKENS`). The CLI
+  gets it as `CLAUDE_CODE_MAX_OUTPUT_TOKENS`. Reasoning tokens count against
+  it on OpenAI and Anthropic. Real answers average about 350.
+- **Caching.** Anthropic API: the system prompt is cached with `ttl: 1h`. The
+  CLI gets `ENABLE_PROMPT_CACHING_1H=1` (and `CLAUDE_CODE_PROMPT_CACHE_TTL=1h`
+  for newer CLIs), and any `DISABLE_PROMPT_CACHING*` or
+  `FORCE_PROMPT_CACHING_5M` from the server is removed. OpenAI GPT-5.6
+  caches implicitly at a fixed 30 min with no parameter needed, and was
+  already hitting on about 90% of turns. Its new `prompt_cache_options` is
+  documented for the Responses API only, so it is not sent.
+- **Python still has 2048 tokens and 180 s.** These are PHP-only.
+
+---
+
+## 19. Initiative attributes: a site module adds to the prompt (Drupal only)
+
+`vf_arvind_retail_chatbot` (under `web/sites/site-arvind-retail/modules/custom/`)
+owns the view `tms_initiative_attributes_flat`. Since 8 October 2026:
+
+- **The server cannot write files.** So nothing is generated to disk.
+  `\Drupal::service('vf_arvind_retail_chatbot.initiative_attributes')->show();`
+  in `/devel/php` shows the labels, the view SQL, and the three YAML blocks,
+  each with a Copy button. The view SQL is run by hand; nothing builds it.
+- **Columns come from the label tables, not the data.** The active
+  `vf_input_file_tagging` rows with `unique_col_name = 'reference_id'`
+  (today tags 13, 14, 15, 18), joined to `vf_input_file_display_label` on
+  `tag_id`. The label becomes the description; every column is VARCHAR. Keys
+  `tms_initiative_flat` already has, and `initiative_id`, are in `SKIP`.
+- **Three files are read on every question**, with no cache:
+  `metadata/attributes_schema_description.yaml`, `attributes_business_rules.yaml`
+  and `attributes_column_hierarchy.yaml`. The module's hooks add each to the
+  common file in `vf_sql_chatbot/metadata/`. Empty, they change nothing: the
+  built prompt is byte-identical.
+- **A YAML mistake in one of them breaks every question**, the same as one in
+  a common file. Nothing validates a paste.
+- **The column hierarchy never reaches the model**, common or attributes. It
+  only orders, hides and groups the results table. Only schema and rules are
+  in the prompt.
+- **Drupal-only, and parity cannot see it.** The hooks
+  (`hook_vf_sql_chatbot_rules_alter`, `hook_vf_sql_chatbot_column_hierarchy_alter`,
+  next to the schema one) do not exist in Python, and parity builds `Metadata`
+  with no module handler. Do not paste attribute content into the common
+  `schema_description.yaml` instead: that file must match Python (§1).
+- **Deploying it needs one cache clear**: `services.yml` and the hooks
+  changed. Without it every chatbot request fails (§3).
+- **`/devel/php` keeps the last code that ran.** After the snippet changed,
+  the old one was run again and looked like a bug. Clear the box first.
