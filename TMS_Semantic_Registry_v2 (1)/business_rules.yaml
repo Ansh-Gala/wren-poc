@@ -47,8 +47,8 @@ critical_rules:
 
   elapsed_task_days:
     rule: >
-      Do not recompute elapsed duration. The view exposes task_elapsed_hours and
-      task_elapsed_days directly.
+      Do not recompute elapsed duration. The view exposes task_elapsed_days
+      directly, in days rounded to 2 decimal places.
     underlying:
       closed: "task_closed_at - task_start_at"
       open_started: "current/reference time - task_start_at"
@@ -56,7 +56,7 @@ critical_rules:
 
   delayed_task:
     rule: "A task is delayed when task_sla_status = 'Delayed'. Observed values are 'On Time' and 'Delayed'."
-    underlying: "task_elapsed_hours exceeds task_sla_hours; the view has already applied this."
+    underlying: "elapsed time exceeds task_sla_hours; the view has already applied this."
     also_available: "is_delayed_open_task and is_delayed_closed_task hold 'Yes' or 'Not Applicable'."
     warning: "Do not determine task delay from the Business Object client due date."
 

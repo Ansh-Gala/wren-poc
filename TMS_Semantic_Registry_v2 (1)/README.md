@@ -59,7 +59,7 @@ need an explicit cast.
 
 The views precompute values the rules previously asked to be recalculated. Prefer
 `task_sla_status`, `is_delayed_open_task`, `is_delayed_closed_task`,
-`task_elapsed_hours`, `task_elapsed_days`, `is_open_task`, `is_closed_task`,
+`task_elapsed_days`, `is_open_task`, `is_closed_task`,
 `is_not_started_task` and `is_followup` over rebuilding the logic.
 
 Likewise `business_object_status` and `business_object_color` are already resolved to

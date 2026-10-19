@@ -45,7 +45,7 @@
       "task entity configuration active"
     ],
     "other_tasks": "department/sub-department task pool via task_department / task_sub_department",
-    "delayed_task": "task_sla_status = 'Delayed' (view has already compared task_elapsed_hours to task_sla_hours)",
+    "delayed_task": "task_sla_status = 'Delayed' (view has already compared elapsed time to task_sla_hours)",
     "client_due_date": "use Business Object client due-date field",
     "business_object_status": {
       "note": "already text in the flat view; filter on the text, not on 1/2/80",

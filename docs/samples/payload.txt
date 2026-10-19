@@ -178,8 +178,7 @@ TABLE tms_task_flat  (primary key: task_id)
   - next_followup_at (TIMESTAMP): Timestamp of the next follow-up.
   - is_followup (BOOLEAN): Boolean flag, true when the task is a follow-up ticket.
   - task_sla_hours (DOUBLE): Allowed task duration / SLA buffer, in hours.
-  - task_elapsed_hours (DECIMAL): Elapsed task duration in hours, already calculated by the view.
-  - task_elapsed_days (DOUBLE): Elapsed task duration in days, already calculated by the view.
+  - task_elapsed_days (DECIMAL): Elapsed task duration in days, rounded to 2 decimal places (e.g. 186.86), already calculated by the view.
   - is_delayed_open_task (VARCHAR): 'Yes' when an open task has breached SLA, else 'Not Applicable'.  values: Not Applicable, Yes
   - is_delayed_closed_task (VARCHAR): 'Yes' when a closed task breached SLA, else 'Not Applicable'.  values: Not Applicable, Yes
   - task_sla_status (VARCHAR): SLA status of the task (e.g. Delayed, On Time).  values: Delayed, On Time

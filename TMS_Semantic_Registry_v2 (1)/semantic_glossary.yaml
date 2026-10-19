@@ -54,7 +54,7 @@ core_business_terms:
   delayed_task:
     definition: >
       A task where task_sla_status = 'Delayed'. The view has already compared
-      task_elapsed_hours against task_sla_hours. This is a task-level SLA/buffer
+      elapsed time against task_sla_hours. This is a task-level SLA/buffer
       concept and is not the same as an overdue Business Object.
   followup_ticket:
     definition: >
