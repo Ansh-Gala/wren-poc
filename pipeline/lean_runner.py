@@ -642,7 +642,7 @@ def run_turn(
     ``on_sql`` is optional and changes nothing about the answer. When it is
     set the reply is streamed, and the moment the sql value closes the query
     is vetted, run and handed over -- about two seconds before the last token
-    on the measurements in docs/superpowers/specs/2026-09-23-stream-sql-early-design.md.
+    on the measurements in the stream-SQL-early design (2026-09-23, now in git history).
     The turn then finishes exactly as it would have, reusing that execution
     rather than repeating it. A reply that clarifies has no sql and never
     calls it.

@@ -73,8 +73,6 @@ EXCLUDE = [
     # -- Source datasets. metadata/*.yaml is generated from these and promoted
     #    as output; the sources themselves are not deployed.
     "TMS_Semantic_Registry_v2 (1)",
-    "TMS_Semantic_Registry_Learning_Material (1)",
-    "TMS_AI_Golden_Challenge_Test_Set (1).csv",
 
     # -- Generators and setup tooling for the above. Dropping build_wren.py and
     #    check_environment.py orphans three wren_setup modules, so they go too;
@@ -105,7 +103,6 @@ EXCLUDE = [
     # -- Fixtures, editor droppings, other agents' instruction files.
     "ui/mock.js",
     "claude/.cph",
-    "gemini.md",
 
     # -- This machinery. It rebuilds production; it does not ship to it.
     "promotion",
