@@ -45,6 +45,7 @@ import json
 import os
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -55,6 +56,19 @@ from pipeline.models import ClaudeRun
 
 # The output cap every transport gets, as in the Drupal port.
 MAX_OUTPUT_TOKENS = 4000
+
+
+def cli_workdir() -> str:
+    """An empty folder for every Claude Code child to run in.
+
+    The CLI reads each CLAUDE.md from its working folder up to the root, and
+    the folder's git status, and puts both in the question uncached. Run
+    from scripts/ that was about 4,700 tokens a question, at full price.
+    Drupal's children run from a folder with neither.
+    """
+    path = os.path.join(tempfile.gettempdir(), "wren-claude-cwd")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def cli_environment(config_dir: str = "") -> dict[str, str]:
@@ -245,7 +259,7 @@ class ClaudePool:
                 # stall a process that sits warm for a long time.
                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                 errors="replace", bufsize=1,
-                env=self._environment(),
+                env=self._environment(), cwd=cli_workdir(),
             )
             warm = _Warm(proc=proc, spawned_at=time.perf_counter())
         except OSError:

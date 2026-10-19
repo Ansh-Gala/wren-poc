@@ -343,7 +343,7 @@ class CLILocalProvider(LLMProvider):
         # plugins it enables from there, so leaving it unset hands the run the
         # operator's whole setup -- and a plugin's SessionStart hook is the one
         # leak no flag can close.
-        from llm_api.cli_pool import cli_environment
+        from llm_api.cli_pool import cli_environment, cli_workdir
         env = cli_environment(settings.claude_config_dir)
 
         started = time.perf_counter()
@@ -355,7 +355,7 @@ class CLILocalProvider(LLMProvider):
                 encoding="utf-8",
                 errors="replace",
                 timeout=settings.claude_timeout_seconds,
-                env=env,
+                env=env, cwd=cli_workdir(),
             )
         except subprocess.TimeoutExpired:
             waited = (time.perf_counter() - started) * 1000
