@@ -73,21 +73,10 @@ attachment attachments issue issues attribute attributes
 _REQUEST_VERB = re.compile(
     r"^\s*(show|list|give|get|display|find|tell|fetch|pull)\b", re.IGNORECASE)
 
-# ...or is a wh-question with a clause of its own. The trailing verb is what
-# separates "How many tasks are open?", which is a whole question, from "How
-# many tasks?", which is still leaning on the turn before it.
-_WH_CLAUSE = re.compile(
-    r"^\s*(how many|how much|which|what|who|when|where)\b.*"
-    r"\b(is|are|was|were|have|has|had|do|does|did|can)\b",
-    re.IGNORECASE,
-)
-
-# ...or a wh-question carrying a main verb rather than an auxiliary. _WH_CLAUSE
-# wants "which tasks ARE delayed", so it misses "which roles BELONG to sales",
-# "who OWNS this initiative", "what tasks FALL under it" -- ordinary complete
-# questions with no auxiliary anywhere in them. Read as fragments, each
-# inherited the previous turn's filters and came back quietly narrower than it
-# was asked.
+# ...or is a wh-question. Any wh-opener counts, not only one followed by an
+# auxiliary: "which roles BELONG to sales" and "who OWNS this initiative" are
+# whole questions too, and read as fragments each inherited the previous
+# turn's filters and came back quietly narrower than it was asked.
 #
 # Left loose deliberately. is_complete_request consults it only after a subject
 # noun has already been found, and the referential and elliptical forms are
@@ -102,49 +91,48 @@ def is_complete_request(question: str) -> bool:
 
     Both halves are needed. "Show their status too" opens with a verb of
     asking but names no subject, so it continues the thread; "How many tasks?"
-    names one but does not ask a whole question. Only when both are present is
-    the turn independent of what came before -- which is what makes it safe to
-    drop the filters that were narrowing the previous subject.
+    names tasks and asks outright, so it stands alone. Only when both are
+    present is the turn independent of what came before -- which is what makes
+    it safe to drop the filters that were narrowing the previous subject.
     """
     if not any(token in _SUBJECT_NOUNS for token in _tokens(question)):
         return False
-    return bool(
-        _REQUEST_VERB.match(question)
-        or _WH_CLAUSE.match(question)
-        or _WH_OPENER.match(question)
-    )
+    return bool(_REQUEST_VERB.match(question) or _WH_OPENER.match(question))
 
 
 def _is_identifier_column(column: str) -> bool:
     """Whether a column name identifies a row rather than describes one."""
-    column = (column or "").lower()
-    return column == "bo_id" or column.endswith("_id")
+    return (column or "").lower().endswith("_id")
 
 
 def _equality_value(column: str, predicate: str) -> str | None:
     """The literal an equality predicate compares a column to, or None.
 
-    Anchored on the whole predicate so only ``x = 'y'`` matches. An inequality,
-    a range, a LIKE or an IN all fall through, which is the point: none of them
-    is a question about one record.
+    Anchored on the whole predicate so only ``x = 'y'`` or ``x = 12`` matches.
+    An inequality, a range, a LIKE or an IN all fall through, which is the
+    point: none of them is a question about one record. Nor does a column on
+    the right -- ``t.initiative_id = i.initiative_id`` is a join, and reading
+    it as a subject put "initiative i.initiative_id" in a public pill.
     """
     pattern = (
         r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?"
         + re.escape(column)
-        + r"\s*=\s*'?([^']*?)'?\s*$"
+        + r"\s*=\s*(?:'([^']*)'|(-?\d+(?:\.\d+)?))\s*$"
     )
     found = re.match(pattern, str(predicate), re.IGNORECASE)
-    return found.group(1).strip() if found else None
+    if not found:
+        return None
+    return (found.group(1) if found.group(1) is not None else found.group(2)).strip()
 
 
 def _subject_noun(column: str) -> str:
     """What to call the thing an identifier column identifies.
 
-    One record, one name. tms_task_flat calls the initiative bo_id and
-    tms_initiative_flat calls it business_object_id, so a thread that moves
-    between the two tables would otherwise rename the thing under discussion
-    partway through -- "initiative 123" on one turn and "BO 123" on the next,
-    which reads as two subjects and compares as a change of subject. The
+    One record, one name. Older SQL called the initiative bo_id or
+    business_object_id, so a thread that met both would otherwise rename the
+    thing under discussion partway through -- "initiative 123" on one turn and
+    "BO 123" on the next, which reads as two subjects and compares as a change
+    of subject. The
     synonyms are already named in pipeline.initiative; this reuses that list
     rather than starting a second one.
     """
@@ -169,7 +157,7 @@ def _subject_from(filters: dict) -> dict | None:
     Identifier-ness is decided by the name, not by a list of known columns.
     Every identifier in this schema ends in _id, so the naming convention is a
     stronger rule than any enumeration and it covers a table nobody has added
-    yet. bo_id is named outright because it breaks the convention.
+    yet.
 
     The first match wins when a query names two. That is a guess, and a wrong
     one is visible and removable in the context bar rather than silent.
@@ -186,10 +174,6 @@ def _subject_from(filters: dict) -> dict | None:
             "label": f"{_subject_noun(column)} {value}".strip(),
         }
     return None
-
-
-def _normalise(token: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", token.lower())
 
 
 @dataclass
@@ -244,15 +228,10 @@ class ConversationState:
     previous_result_summary: str = ""
     turns_in_block: int = 0
 
-    # A question the system asked and is waiting on, with the choices it
-    # offered. Held here because it is exactly what the next turn needs in
-    # order to be understood -- "AR_YD_Suiting" means nothing without it. Not
-    # rendered into the prompt: it is resolved before the model is asked, so
-    # what the model sees is the original question with the choice filled in.
     # What the conversation has been about, in the model's own words, folded
     # afresh each turn rather than added to. The structured fields above are
     # exact and lossy: they hold the last query's shape and nothing of why it
-    # was asked. This holds the why, and is the only field that survives a
+    # was asked. This holds the why, and with recent_questions survives a
     # change of subject -- which is the point, since that is when the fields
     # are cleared and the thread would otherwise start from nothing.
     rolling_recap: str | None = None
@@ -338,7 +317,8 @@ NEWLINE = chr(10)
 # The recap does not have the problem, because it is not a transcript. It is
 # folded afresh every turn, so the turn that drops the department produces a
 # recap without one. That is the property a window structurally cannot have,
-# and it is why the recap is the whole of what carries forward.
+# and it is why the recap, with the user's own recent questions, is what
+# carries forward -- never the model's answers or SQL.
 RECAP_MAX_CHARS = 320
 
 # How many of the user's own questions travel, and how much of each.
@@ -384,16 +364,6 @@ def accept_recap(text: str | None) -> str | None:
     return _clip(flat, RECAP_MAX_CHARS)
 
 
-def _recap_lines(state: ConversationState) -> list[str]:
-    if not state.rolling_recap:
-        return []
-    return [
-        "EARLIER IN THIS CONVERSATION (background only -- it says what has been",
-        "discussed, not what is still filtering the answer)",
-        f"  {state.rolling_recap}",
-    ]
-
-
 def parse_sql_state(sql: str) -> dict:
     """Pull the structured shape out of a SQL statement.
 
@@ -419,9 +389,10 @@ def parse_sql_state(sql: str) -> dict:
         if name and name not in tables:
             tables.append(name)
 
-    # Only top-level AND-ed equality/IN predicates become remembered filters.
-    # A filter the next turn might replace has to be addressable by column
-    # name; anything more tangled is left to previous_sql to carry.
+    # Every comparison in WHERE whose left side is a plain column, keyed by
+    # column; a later one on the same column overwrites an earlier one, as
+    # Drupal's SqlReader does. A filter the next turn might replace has to be
+    # addressable by column name.
     filters: dict[str, str] = {}
     where = tree.args.get("where")
     if where is not None:
@@ -463,7 +434,7 @@ def parse_sql_state(sql: str) -> dict:
     selects = tree.selects if hasattr(tree, "selects") else []
     if grouping:
         intent = "breakdown"
-    elif any(isinstance(s.find(exp.AggFunc), exp.AggFunc) for s in selects if s is not None):
+    elif any(s.find(exp.AggFunc) is not None for s in selects if s is not None):
         intent = "aggregate"
 
     return {
@@ -538,10 +509,7 @@ def classify_turn(
     decide deterministically, and a model call here would cost more than the
     context it saves and could itself be wrong.
     """
-    if _EXPLICIT_RESET.search(question):
-        return "new_block", detect_entity(question, gazetteer)
-
-    if state.is_empty():
+    if _EXPLICIT_RESET.search(question) or state.is_empty():
         return "new_block", detect_entity(question, gazetteer)
 
     named = detect_entity(question, gazetteer)
@@ -557,8 +525,6 @@ def classify_turn(
         if _ELLIPTICAL.match(question):
             return "rebase", named
         return "switch", named
-    if named and not state.active_entity:
-        return "follow_up", named
     if named:
         return "follow_up", named
 

@@ -14,7 +14,9 @@ the database. There is no LLM call in this module. That is not a performance
 compromise; it is what makes the candidates trustworthy. A model asked to
 propose "which order did you mean?" will produce plausible order numbers, and
 plausible is exactly wrong. Values offered here can only come from the
-database, because there is nowhere else for them to come from.
+database, because there is nowhere else for them to come from. The model's
+own readings and next questions are offered too, but only as free text with
+no action, and only past names_a_database_object.
 
 The output is shaped for a frontend that renders buttons. A suggestion
 therefore carries a machine-readable ``action`` alongside its human label, so
@@ -48,7 +50,8 @@ ACTION_TYPES = (
     "drill_down",
 )
 
-FOLLOWUP_TYPES = ("clarification", "exploration", "none")
+# The actions that act on a column, and so must name one.
+_NEEDS_FIELD = ("add_filter", "replace_filter", "remove_filter", "add_group_by", "set_sort")
 
 
 @dataclass(frozen=True)
@@ -181,9 +184,7 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
     if detect_entity(question, gazetteer) is not None:
         return None  # unambiguous; nothing to ask
 
-    for token in sorted(_CANDIDATE_TOKEN.findall(question), key=len, reverse=True):
-        if token.lower() in _NOT_AN_ENTITY:
-            continue
+    for token in _candidate_tokens(question):
         matches = [v for v in gazetteer if _is_partial_name(token, v)]
         if len(matches) < 2:
             continue
@@ -271,17 +272,16 @@ def _default_values() -> dict[str, str]:
     }
 
 
-def _enum_columns(table: str) -> dict[str, list[str]]:
-    spec = (_schema().get("tables") or {}).get(table) or {}
-    return {
-        column: [str(v) for v in cspec["values"]]
-        for column, cspec in (spec.get("columns") or {}).items()
-        if isinstance(cspec, dict) and 2 <= len(cspec.get("values") or []) <= 12
-    }
-
-
 def _columns(table: str) -> dict:
     return ((_schema().get("tables") or {}).get(table) or {}).get("columns") or {}
+
+
+def _enum_columns(table: str) -> dict[str, list[str]]:
+    return {
+        column: [str(v) for v in cspec["values"]]
+        for column, cspec in _columns(table).items()
+        if isinstance(cspec, dict) and 2 <= len(cspec.get("values") or []) <= 12
+    }
 
 
 # ------------------------------------------------------------- exploration --
@@ -339,7 +339,6 @@ def explore(state, row_count: int | None,
     hidden = hidden_names(state.active_tables)
     # The predicates themselves, not just their columns: telling a
     # defaulted status from one the user chose means reading the value.
-    in_force_predicates = dict(state.active_filters)
     suggestions: list[Suggestion] = []
 
     # A grouped answer's most obvious continuation is the rows behind it.
@@ -408,7 +407,7 @@ def explore(state, row_count: int | None,
     # question, not a refinement of this one.
     removable = [c for c in in_force if c not in _NOT_GROUPABLE]
     if removable:
-        column = sorted(removable)[0]
+        column = min(removable)
         # A status filter matching the active-first default was never typed by
         # the user, so "remove your filter" describes it from the system's
         # point of view. Dropping it is the only way out of the default, which
@@ -418,7 +417,7 @@ def explore(state, row_count: int | None,
         defaulted = _default_values().get(column)
         was_defaulted = (
             defaulted is not None
-            and f"'{defaulted}'" in (in_force_predicates.get(column) or "")
+            and f"'{defaulted}'" in (state.active_filters.get(column) or "")
         )
         label = (
             f"Show every {column_phrase(column)}, not just {defaulted.lower()}"
@@ -478,6 +477,8 @@ def apply_action(state, action: Action) -> str:
     written here is provisional in exactly the way the rest of the pipeline
     expects: update_state overwrites it from whatever query actually ran.
     """
+    if action.type in _NEEDS_FIELD and not action.field:
+        raise ValueError("action needs a field")
     label = column_phrase(action.field)
 
     if action.type in ("add_filter", "replace_filter"):
@@ -581,13 +582,15 @@ def clarification_followup(text: str, model_options: list[str] | None = None,
     readings = [o for o in (model_options or [])
                 if not names_a_database_object(o)]
 
+    question = " ".join(text.split())
+
     # Same cutoff as the enum path below, for the same reason.
     if readings and len(readings) <= 8:
         token = _interpretation_token()
         return FollowUp(
             type="clarification",
             reason="ambiguous_interpretation",
-            question=" ".join(text.split()),
+            question=question,
             suggestions=[
                 Suggestion(id=f"interpretation_{i + 1}", label=option,
                            action=None, ref=f"{token}.{i + 1}")
@@ -611,7 +614,7 @@ def clarification_followup(text: str, model_options: list[str] | None = None,
         return FollowUp(
             type="clarification",
             reason="unknown_value",
-            question=" ".join(text.split()),
+            question=question,
             suggestions=[
                 Suggestion(
                     id=f"filter_{_slug(column)}_{_value_id(value)}",
@@ -626,7 +629,7 @@ def clarification_followup(text: str, model_options: list[str] | None = None,
     return FollowUp(
         type="clarification",
         reason="ambiguous_request",
-        question=" ".join(text.split()),
+        question=question,
         suggestions=[],
     )
 
@@ -637,11 +640,11 @@ NO_FOLLOWUP = FollowUp(type="none", reason="answer_complete", question="",
                        suggestions=[], allow_free_text=True)
 
 
-def next_questions(state, row_count: int | None,
+def next_questions(row_count: int | None,
                    model_next: list[str] | None = None) -> FollowUp | None:
     """The model's follow-up questions, as chips.
 
-    Same gates the registry path applies, for the same reasons: an empty result
+    The same row-count gate the registry path applies: an empty result
     has nothing to explore, and one suggestion is not a choice.
 
     Each carries no action. Choosing one sends its text as an ordinary
@@ -689,7 +692,7 @@ def decide(state, row_count: int | None, clarification: str | None,
     # Kept as the fallback rather than replaced: a reply that carries no
     # suggestions, and every reply written before this field existed, still
     # gets the registry's.
-    suggested = next_questions(state, row_count, model_next)
+    suggested = next_questions(row_count, model_next)
     if suggested is not None:
         return suggested
     return explore(state, row_count, result) or NO_FOLLOWUP
@@ -796,10 +799,10 @@ def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
     Only ever offered against readings the model itself numbered in prose. Two
     reasons, and both are load-bearing.
 
-    Gazetteer candidates are not positionally answerable. The gazetteer is not
-    deduplicated, so "Show the AR_YD items" offers five candidates of which two
-    pairs are the same string -- asking someone to distinguish option 2 from
-    option 3 when both read AR_YD_Shirting is not a question with an answer.
+    Gazetteer candidates are not positionally answerable. "Show the AR_YD
+    items" offers names that differ only in case (AR_YD_Shirting and
+    AR_YD_SHIRTING) -- asking someone to tell option 2 from option 3 by
+    number when they read alike is not a question with an answer.
 
     And a bare number means nothing on its own. Asked to choose between listing
     and grouping, a user once replied "3" and the turn came back as LIMIT 3. A
@@ -816,6 +819,12 @@ def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
     return _chosen_value(pending.suggestions[index - 1])
 
 
+def _candidate_tokens(text: str) -> list[str]:
+    """Tokens that could name an entity, longest first."""
+    return [t for t in sorted(_CANDIDATE_TOKEN.findall(text), key=len, reverse=True)
+            if t.lower() not in _NOT_AN_ENTITY]
+
+
 def _resume(original_question: str, chosen: str) -> str:
     """The original question with the choice written into it.
 
@@ -824,9 +833,8 @@ def _resume(original_question: str, chosen: str) -> str:
     a partial form of the choice -- which is always so for a reading, since a
     reading is a sentence rather than a name -- the choice is appended instead.
     """
-    for token in sorted(_CANDIDATE_TOKEN.findall(original_question),
-                        key=len, reverse=True):
-        if token.lower() in _NOT_AN_ENTITY or token == chosen:
+    for token in _candidate_tokens(original_question):
+        if token == chosen:
             continue
         if _is_partial_name(token, chosen):
             return original_question.replace(token, chosen)
