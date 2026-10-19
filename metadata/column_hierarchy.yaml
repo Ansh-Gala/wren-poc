@@ -84,8 +84,10 @@ tables:
     - is_initiative_delayed
     - task_reopen_at
     - task_display_status
+    - tms_initiative_flat
     - business_unit
     - initiative_ref_id
+    - tms_task_flat
     - instant_closer
     - is_followup
     - initiative_color
