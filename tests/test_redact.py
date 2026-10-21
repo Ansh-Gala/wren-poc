@@ -394,17 +394,32 @@ def test_a_clarification_chip_keeps_its_ref():
 
 # ---------------------------------------------------- model failures --
 
+@pytest.mark.parametrize("raw", [
+    "Failed to authenticate: OAuth session expired and could not be refreshed",
+    "Error code: 401 - invalid x-api-key",
+    "prompt is too long: 210000 tokens",
+    "Claude CLI timed out after 500s",
+    "Error code: 503 - upstream unavailable",
+    "something nobody foresaw",
+])
+def test_a_model_failure_shows_the_real_error(raw):
+    """It names no table, column or query, so the reader sees it as it is."""
+    assert safe_error(raw) == raw
+
+
+def test_the_real_error_is_shown_on_one_line():
+    assert safe_error("claude exited 1: first\n  second") == "claude exited 1: first second"
+
+
 @pytest.mark.parametrize("raw,starts", [
     ("OPENAI_API_KEY is not set.", "Authentication failed"),
-    ("Error code: 401 - invalid x-api-key", "Authentication failed"),
     ("Error code: 429 - rate_limit_error", "Too many requests"),
     ("overloaded_error: Overloaded", "Too many requests"),
-    ("prompt is too long: 210000 tokens", "This request is too large"),
-    ("Claude CLI timed out after 500s", "The AI service is temporarily unavailable"),
-    ("Error code: 503 - upstream unavailable", "The AI service is temporarily unavailable"),
+    ("context_length_exceeded", "This request is too large"),
 ])
-def test_a_model_failure_says_what_kind_it_was(raw, starts):
-    """Drupal's Redactor::BY_PROVIDER: no sqlstate, so the message decides."""
+def test_a_model_failure_that_looks_like_a_name_says_what_kind_it_was(raw, starts):
+    """Drupal's Redactor::BY_PROVIDER: the real text has a snake_case word,
+    so it is replaced, and the message decides by what."""
     assert safe_error(raw).startswith(starts)
 
 
@@ -414,5 +429,5 @@ def test_a_database_failure_is_judged_by_its_sqlstate_not_its_words():
     assert message.startswith("That question took too long")
 
 
-def test_an_unrecognised_model_failure_gets_the_general_sentence():
-    assert safe_error("something nobody foresaw").startswith("I couldn't process")
+def test_an_unrecognised_failure_that_names_a_table_gets_the_general_sentence():
+    assert safe_error("KeyError: 'tms_task_flat'").startswith("I couldn't process")

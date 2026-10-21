@@ -162,6 +162,16 @@ def test_parse_stream_json_marks_error_results():
     assert run.error == "error_max_turns"
 
 
+def test_parse_stream_json_takes_the_reason_from_result():
+    """The CLI's auth failure says subtype "success"; the reason is in result."""
+    run = parse_stream_json(
+        '{"type":"result","is_error":true,"subtype":"success",'
+        '"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}'
+    )
+    assert not run.ok
+    assert run.error == "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+
 def test_parse_stream_json_on_empty_output():
     run = parse_stream_json("")
     assert not run.ok

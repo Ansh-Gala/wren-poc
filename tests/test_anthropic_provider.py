@@ -91,17 +91,14 @@ def test_a_refusal_is_a_failure_not_an_empty_answer(monkeypatch):
     assert not run.ok and "declined" in run.error
 
 
-@pytest.mark.parametrize("status,starts", [
-    (401, "Authentication failed"), (429, "Too many requests"),
-    (503, "The AI service is temporarily unavailable"),
-])
-def test_an_http_failure_says_what_kind_it_was(monkeypatch, status, starts):
+@pytest.mark.parametrize("status", [401, 429, 503])
+def test_an_http_failure_shows_the_real_error(monkeypatch, status):
     response = httpx2.Response(status, request=httpx2.Request("POST", "https://api.anthropic.com"))
     error = anthropic.APIStatusError("upstream said no", response=response, body=None)
     monkeypatch.setattr(ap, "_client", lambda s: FakeClient(error=error))
     run = ap.AnthropicProvider().ask("q", None, "strict", SETTINGS)
     assert not run.ok and run.error.startswith(f"anthropic returned HTTP {status}")
-    assert safe_error(run.error).startswith(starts)
+    assert safe_error(run.error) == run.error
 
 
 def test_no_key_is_said_before_anything_is_sent(monkeypatch):

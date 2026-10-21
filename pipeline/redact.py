@@ -2,10 +2,11 @@
 
 One job, the boundary rather than the pipeline: what may reach the browser.
 
-``safe_error`` replaces a database error with something a person can act on.
-Replacing rather than scrubbing: a raw message names the table and column it
-failed on, and any attempt to filter identifiers out of free text will miss a
-form nobody anticipated. Discarding the message entirely cannot.
+``safe_error`` shows the real error when it names no table, column or query,
+and replaces it otherwise. Replacing rather than scrubbing: a raw message names
+the table and column it failed on, and any attempt to filter identifiers out of
+free text will miss a form nobody anticipated. Discarding the message entirely
+cannot.
 
 ``public_response`` drops every field that exists for debugging. It is a
 whitelist, so a field added to the response later is hidden until someone
@@ -189,7 +190,11 @@ _CLARIFY_FALLBACK = ("Could you tell me a bit more about what you are looking "
 
 
 def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
-    """A database error as something worth showing a user.
+    """An error as something worth showing a user.
+
+    The real message, unless it names a table, a column or a query. A known
+    sqlstate keeps its own sentence: it already says the reason in plain
+    words, and the raw text names what the query failed on.
 
     ``None`` in, ``None`` out: a turn that did not fail has no error, and
     inventing one would put a banner on a successful answer.
@@ -198,11 +203,16 @@ def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
         return None
     # A sqlstate means PostgreSQL refused; the code is the reliable signal.
     code = (sqlstate or "").strip()
+    if code in _BY_SQLSTATE:
+        return _sqlstate_message(code)
+    raw = " ".join(str(error).split())
+    if not names_a_database_object(raw):
+        return raw
     if code:
-        return _sqlstate_message(code) if code in _BY_SQLSTATE else GENERIC
+        return GENERIC
     # No sqlstate: a model or network failure, and only the message remains.
     for pattern, message in _BY_PROVIDER:
-        if pattern.search(str(error)):
+        if pattern.search(raw):
             return message
     return GENERIC
 

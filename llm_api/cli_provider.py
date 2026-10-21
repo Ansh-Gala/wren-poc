@@ -199,7 +199,9 @@ def apply_result_event(run: ClaudeRun, event: dict) -> None:
     run.cache_write_tokens = int(usage.get("cache_creation_input_tokens") or 0)
     run.ok = not event.get("is_error", False)
     if event.get("is_error"):
-        run.error = event.get("subtype") or "claude reported an error"
+        # The reason is in `result`; `subtype` can say "success" even here.
+        run.error = (event.get("result") or event.get("subtype")
+                     or "claude reported an error")
 
 
 def parse_stream_json(stdout: str) -> ClaudeRun:

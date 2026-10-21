@@ -876,7 +876,8 @@ _LOOPBACK = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 def failure(exc: Exception, what: str) -> tuple[int, dict]:
     """A failed turn as a status and a body, the same for /ask and the stream.
 
-    Log, not wire: the raw message names tables and columns.
+    The real message reaches the wire only when safe_error finds no table,
+    column or query in it.
     """
     if isinstance(exc, TokenLimitError):
         return 429, {"error": str(exc), "code": TOKEN_LIMIT_CODE}
@@ -887,7 +888,7 @@ def failure(exc: Exception, what: str) -> tuple[int, dict]:
     if isinstance(exc, ValueError):
         return 400, {"error": str(exc)}
     log.exception(what)
-    return 500, {"error": GENERIC}
+    return 500, {"error": safe_error(str(exc)) or GENERIC}
 
 
 def _local_client(address: str) -> bool:
