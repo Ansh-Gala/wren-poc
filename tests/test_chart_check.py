@@ -12,6 +12,10 @@ from datetime import date, timedelta
 import pytest
 
 from pipeline import chart_check as cc
+from pipeline.metadata import profile
+
+# The product's colours, as the server passes them.
+PALETTE = profile().colours()
 
 
 def source(columns, rows, truncated=False):
@@ -19,9 +23,9 @@ def source(columns, rows, truncated=False):
     return {"columns": columns, "rows": rows, "truncated": truncated}
 
 
-def build(chart, src):
+def build(chart, src, palette=None):
     labels = [c.replace("_", " ").title() for c in src.get("columns") or []]
-    return cc.build(chart, src, labels)
+    return cc.build(chart, src, labels, PALETTE if palette is None else palette)
 
 
 def reason(chart, src):
@@ -309,15 +313,20 @@ def test_a_pivoted_line_is_still_checked_for_time_order():
 
 # ------------------------------------------------------------------ colours --
 
-GREEN, RED = cc.STATUS_COLOURS["green"], cc.STATUS_COLOURS["red"]
+HEX = {name: colour["hex"] for name, colour in PALETTE.items()}
+GREEN, RED = HEX["green"], HEX["red"]
 BY_COLOUR = source(["colour", "n"], [["Green", "4"], ["Yellow", "2"], ["Red", "1"],
                                      ["Black", "3"], ["White", "1"]])
 
 
 def test_status_slices_take_the_status_colours():
     assert build(PIE, BY_COLOUR)["chart"]["colors"] == {
-        "Green": GREEN, "Yellow": cc.STATUS_COLOURS["yellow"], "Red": RED,
-        "Black": cc.STATUS_COLOURS["black"], "White": cc.STATUS_COLOURS["white"]}
+        "Green": GREEN, "Yellow": HEX["yellow"], "Red": RED,
+        "Black": HEX["black"], "White": HEX["white"]}
+
+
+def test_a_product_with_no_colours_has_no_status_colours():
+    assert "colors" not in build(PIE, BY_COLOUR, palette={})["chart"]
 
 
 def test_status_series_take_the_status_colours():
@@ -345,8 +354,8 @@ def test_the_apps_colour_codes_take_the_status_colours():
     src = source(["initiative_color", "n"], [["a_bl", "9"], ["d_gr", "5"], ["E_WH", "1"],
                                              ["b_re", "1"], ["c_ye", "1"]])
     assert build({**PIE, "category": "initiative_color"}, src)["chart"]["colors"] == {
-        "a_bl": cc.STATUS_COLOURS["black"], "d_gr": GREEN, "E_WH": cc.STATUS_COLOURS["white"],
-        "b_re": RED, "c_ye": cc.STATUS_COLOURS["yellow"]}
+        "a_bl": HEX["black"], "d_gr": GREEN, "E_WH": HEX["white"],
+        "b_re": RED, "c_ye": HEX["yellow"]}
 
 
 @pytest.mark.parametrize("labels", [["xa_bl", "a_bl2"], ["Red or Black", "Other"],

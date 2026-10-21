@@ -52,22 +52,18 @@ _EXPLICIT_RESET = re.compile(
 )
 
 
-# The words that name a subject rather than describe one. Taken from the table
-# names (tms_initiative_flat, tms_task_flat, tms_user_flat, tms_role_flat)
-# and from the entity_alias business rule, which declares Initiative, Order, BO
-# and Business Object to be one entity. "item" is the word the benchmark and
-# the users actually use for a business object.
-#
-# The remaining tables were missing, and their absence was not theoretical:
-# "what attachments do we have?" named no subject this set recognised, so it
-# read as a follow-up and was answered with the previous question's filters
-# still in force -- a narrower answer than the question, and nothing
-# downstream could tell.
-_SUBJECT_NOUNS = frozenset("""
-task tasks item items object objects initiative initiatives order orders
-user users role roles workflow workflows department departments
-attachment attachments issue issues attribute attributes
-""".split())
+def subject_nouns() -> frozenset[str]:
+    """The words that name a subject rather than describe one: every entity's
+    words in product.yaml.
+
+    A missing one is not theoretical: "what attachments do we have?" once
+    named no subject this set recognised, so it read as a follow-up and was
+    answered with the previous question's filters still in force -- a
+    narrower answer than the question, and nothing downstream could tell.
+    """
+    from pipeline.metadata import profile
+
+    return frozenset(profile().subject_nouns())
 
 # A request that stands on its own opens with a verb of asking...
 _REQUEST_VERB = re.compile(
@@ -95,14 +91,22 @@ def is_complete_request(question: str) -> bool:
     present is the turn independent of what came before -- which is what makes
     it safe to drop the filters that were narrowing the previous subject.
     """
-    if not any(token in _SUBJECT_NOUNS for token in _tokens(question)):
+    nouns = subject_nouns()
+    if not any(token in nouns for token in _tokens(question)):
         return False
     return bool(_REQUEST_VERB.match(question) or _WH_OPENER.match(question))
 
 
 def _is_identifier_column(column: str) -> bool:
-    """Whether a column name identifies a row rather than describes one."""
-    return (column or "").lower().endswith("_id")
+    """Whether a column name identifies a row rather than describes one: an
+    entity's id in product.yaml under any of its names, or a name with one of
+    its id_column_endings."""
+    from pipeline.metadata import profile
+
+    column = (column or "").lower()
+    if column in {name.lower() for name in profile().identifier_columns()}:
+        return True
+    return any(ending and column.endswith(ending.lower()) for ending in profile().id_endings())
 
 
 def _equality_value(column: str, predicate: str) -> str | None:
@@ -132,15 +136,15 @@ def _subject_noun(column: str) -> str:
     business_object_id, so a thread that met both would otherwise rename the
     thing under discussion partway through -- "initiative 123" on one turn and
     "BO 123" on the next, which reads as two subjects and compares as a change
-    of subject. The
-    synonyms are already named in pipeline.initiative; this reuses that list
-    rather than starting a second one.
+    of subject. So an entity's id, under any of its names in product.yaml,
+    is called by the entity's name.
     """
-    from pipeline.initiative import _ID_COLUMNS
     from pipeline.labels import column_phrase
+    from pipeline.metadata import profile
 
-    if (column or "").lower() in _ID_COLUMNS:
-        return "initiative"
+    record = profile().record_name(column)
+    if record is not None:
+        return record
     words = [w for w in column_phrase(column).split(" ") if w]
     while words and words[-1].lower() in ("id", "ref"):
         words.pop()
@@ -154,10 +158,9 @@ def _subject_from(filters: dict) -> dict | None:
     one thing" looks like in SQL. Only an equality counts: ``task_id IN
     (1,2,3)`` is a list, and browsing a list must not pin the thread to a row.
 
-    Identifier-ness is decided by the name, not by a list of known columns.
-    Every identifier in this schema ends in _id, so the naming convention is a
-    stronger rule than any enumeration and it covers a table nobody has added
-    yet.
+    Identifier-ness is decided by product.yaml: the entities' ids, and the
+    id_column_endings naming convention, which covers a table nobody has
+    added yet.
 
     The first match wins when a query names two. That is a guess, and a wrong
     one is visible and removable in the context bar rather than silent.
@@ -724,7 +727,7 @@ says a restriction was removed, it has been removed.
 RECENT QUESTIONS are the user's own words, oldest first, ending with the one
 before this. They are there for the times the summary is not enough -- "no, I
 meant the previous one", "remove the date filter", "same thing but for
-orders". Read them to work out what the current question refers to. Do NOT
+{other_subject}". Read them to work out what the current question refers to. Do NOT
 treat them as still in force: a filter someone asked for four questions ago is
 only still wanted if the CONTEXT says so.
 

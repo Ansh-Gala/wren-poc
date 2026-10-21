@@ -1,0 +1,291 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Chatbot product profile (product.yaml)",
+  "description": "The product this chatbot answers about, in business terms: the things people ask about, how a click opens them, who the user is, and the product's words. ProductProfile checks the file against this schema when it loads.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "entities", "prompt"],
+  "properties": {
+    "version": {
+      "description": "The layout of this file. Always 2.",
+      "type": "integer",
+      "enum": [2]
+    },
+    "entities": {
+      "description": "The things people ask about, one block each, keyed by the name a person uses for one of them (\"ticket\", \"order\").",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["words"],
+        "properties": {
+          "table": {
+            "description": "The view that holds one row per thing. Leave out when it has none of its own.",
+            "type": "string"
+          },
+          "words": {
+            "description": "Every word a person types to name it, singular and plural. A question naming one of these starts a new topic instead of continuing the last one.",
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "id": {
+            "description": "The column holding its id. A filter on it pins the conversation to one record, named \"<entity> <id>\".",
+            "type": "string"
+          },
+          "same_id_as": {
+            "description": "Other names the same id goes by in an answer, such as an old column name.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "title": {
+            "description": "The readable column a person clicks instead of the id.",
+            "type": "string"
+          },
+          "reference": {
+            "description": "The column holding its business reference number.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The column naming its type, whose values entity_gazetteer.yaml lists under `entity`. A half-typed type gets a \"which one did you mean?\" question. One entity at most.",
+            "type": "string"
+          },
+          "colour": {
+            "description": "The column holding its colour code (see `colours`). Every row that carries its id gets a colour strip. One entity at most; needs `table` and `id`.",
+            "type": "string"
+          },
+          "default_rule": {
+            "description": "The business rule applied when nobody asks otherwise, such as open-only. Must be a single table.column = 'value' rule.",
+            "type": "string"
+          },
+          "open": {
+            "description": "What a click does. Exactly one of url, download or popup.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "url": {
+                "description": "A page opened in a new tab. {id} is replaced by the value of `id`.",
+                "type": "string"
+              },
+              "encode": {
+                "description": "How {id} is written into the url: plain (default) or base64.",
+                "type": "string",
+                "enum": ["plain", "base64"]
+              },
+              "download": {
+                "description": "The column holding a stored file's address; the click downloads it.",
+                "type": "string"
+              },
+              "popup": {
+                "description": "The name of a popup the app already has, such as BODetails.",
+                "type": "string"
+              },
+              "param": {
+                "description": "The name the popup expects the id under.",
+                "type": "string"
+              },
+              "button": {
+                "description": "Show the click as a button with this text in its own column, instead of making a cell clickable.",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "id_column_endings": {
+      "description": "Any column whose name ends like this holds an id, even when no entity names it.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "columns": {
+      "description": "Facts about one column, keyed by its name.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "unit": {
+            "description": "A unit the name does not say; the heading becomes \"<name> (<unit>)\".",
+            "type": "string"
+          },
+          "group": {
+            "description": "false: never suggest grouping by it, such as free text that differs on every row.",
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "headings": {
+      "description": "How column names become headings.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "words": {
+          "description": "A word inside any column name, and how to write it (sla: SLA).",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "phrases": {
+          "description": "Part of a column name replaced before it is split into words.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "suggestions": {
+      "description": "The follow-up chips offered after an answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sort_by": {
+          "description": "Parts of column names worth sorting by, most interesting first.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "spelling": {
+      "description": "The spelling repair of questions.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "never_correct": {
+          "description": "Ordinary words one letter from a database word, which must never be changed into it.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "colours": {
+      "description": "Colours with a meaning, keyed by name. A chart label naming one is drawn in it.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hex"],
+        "properties": {
+          "code": {
+            "description": "How the data stores it, and the CSS class the app paints the colour strip with.",
+            "type": "string"
+          },
+          "hex": {
+            "description": "How a chart draws it.",
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          }
+        }
+      }
+    },
+    "users": {
+      "description": "Who the signed-in user is. The Drupal user id is the product's user id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "id", "name"],
+      "properties": {
+        "table": { "description": "The view with one row per user.", "type": "string" },
+        "id": { "description": "Its user id column.", "type": "string" },
+        "name": { "description": "Its user name column.", "type": "string" },
+        "departments": {
+          "description": "Where a user's departments are. Leave out when the product has none.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["table", "user_id", "name"],
+          "properties": {
+            "table": { "description": "The view with one row per user and department.", "type": "string" },
+            "user_id": { "description": "Its user id column.", "type": "string" },
+            "name": { "description": "Its department name column.", "type": "string" }
+          }
+        }
+      }
+    },
+    "messages": {
+      "description": "Product words in the messages a user sees when a query fails.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "narrow_hint": {
+          "description": "\"Try narrowing it down -- <narrow_hint>.\"",
+          "type": "string"
+        },
+        "subjects": {
+          "description": "\"Try asking about <subjects>.\"",
+          "type": "string"
+        }
+      }
+    },
+    "welcome": {
+      "description": "What an empty chat shows.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "description": "The line under the greeting.", "type": "string" },
+        "starters": {
+          "description": "Example questions, one card each.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question"],
+            "properties": {
+              "question": { "type": "string" },
+              "hint": { "type": "string" },
+              "icon": {
+                "description": "One of the app's starter icons.",
+                "type": "string",
+                "enum": ["delayed", "issues", "pending"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "prompt": {
+      "description": "The product's words inside the fixed system prompt. Each value is pasted into a sentence exactly as written; read the sentence with the value in it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["database", "rule_terms", "two_level_example", "chart_scope", "explanation_example", "clarify_example", "other_subject"],
+      "properties": {
+        "database": {
+          "description": "\"You generate read-only SQL for a PostgreSQL <database> analytics database.\"",
+          "type": "string",
+          "minLength": 1
+        },
+        "rule_terms": {
+          "description": "\"...the business rules -- they define what terms like <rule_terms> mean in SQL.\"",
+          "type": "string",
+          "minLength": 1
+        },
+        "two_level_example": {
+          "description": "\"...when a question asks for counts at two levels at once -- <two_level_example>. Joining the child table repeats every parent row...\"",
+          "type": "string",
+          "minLength": 1
+        },
+        "colour_note": {
+          "description": "A sentence of its own after \"Leave it out when no colour means anything.\" Empty or absent: none.",
+          "type": "string"
+        },
+        "chart_scope": {
+          "description": "\"It must cover exactly the same records as the main query: keep every filter, <chart_scope> and rule the main query applies...\"",
+          "type": "string",
+          "minLength": 1
+        },
+        "explanation_example": {
+          "description": "Whole sentences after \"...do not describe how the query works.\": a good explanation, then the SQL-like one to avoid.",
+          "type": "string",
+          "minLength": 1
+        },
+        "clarify_example": {
+          "description": "Whole sentences after \"Never name a table or a column in it, never quote SQL.\": a good clarifying question, then the one to avoid.",
+          "type": "string",
+          "minLength": 1
+        },
+        "other_subject": {
+          "description": "\"...\\\"same thing but for <other_subject>\\\".\"",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

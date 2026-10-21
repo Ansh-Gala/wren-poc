@@ -1,0 +1,157 @@
+# yaml-language-server: $schema=./product.schema.json
+#
+# The product this chatbot answers about, in business terms.
+#
+# The other four files describe the data (tables, rules, examples). This one
+# describes the product: the things people ask about, what a click on one
+# opens, who the signed-in user is, and the product's own words. A new product
+# replaces this file; the code stays the same.
+#
+# product.schema.json says what every key means; editors that read the first
+# line show it on hover and underline mistakes. The file is checked when it
+# loads: an unknown key, a missing table or column, or a rule that does not
+# exist stops the chatbot with a message naming it, instead of quietly turning
+# a feature off. Run scripts/check_product.php to check it before deploying.
+# A site module can change any of it through
+# hook_vf_sql_chatbot_product_alter().
+version: 2
+
+# The things people ask about, one block each.
+entities:
+  initiative:
+    table: tms_initiative_flat
+    # Initiative, Business Object, Order and BO are one thing; "item" is
+    # what users call it.
+    words: [initiative, initiatives, order, orders, item, items, object, objects]
+    id: initiative_id
+    # tms_task_flat's old name for initiative_id.
+    same_id_as: [bo_id]
+    reference: initiative_ref_id
+    kind: initiative_type
+    colour: initiative_color
+    default_rule: active_initiative
+    open: {popup: BODetails, param: bo_id}
+  task:
+    table: tms_task_flat
+    words: [task, tasks]
+    id: task_id
+    default_rule: open_task
+    open: {url: '/ticket-details/{id}?destination=/tickets', button: View Task}
+  issue:
+    table: tms_task_issue_flat
+    words: [issue, issues]
+    id: issue_id
+    title: issue_title
+    open: {url: '/view-issue/{id}?destination=/issues', encode: base64}
+  attachment:
+    table: tms_attachment_flat
+    words: [attachment, attachments]
+    title: file_name
+    open: {download: file_uri}
+  user:
+    table: tms_user_flat
+    words: [user, users]
+    id: user_id
+  role:
+    table: tms_role_flat
+    words: [role, roles]
+  department:
+    table: tms_user_department_flat
+    words: [department, departments]
+  workflow:
+    words: [workflow, workflows]
+  # Its table, tms_initiative_attributes_flat, comes from the Arvind site
+  # module.
+  attribute:
+    words: [attribute, attributes]
+  report:
+    table: vf_report_task_summary
+    words: [report, reports, summary, summaries]
+
+id_column_endings: [_id]
+
+columns:
+  # The view converts it to KB.
+  file_size: {unit: KB}
+  # Free text: one group per row.
+  workflow_code: {group: false}
+  workflow_name: {group: false}
+
+headings:
+  words:
+    sla: SLA
+    # BO is what the rest of the UI calls Initiative.
+    bo: Initiative
+    moq: MOQ
+    csbd: CSBD
+    pi: PI
+    won: WON
+  phrases:
+    # A phrase, not a word: "business" alone stays (business_unit).
+    business_object: initiative
+    # The task's readable name; "display" only tells it apart from the code.
+    task_display_name: task_name
+
+suggestions:
+  sort_by: [due, delay, elapsed, remaining, created]
+
+spelling:
+  # Enum values put "mail" and "costing" in the vocabulary, one edit from
+  # "email" and "closing".
+  never_correct: [
+    email, attachment, attachments, file, files, comment, comments,
+    issue, issues, closing, opening, raising, raised, uploaded,
+    uploading,
+  ]
+
+colours:
+  green: {code: d_gr, hex: '#7dbd18'}
+  yellow: {code: c_ye, hex: '#ffd42c'}
+  red: {code: b_re, hex: '#f91223'}
+  black: {code: a_bl, hex: '#1f1d1d'}
+  # Drawn grey: white vanishes on the chart.
+  white: {code: e_wh, hex: '#cccccc'}
+
+users:
+  table: tms_user_flat
+  id: user_id
+  name: user_name
+  departments:
+    table: tms_user_department_flat
+    user_id: user_id
+    name: department
+
+messages:
+  narrow_hint: a single business unit, or a shorter date range
+  subjects: tasks, initiatives, users, departments or roles
+
+welcome:
+  text: Ask about your tasks, issues, initiatives or attachments.
+  starters:
+    - {question: Show me my delayed tasks, hint: Running past their SLA, icon: delayed}
+    - {question: Show me all issues, hint: Raised against any task, icon: issues}
+    - {question: Show me my pending tasks, hint: Still open and assigned to you, icon: pending}
+
+# Pasted into the fixed prompt sentences exactly as written. The TMS values
+# keep their line breaks so the prompt stays byte-identical to the Python
+# one; a new product can write each on one line.
+prompt:
+  database: TMS
+  rule_terms: '"active", "open", "delayed" and "my tasks"'
+  two_level_example: |-
+    "each
+       workflow with its order count, and for each order the task count"
+  colour_note: |-
+    Task and Initiative colours
+       (Green, Yellow, Red, Black, White) are always drawn in their own.
+  chart_scope: |-
+    person, department, initiative,
+       status, date range
+  explanation_example: |-
+    Write "the open tasks for the Sales department this month, with the status
+       of each", not "task_status = 'open' AND task_department = 'Sales'".
+  clarify_example: |-
+    Write "which department did you mean?", not "task_department is
+       ambiguous"; write "I could not find an initiative with that number", not
+       "initiative_ref_id does not match".
+  other_subject: orders

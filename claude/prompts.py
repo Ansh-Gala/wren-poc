@@ -116,11 +116,11 @@ def build_user_prompt(
 # Used with `--system-prompt` (replaces the default rather than appending) and
 # `--tools ""` (drops the built-in tool definitions from context).
 
-LEAN_SYSTEM_PROMPT = """You generate read-only SQL for a PostgreSQL TMS analytics database.
+LEAN_SYSTEM_PROMPT = """You generate read-only SQL for a PostgreSQL {database} analytics database.
 
 Use ONLY the tables and columns in the schema below. Never invent a table or
 column name. Apply the business rules exactly as written -- they define what
-terms like "active", "open", "delayed" and "my tasks" mean in SQL.
+terms like {rule_terms} mean in SQL.
 
 Rules for your answer:
 
@@ -131,8 +131,7 @@ Rules for your answer:
    COUNT(DISTINCT x) OVER (PARTITION BY y) is rejected outright, whatever the
    query around it looks like.
 
-   That matters when a question asks for counts at two levels at once -- "each
-   workflow with its order count, and for each order the task count". Joining
+   That matters when a question asks for counts at two levels at once -- {two_level_example}. Joining
    the child table repeats every parent row, so each count needs DISTINCT to
    undo the repetition, and showing a parent-level total beside child rows
    wants a window function. The two cannot be combined, so aggregate in a
@@ -202,15 +201,13 @@ Rules for your answer:
    "colors" is optional: a colour for a value column, a series value or a
    category, by its name, when the colour carries meaning -- red for
    delayed or overdue, green for done or on time, grey for not set. Leave
-   it out when no colour means anything. Task and Initiative colours
-   (Green, Yellow, Red, Black, White) are always drawn in their own.
+   it out when no colour means anything.{colour_note}
 
    "sql" inside "chart" is optional: leave it out when the rows of your main
    query already have that shape. When they do not -- the user wants the
    records listed and also drawn as totals, say -- write a second query here
    that returns the chart's rows. It must cover exactly the same records as
-   the main query: keep every filter, person, department, initiative,
-   status, date range and rule the main query applies, including those from
+   the main query: keep every filter, {chart_scope} and rule the main query applies, including those from
    earlier turns. It may group, count or reshape them, never widen them.
    Leave the chart out when nothing numeric is worth drawing.
 
@@ -221,8 +218,7 @@ Rules for your answer:
    the database: what you understood the question to be asking, which reading
    of it you settled on, and what the answer will show. Never name a table or
    a column in it, never quote SQL, and do not describe how the query works.
-   Write "the open tasks for the Sales department this month, with the status
-   of each", not "task_status = 'open' AND task_department = 'Sales'".
+   {explanation_example}
 
 5. If the question cannot be answered from the schema above -- it names a
    column, table or value that does not exist, or asks for a measure the data
@@ -235,9 +231,7 @@ Rules for your answer:
 
    "clarify" is written for a reader who does not know the database, exactly
    as "explanation" is. Never name a table or a column in it, never quote
-   SQL. Write "which department did you mean?", not "task_department is
-   ambiguous"; write "I could not find an initiative with that number", not
-   "initiative_ref_id does not match".
+   SQL. {clarify_example}
 
    "about" is optional: when the ambiguity is about one particular column,
    name that column here. It is read to look up the real values worth
@@ -339,6 +333,28 @@ def _render_examples(doc: dict) -> str:
     return chr(10).join(out)
 
 
+_PROMPT_WORDS = ("database", "rule_terms", "two_level_example", "chart_scope",
+                 "explanation_example", "clarify_example", "other_subject")
+
+
+def _with_product_words(text: str) -> str:
+    """The {placeholders} in the fixed prompt text, from product.yaml's prompt.
+
+    Pasted as written: the TMS values carry their own line breaks and
+    indentation, which keeps the prompt byte-identical to the PHP port's.
+    Replaced one by one rather than with str.format, because the prompt's
+    JSON examples are full of braces.
+    """
+    from pipeline import metadata
+
+    profile = metadata.profile()
+    for key in _PROMPT_WORDS:
+        text = text.replace("{" + key + "}", profile.prompt_word(key))
+    # A sentence of its own, so no colour note leaves no stray space.
+    note = profile.prompt_word("colour_note")
+    return text.replace("{colour_note}", " " + note if note else "")
+
+
 @lru_cache(maxsize=1)
 def build_lean_system_prompt() -> str:
     """LEAN_SYSTEM_PROMPT with metadata/*.yaml inlined, rendered compactly.
@@ -358,8 +374,7 @@ def build_lean_system_prompt() -> str:
     from pipeline.context import CONTEXT_GUIDANCE
 
     return (
-        LEAN_SYSTEM_PROMPT
-        + CONTEXT_GUIDANCE
+        _with_product_words(LEAN_SYSTEM_PROMPT + CONTEXT_GUIDANCE)
         + chr(10) + "# SCHEMA" + chr(10) + chr(10)
         + _render_schema(metadata.schema())
         + _render_rules(metadata.rules())

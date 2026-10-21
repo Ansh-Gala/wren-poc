@@ -61,9 +61,8 @@ are were was been being have has had does did doing
 can could will would shall should may might must
 about per versus mine yours ours everything something anything nothing
 overdue urgent pending done outstanding
-email attachment attachments file files comment comments issue issues
-closing opening raising raised uploaded uploading
 """.split())
+# The product's own such words are product.yaml's spelling.never_correct.
 
 
 # Prefixes that change what a word means. "unassigned" is two letters from
@@ -269,14 +268,17 @@ def _starts_a_sentence(question: str, start: int) -> bool:
 
 def normalize(question: str) -> Normalized:
     """Rewrite obvious misspellings of schema terms, leaving everything else."""
+    from pipeline.metadata import profile
+
     vocabulary = load_vocabulary()
+    query_words = _QUERY_WORDS | frozenset(profile().never_correct())
     repairs: list[Repair] = []
     quoted = _quoted_spans(question)
 
     def repair_token(match: re.Match) -> str:
         token = match.group(0)
         lowered = token.lower()
-        if len(lowered) < _MIN_LENGTH or lowered in _QUERY_WORDS:
+        if len(lowered) < _MIN_LENGTH or lowered in query_words:
             return token
 
         # Inside quotes the user is naming a value. Repairing there is a guess

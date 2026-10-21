@@ -72,27 +72,18 @@ NOTES = {
     "other": "No chart could be drawn for this answer.",
 }
 
-# The colours a Task or Initiative colour is always drawn in: the app's own.
-# White is drawn grey, as the workflow screens draw it.
-STATUS_COLOURS = {
-    "green": "#7dbd18",
-    "yellow": "#ffd42c",
-    "red": "#f91223",
-    "black": "#1f1d1d",
-    "white": "#cccccc",
-}
-# The app's colour codes, as tms_task_flat.initiative_color holds them.
-STATUS_CODES = {"a_bl": "black", "b_re": "red", "c_ye": "yellow", "d_gr": "green",
-                "e_wh": "white"}
+# The colours a label is always drawn in come from product.yaml's `colours`:
+# name -> {code, hex}, passed to build() as `palette`.
 # PHP's trim(): only these characters, not every Unicode space.
 PHP_TRIM = " \t\n\r\0\x0b"
 
-_STATUS_WORD = re.compile(r"\b(" + "|".join(STATUS_COLOURS) + r")\b", re.IGNORECASE)
 
-
-def build(chart: dict, source: dict, labels: list) -> dict:
+def build(chart: dict, source: dict, labels: list, palette: dict | None = None) -> dict:
     """The chart, or why not: {"chart": built or None, "reason": "ok" or why},
-    plus "note" when the type drawn is not the type asked for."""
+    plus "note" when the type drawn is not the type asked for.
+
+    ``palette`` is product.yaml's `colours`: a label naming one is always
+    drawn in its hex, beating any colour the model chose."""
     columns, rows = source.get("columns"), source.get("rows")
     if not _is_list_of_rows(columns, rows) or not isinstance(labels, list) \
             or len(labels) != len(columns):
@@ -179,7 +170,7 @@ def build(chart: dict, source: dict, labels: list) -> dict:
     if len(values) == 1 and kind not in TIME_TYPES:
         for label in categories:
             names[label] = [label]
-    colours = _colours(chart.get("colors") or {}, names)
+    colours = _colours(chart.get("colors") or {}, names, palette or {})
     if colours:
         built["colors"] = colours
 
@@ -205,14 +196,14 @@ def note(reason: str | None) -> str | None:
 
 # ------------------------------------------------------------------ helpers
 
-def _colours(wanted: dict, names: dict) -> dict:
-    """The colour of each drawn label that has one. A Task or Initiative
-    colour always gets its own; any other label gets the model's, if it gave
-    one under any of the label's names."""
+def _colours(wanted: dict, names: dict, palette: dict) -> dict:
+    """The colour of each drawn label that has one. A product colour always
+    gets its own; any other label gets the model's, if it gave one under any
+    of the label's names."""
     wanted = {str(k).lower(): v for k, v in wanted.items()}
     colours = {}
     for label, keys in names.items():
-        colour = _status_colour(str(label))
+        colour = _status_colour(str(label), palette)
         for key in keys:
             colour = colour if colour is not None else wanted.get(str(key).lower())
         if colour is not None:
@@ -220,14 +211,24 @@ def _colours(wanted: dict, names: dict) -> dict:
     return colours
 
 
-def _status_colour(label: str) -> str | None:
+def _status_colour(label: str, palette: dict) -> str | None:
     """A whole word only, so "Reduced" is not red, and exactly one: a label
     naming two colours is not either of them. Or a whole colour code."""
+    hex_by_name, name_by_code = {}, {}
+    for name, colour in palette.items():
+        if not isinstance(colour, dict) or "hex" not in colour:
+            continue
+        hex_by_name[str(name).lower()] = str(colour["hex"])
+        if "code" in colour:
+            name_by_code[str(colour["code"]).lower()] = str(name).lower()
+    if not hex_by_name:
+        return None
     code = label.strip(PHP_TRIM).lower()
-    if code in STATUS_CODES:
-        return STATUS_COLOURS[STATUS_CODES[code]]
-    found = {m.lower() for m in _STATUS_WORD.findall(label)}
-    return STATUS_COLOURS[found.pop()] if len(found) == 1 else None
+    if code in name_by_code:
+        return hex_by_name[name_by_code[code]]
+    words = re.compile(r"\b(" + "|".join(re.escape(n) for n in hex_by_name) + r")\b", re.IGNORECASE)
+    found = {m.lower() for m in words.findall(label)}
+    return hex_by_name[found.pop()] if len(found) == 1 else None
 
 
 def _pivot(chart: dict, columns: list, rows: list, labels: list):

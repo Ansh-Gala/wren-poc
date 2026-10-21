@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.initiative import (
-    colour_class, colours_from_result, indices, with_initiative)
+    colour_class, colours_from_result, indices, with_row_colour)
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -64,8 +64,8 @@ def test_a_projected_colour_is_used_and_nothing_is_queried():
               "rows": [[112, "Black"], [109, "Green"], [131, "White"]]}
     # settings=None would make a lookup impossible, so a colour coming back
     # proves the projected value was used.
-    out = with_initiative(result, result["columns"], None)
-    assert out["colours"] == {"112": "a_bl", "109": "d_gr", "131": "e_wh"}
+    out = with_row_colour(result, result["columns"], None)
+    assert out["row_colour"] == {"at": 0, "colours": {"112": "a_bl", "109": "d_gr", "131": "e_wh"}}
 
 
 def test_rows_whose_colour_is_unknown_are_left_out_of_the_map():
@@ -75,27 +75,26 @@ def test_rows_whose_colour_is_unknown_are_left_out_of_the_map():
     assert colours_from_result(result, indices(result["columns"])) == {"112": "a_bl"}
 
 
-def test_an_aggregate_gets_positions_but_no_colours_and_no_lookup():
-    """21 of 73 benchmark turns are aggregates. There is nothing to open."""
+def test_an_aggregate_gets_no_colours_and_no_lookup():
+    """21 of 73 benchmark turns are aggregates. There is no record to colour."""
     result = {"columns": ["initiative_status", "count"],
               "rows": [["Active", 196], ["Closed", 95]]}
-    out = with_initiative(result, result["columns"], None)
-    assert out["initiative"] == {"id": None, "ref_id": None, "colour": None}
-    assert "colours" not in out
+    out = with_row_colour(result, result["columns"], None)
+    assert out == result
 
 
 def test_the_rows_and_columns_are_never_touched():
     result = {"columns": ["initiative_id", "initiative_color"],
               "rows": [[112, "Black"]], "row_count": 1}
-    out = with_initiative(result, result["columns"], None)
+    out = with_row_colour(result, result["columns"], None)
     assert out["columns"] == result["columns"]
     assert out["rows"] == result["rows"]
     assert out["row_count"] == 1
 
 
 def test_a_clarification_passes_through():
-    assert with_initiative(None, None, None) is None
-    assert with_initiative("not a dict", None, None) == "not a dict"
+    assert with_row_colour(None, None, None) is None
+    assert with_row_colour("not a dict", None, None) == "not a dict"
 
 
 def test_the_lookup_is_skipped_when_there_is_no_initiative_id():
@@ -106,8 +105,8 @@ def test_the_lookup_is_skipped_when_there_is_no_initiative_id():
         statement_timeout_ms = 5000
 
     result = {"columns": ["task_id"], "rows": [[1]]}
-    out = with_initiative(result, result["columns"], Boom())
-    assert "colours" not in out
+    out = with_row_colour(result, result["columns"], Boom())
+    assert "row_colour" not in out
     assert calls == []
 
 
@@ -121,10 +120,9 @@ def test_a_failed_lookup_loses_the_bar_and_not_the_answer(monkeypatch):
                                     error="boom", sqlstate="57014"))
 
     result = {"columns": ["initiative_id"], "rows": [[112]]}
-    out = initiative.with_initiative(result, result["columns"],
+    out = initiative.with_row_colour(result, result["columns"],
                                      type("S", (), {"statement_timeout_ms": 5000})())
-    assert out["initiative"]["id"] == 0
-    assert "colours" not in out
+    assert "row_colour" not in out
     assert out["rows"] == [[112]]
 
 
@@ -143,15 +141,15 @@ def test_only_integers_reach_the_lookup_sql(monkeypatch):
     monkeypatch.setattr("database.connection.run_readonly", capture)
     result = {"columns": ["initiative_id"],
               "rows": [[112], ["'; DROP TABLE x --"], [None], [109], [112]]}
-    out = initiative.with_initiative(
+    out = initiative.with_row_colour(
         result, result["columns"], type("S", (), {"statement_timeout_ms": 5000})())
 
     assert "DROP" not in seen["sql"]
     assert "IN (112, 109)" in seen["sql"], seen["sql"]
-    assert out["colours"] == {"112": "a_bl"}
+    assert out["row_colour"] == {"at": 0, "colours": {"112": "a_bl"}}
 
 
-def test_both_new_fields_survive_debug_being_off():
+def test_the_row_colour_survives_debug_being_off():
     """The whole point. redact.public_response is a whitelist, so a field not
     named there is dropped -- which is how column_order shipped inert."""
     from pipeline.redact import public_response
@@ -163,12 +161,10 @@ def test_both_new_fields_survive_debug_being_off():
             "columns": ["initiative_id"],
             "column_labels": ["Initiative Id"],
             "rows": [[112]], "row_count": 1, "truncated": False,
-            "initiative": {"id": 0, "ref_id": None, "colour": None},
-            "colours": {"112": "a_bl"},
+            "row_colour": {"at": 0, "colours": {"112": "a_bl"}},
         },
     }
     out = public_response(full)
-    assert out["result"]["initiative"] == {"id": 0, "ref_id": None, "colour": None}
-    assert out["result"]["colours"] == {"112": "a_bl"}
+    assert out["result"]["row_colour"] == {"at": 0, "colours": {"112": "a_bl"}}
     assert "columns" not in out["result"]
     assert "generated_sql" not in out

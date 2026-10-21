@@ -27,14 +27,13 @@ from typing import Any
 GENERIC = ("I couldn't process that request. Please try rephrasing your "
            "question.")
 
-_NOT_FOUND = ("I couldn't find the information you asked for. Try asking about "
-              "tasks, initiatives, users, departments or roles.")
+_NOT_FOUND = "I couldn't find the information you asked for.{subjects}"
 _READ_ONLY = "I can only read data, so I can't make that change."
 
+# {narrow_hint} and {subjects} are product.yaml's messages.
 _BY_SQLSTATE = {
     # query_canceled: the statement timeout fired.
-    "57014": ("That question took too long to answer. Try narrowing it down -- "
-              "a single business unit, or a shorter date range."),
+    "57014": "That question took too long to answer. Try narrowing it down{narrow_hint}.",
     # undefined_column / undefined_table: the query named something absent.
     "42703": _NOT_FOUND,
     "42P01": _NOT_FOUND,
@@ -43,6 +42,18 @@ _BY_SQLSTATE = {
     "42501": _READ_ONLY,
     "55000": _READ_ONLY,
 }
+
+
+def _sqlstate_message(code: str) -> str:
+    """_BY_SQLSTATE's sentence for a code, with the product's words filled in.
+    A product without them gets the sentence without the hint."""
+    from pipeline.metadata import profile
+
+    hint = profile().message("narrow_hint")
+    subjects = profile().message("subjects")
+    return (_BY_SQLSTATE[code]
+            .replace("{narrow_hint}", f" -- {hint}" if hint else "")
+            .replace("{subjects}", f" Try asking about {subjects}." if subjects else ""))
 
 # A person-readable reason per kind of model failure. There is no code to
 # switch on, only the message text, which carries the HTTP status. First match
@@ -92,21 +103,21 @@ _PUBLIC_FIELDS = frozenset({
 # -- withholding them would leave the presentation metadata reaching only the
 # people who least need it.
 #
-# initiative and colours are public for the same reason and on the same terms.
-# `initiative` is three integer positions into the result; `colours` maps an
-# initiative id -- a number the reader is about to be shown anyway, and which
-# the details dialog takes -- to a CSS class code such as "a_bl". Neither
-# carries a column name, a table name or any SQL. Without them here the grid
-# would draw no colour bar and open no dialog when debug is off, which is the
-# mode it actually runs in: exactly how the column hierarchy shipped inert.
+# row_colour is public for the same reason and on the same terms: an integer
+# position into the result, and a map from a record id -- a number the reader
+# is about to be shown anyway -- to a CSS class code such as "a_bl". It
+# carries no column name, table name or SQL. Without it here the grid would
+# draw no colour bar when debug is off, which is the mode it actually runs in:
+# exactly how the column hierarchy shipped inert.
 #
-# links is positions too: which cell opens an issue, a file or a task.
+# links is positions too, with product.yaml's own url, popup name or button
+# text: which cell opens what, and how.
 # freshness and chart_note are fixed sentences, naming no table or column.
 # download is two integers: the chat and the question's number in it. chart
 # is labels and numbers only, trimmed to _PUBLIC_CHART_FIELDS.
 _PUBLIC_RESULT_FIELDS = frozenset({"column_labels", "rows", "row_count", "truncated",
                                    "column_order", "hidden_columns",
-                                   "initiative", "colours", "grouping",
+                                   "row_colour", "grouping",
                                    "links", "freshness", "download",
                                    "chart", "chart_note"})
 
@@ -188,7 +199,7 @@ def safe_error(error: str | None, sqlstate: str | None = None) -> str | None:
     # A sqlstate means PostgreSQL refused; the code is the reliable signal.
     code = (sqlstate or "").strip()
     if code:
-        return _BY_SQLSTATE.get(code, GENERIC)
+        return _sqlstate_message(code) if code in _BY_SQLSTATE else GENERIC
     # No sqlstate: a model or network failure, and only the message remains.
     for pattern, message in _BY_PROVIDER:
         if pattern.search(str(error)):

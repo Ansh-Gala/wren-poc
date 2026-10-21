@@ -47,11 +47,11 @@ from pipeline.followup import ACTION_TYPES, Action, apply_action, label_for_ref
 from pipeline.freshness import freshness_note
 from pipeline.identity_provider import resolve_identity
 from pipeline.lean_runner import TurnResult, load_gazetteer, logged, run_turn
-from pipeline.initiative import with_initiative
+from pipeline.initiative import with_row_colour
 from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
-from pipeline.metadata import enable_site_metadata
+from pipeline.metadata import enable_site_metadata, profile
 from pipeline.models import Session
 from pipeline.redact import (
     GENERIC, names_a_database_object, public_response, safe_error, safe_explanation,
@@ -207,7 +207,7 @@ def chart_for(r: TurnResult, result) -> tuple[dict | None, str | None, str | Non
         source = with_column_labels(r.chart_result)
     else:
         source = result
-    built = build_chart(chart, source, source.get("column_labels") or [])
+    built = build_chart(chart, source, source.get("column_labels") or [], profile().colours())
     drawn = built["chart"]
     if drawn is not None and "title" in drawn and names_a_database_object(drawn["title"]):
         drawn = {k: v for k, v in drawn.items() if k != "title"}
@@ -221,13 +221,13 @@ def _no_chart(reason: str) -> tuple[None, str, str | None]:
 def shown_result(actual_result, settings) -> dict | None:
     """The rows a reader is shown, with the fields the grid reads beside them.
 
-    At most SHOWN_ROWS rows; row_count keeps the whole count. with_initiative
+    At most SHOWN_ROWS rows; row_count keeps the whole count. with_row_colour
     and with_links are innermost: both need the real column names, and every
     wrapper around them only adds fields.
     """
     shown = first_rows(actual_result, SHOWN_ROWS)
     columns = (shown or {}).get("columns")
-    return with_column_labels(with_links(with_initiative(shown, columns, settings), columns))
+    return with_column_labels(with_links(with_row_colour(shown, columns, settings), columns))
 
 
 def with_freshness(result, settings, ran: list) -> dict | None:
@@ -723,7 +723,18 @@ def present_chats(store: ChatStore, limit, offset) -> dict:
               "turn_count": int(row["turn_count"]),
               **chat_dates(row)}
              for row in store.list_chats(limit, offset)]
-    return {"chats": chats, "total": store.count_chats()}
+    return {"chats": chats, "total": store.count_chats(), "welcome": welcome()}
+
+
+def welcome() -> dict | None:
+    """product.yaml's welcome: the line under the greeting and the starter
+    questions. None when product.yaml has problems: they are logged, and must
+    not cost the user their chat history. Drupal's ChatsResource::welcome."""
+    try:
+        return profile().welcome()
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        return None
 
 
 def _inert_followup(followup) -> dict:
@@ -1058,7 +1069,7 @@ def get_chats(request: Request, limit: str = "50", offset: str = "0"):
     """This user's chats, newest activity first."""
     def listed(store: ChatStore, user_id: int) -> Response:
         if not store.enabled:
-            return _json(200, {"chats": [], "total": 0})
+            return _json(200, {"chats": [], "total": 0, "welcome": welcome()})
         return _json(200, present_chats(store, limit, offset))
     return _closing(_chats_call, request, "I couldn't load your chat history.", listed)
 

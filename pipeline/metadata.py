@@ -1,8 +1,9 @@
 """The metadata/*.yaml files, plus what a site adds to them.
 
-The five files in metadata/ are the common ones. They stay byte-identical to
-the Drupal module's copies, and the parity harness compares the prompt built
-from them byte for byte.
+The files in metadata/ are the common ones: the five that describe the data,
+and product.yaml (with product.schema.json) that describes the product. They
+stay byte-identical to the Drupal module's copies, and the parity harness
+compares the prompt built from them byte for byte.
 
 A site adds what is its own -- today the Arvind site's Initiative attributes
 -- from metadata/site/. The Drupal site module does the same through
@@ -40,6 +41,7 @@ def enable_site_metadata(directory: Path = SITE_DIR) -> None:
     global _site_dir
     _site_dir = Path(directory)
     _parsed.cache_clear()
+    profile.cache_clear()
 
 
 def document(name: str) -> dict:
@@ -80,6 +82,30 @@ def column_hierarchy() -> dict:
 def pairs() -> dict:
     """question_sql_pairs.yaml. A site adds no examples."""
     return document("question_sql_pairs.yaml")
+
+
+def product() -> dict:
+    """product.yaml: the product in business terms. A site adds nothing to
+    it, as the Drupal site module implements no product hook. Read it through
+    profile()."""
+    return document("product.yaml")
+
+
+@lru_cache(maxsize=1)
+def profile():
+    """product.yaml, checked, as the lists the pipeline reads.
+
+    A file with problems stops here, naming each one, rather than quietly
+    turning a feature off. Checked against schema(), so it is rebuilt when
+    enable_site_metadata() adds the site's tables.
+    """
+    from pipeline.product_profile import ProductProfile
+
+    built = ProductProfile(product())
+    problems = built.problems()
+    if problems:
+        raise RuntimeError("product.yaml has problems:\n- " + "\n- ".join(problems))
+    return built
 
 
 def _site(name: str) -> dict:

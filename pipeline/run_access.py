@@ -63,8 +63,16 @@ def user_roles(settings, user_id: int) -> frozenset[str] | None:
     if hit is not None and time.monotonic() - hit[0] < CACHE_TTL_SECONDS:
         return hit[1]
     # user_id is an int, so it is safe in the text: run_readonly binds nothing.
+    # The user table is product.yaml's, and plain names only.
+    from pipeline.identity_provider import _plain
+    from pipeline.metadata import profile
+
+    users = profile().users()
+    table, id_column = _plain(users, "table"), _plain(users, "id")
+    if not table or not id_column:
+        return None
     known = run_readonly(
-        settings, f"SELECT 1 FROM tms_user_flat WHERE user_id = {int(user_id)} LIMIT 1")
+        settings, f"SELECT 1 FROM {table} WHERE {id_column} = {int(user_id)} LIMIT 1")
     granted = run_readonly(
         settings, "SELECT roles_target_id FROM vf_user__roles"
         f" WHERE entity_id = {int(user_id)} AND bundle = 'user' AND deleted = 0")

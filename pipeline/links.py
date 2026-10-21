@@ -1,42 +1,32 @@
-"""Where a row can be followed: the issue it is, the file it holds, its task.
+"""What a row can open: a page, a file, or one of the app's popups.
 
-The same problem `initiative.py` solves, for the two views added on
-16 September 2026. `columns` is stripped from a response when debug is off --
-it holds raw database column names -- so the frontend receives headings and
-rows and no way to tell which cell opens an issue or a file. The positions are
-named here, on the server, where the real column names are still in hand.
+`columns` is stripped from a response when debug is off -- it holds raw
+database column names -- so the frontend receives headings and rows and no
+way to tell which cell opens what. The positions are named here, on the
+server, where the real column names are still in hand.
 
-Two positions per target rather than one, because the cell a person clicks is
-not the cell holding the value:
+One link per product.yaml entity with `open`, when the answer projected what
+it opens:
 
-  * an issue is opened by its id, but the readable cell is its title, and a
-    grid of primary keys is not something anyone wants to read;
-  * a file is opened by its uri, but the readable cell is its name, and the
-    uri is hidden by the column hierarchy.
+  value_at  the position of the value opened (the id, or a file address)
+  at        the readable cell made clickable (the title, else the value);
+            absent for a button, which gets a column of its own
+  action    url, download or popup, with url and encode, or popup and
+            param, as product.yaml gives them
+  button    the button's text, for a button
 
-So each target carries `at` -- the cell to make clickable -- and the position
-of the value to follow. When only the value column is projected, `at` falls
-back to it: a result that shows the id and nothing else should still open.
+Two positions rather than one, because the cell a person clicks is not the
+cell holding the value: an issue is opened by its id, but the readable cell is
+its title, and a grid of primary keys is not something anyone wants to read.
+When only the value column is projected, `at` falls back to it.
 
-Everything here is integer positions. Nothing names a column, a table or any
-SQL, so it survives redaction the way the initiative block does.
+Positions and product.yaml's own strings only, naming no table or SQL, so
+they survive redaction.
+
+Ported from the Drupal module's Links.
 """
 
 from __future__ import annotations
-
-# The issue's own identifier. Only one spelling: the view was given this
-# column on 16 September 2026 precisely so a row could be followed.
-_ISSUE_ID_COLUMNS = ("issue_id",)
-# What a person reads instead of the id.
-_ISSUE_LABEL_COLUMNS = ("issue_title",)
-
-# The stored file and the name it is shown under.
-_FILE_URI_COLUMNS = ("file_uri",)
-_FILE_LABEL_COLUMNS = ("file_name",)
-
-# The task's own identifier. One position only: a task opens through its own
-# button, so there is no readable cell to make clickable.
-_TASK_ID_COLUMNS = ("task_id",)
 
 
 def _first(names: list[str], candidates) -> int | None:
@@ -46,36 +36,46 @@ def _first(names: list[str], candidates) -> int | None:
     return None
 
 
-def indices(columns: list[str] | None) -> dict:
-    """Where an issue, a file and a task sit in a result, by position.
+def indices(columns: list[str] | None) -> list[dict]:
+    """The links an answer with these columns carries, in product.yaml order.
 
-    The first occurrence of each wins, matching `initiative.indices`: a result
-    may project one name twice, and the frontend keys its rows by index.
+    The first occurrence of a name wins, matching `initiative.indices`: a
+    result may project one name twice, and the frontend keys its rows by
+    index. A cell takes the first link that claims it.
     """
+    from pipeline.metadata import profile
+
     names = [str(c) for c in (columns or [])]
+    out: list[dict] = []
+    claimed: set[int] = set()
+    for link in profile().links():
+        value_at = _first(names, link["value_columns"])
+        if value_at is None:
+            continue
+        opened = link["open"]
+        item: dict = {"value_at": value_at}
+        if "download" in opened:
+            item["action"] = "download"
+        elif "popup" in opened:
+            item.update(action="popup", popup=str(opened["popup"]), param=str(opened["param"]))
+        else:
+            item.update(action="url", url=str(opened["url"]),
+                        encode=str(opened.get("encode") or "plain"))
 
-    issue_id = _first(names, _ISSUE_ID_COLUMNS)
-    issue_label = _first(names, _ISSUE_LABEL_COLUMNS)
-    file_uri = _first(names, _FILE_URI_COLUMNS)
-    file_label = _first(names, _FILE_LABEL_COLUMNS)
-    task_id = _first(names, _TASK_ID_COLUMNS)
-
-    return {
-        "issue": {
-            "id_at": issue_id,
-            # Click the title where there is one, otherwise the id itself.
-            "at": issue_label if issue_label is not None else issue_id,
-        } if issue_id is not None else None,
-        "file": {
-            "uri_at": file_uri,
-            "at": file_label if file_label is not None else file_uri,
-        } if file_uri is not None else None,
-        "task": {"id_at": task_id} if task_id is not None else None,
-    }
+        if "button" in opened:
+            item["button"] = str(opened["button"])
+        else:
+            label_at = _first(names, link["label_columns"])
+            item["at"] = label_at if label_at is not None else value_at
+            if item["at"] in claimed:
+                continue
+            claimed.add(item["at"])
+        out.append(item)
+    return out
 
 
 def with_links(result, columns: list[str] | None):
-    """A result with the followable positions attached.
+    """A result with what its rows can open attached.
 
     Additive, like every other presentation field: `columns` and `rows` keep
     exactly what PostgreSQL said. Anything that is not a result passes through
@@ -88,9 +88,8 @@ def with_links(result, columns: list[str] | None):
     if not isinstance(result, dict):
         return result
 
-    where = indices(columns)
-    if where["issue"] is None and where["file"] is None and where["task"] is None:
-        # Nothing to follow. Say so by omission rather than by a block of
-        # nulls the frontend would have to pick apart.
+    links = indices(columns)
+    if not links:
+        # Nothing to open. Say so by omission rather than by an empty list.
         return result
-    return {**result, "links": where}
+    return {**result, "links": links}

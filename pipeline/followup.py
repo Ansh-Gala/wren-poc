@@ -143,10 +143,19 @@ def _value_id(value: str) -> str:
 _CANDIDATE_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 
 # Words that look like candidate tokens but never name a business object.
+# Plain English; the words that name a whole subject ("items") are added from
+# product.yaml by _not_an_entity().
 _NOT_AN_ENTITY = frozenset(
-    "show the and for with items item all any are how many what which "
+    "show the and for with all any are how many what which "
     "give me my this that those these them list count total".split()
 )
+
+
+def _not_an_entity() -> frozenset[str]:
+    """_NOT_AN_ENTITY and the words that name a whole subject."""
+    from pipeline.metadata import profile
+
+    return _NOT_AN_ENTITY | frozenset(profile().subject_nouns())
 
 
 def _is_partial_name(token: str, value: str) -> bool:
@@ -181,8 +190,15 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
     """
     from pipeline.context import detect_entity
 
+    from pipeline.metadata import profile
+
     if detect_entity(question, gazetteer) is not None:
         return None  # unambiguous; nothing to ask
+    # The entity's kind column a choice filters; none, and there is nothing
+    # to offer.
+    kind_column = profile().kind_column()
+    if not kind_column:
+        return None
 
     for token in _candidate_tokens(question):
         matches = [v for v in gazetteer if _is_partial_name(token, v)]
@@ -204,7 +220,7 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
                     id=f"set_entity_{_value_id(value)}",
                     label=value,
                     action=Action(type="set_entity",
-                                  field="initiative_type",
+                                  field=kind_column,
                                   operator="=",
                                   value=value),
                 )
@@ -216,14 +232,20 @@ def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
 
 # ------------------------------------------------------------------ schema --
 
-# Columns worth sorting by, most interesting first. Name fragments rather than
-# literal columns so this stays true for both tms_initiative_flat and
-# tms_task_flat without listing either.
-_SORTABLE = ("due", "delay", "elapsed", "remaining", "created")
+def _sortable() -> list[str]:
+    """Columns worth sorting by, most interesting first: name fragments from
+    product.yaml's suggestions.sort_by, so one list fits every table."""
+    from pipeline.metadata import profile
 
-# Never offered as a grouping: the entity column is what the user already
-# chose, and free-text columns produce one group per row.
-_NOT_GROUPABLE = frozenset({"initiative_type", "workflow_code", "workflow_name"})
+    return profile().sort_by()
+
+
+def _not_groupable() -> frozenset[str]:
+    """Never offered as a grouping: the entity's kind column is what the user
+    already chose, and free-text columns produce one group per row."""
+    from pipeline.metadata import profile
+
+    return frozenset(profile().not_groupable())
 
 
 @lru_cache(maxsize=1)
@@ -262,13 +284,16 @@ def _default_values() -> dict[str, str]:
     Read out of the registry rather than written here, so that renaming a
     status value in the rules cannot leave this list quietly wrong. The
     default_to_active policy rule carries no fragment of its own by design --
-    it must not become a togglable filter -- so the values come from the two
-    rules it refers to.
+    it must not become a togglable filter -- so the values come from the
+    rules it refers to, which product.yaml names as entities' default_rule.
     """
+    from pipeline.metadata import profile
+
+    default_rules = set(profile().default_rules())
     return {
         column: value
         for name, _table, column, value in _rule_predicates()
-        if name in ("active_initiative", "open_task")
+        if name in default_rules
     }
 
 
@@ -369,7 +394,7 @@ def explore(state, row_count: int | None,
     # Breaking the answer down, but only if it is not already broken down.
     if not state.active_grouping:
         for column in _enum_columns(table):
-            if column in _NOT_GROUPABLE or column in in_force or column in hidden:
+            if column in _not_groupable() or column in in_force or column in hidden:
                 continue
             # One group is not a breakdown. Only skip on evidence against:
             # _varies returns None when the column was not projected, and that
@@ -385,7 +410,7 @@ def explore(state, row_count: int | None,
 
     # Ordering, once there is a list to order.
     if state.active_sorting is None and state.last_intent == "list":
-        for fragment in _SORTABLE:
+        for fragment in _sortable():
             column = next(
                 (c for c in _columns(table)
                  if fragment in c and c not in hidden
@@ -405,7 +430,7 @@ def explore(state, row_count: int | None,
     # with one suggestion, which is not a choice, so the layer said nothing.
     # The subject is still never offered: dropping that is a different
     # question, not a refinement of this one.
-    removable = [c for c in in_force if c not in _NOT_GROUPABLE]
+    removable = [c for c in in_force if c not in _not_groupable()]
     if removable:
         column = min(removable)
         # A status filter matching the active-first default was never typed by
@@ -822,7 +847,7 @@ def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
 def _candidate_tokens(text: str) -> list[str]:
     """Tokens that could name an entity, longest first."""
     return [t for t in sorted(_CANDIDATE_TOKEN.findall(text), key=len, reverse=True)
-            if t.lower() not in _NOT_AN_ENTITY]
+            if t.lower() not in _not_an_entity()]
 
 
 def _resume(original_question: str, chosen: str) -> str:

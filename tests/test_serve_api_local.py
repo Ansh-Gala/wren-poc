@@ -162,7 +162,10 @@ def test_saved_chats_need_a_user_id_and_the_csv_needs_a_run_role(server, monkeyp
     runtime.settings = SimpleNamespace(history_db_name="", history_db_user="",
                                        chat_table_prefix="py_", run_roles=("ticket_owner",))
     assert client.get("/chats").json()["code"] == "user_id_required"
-    assert client.get("/chats?user_id=7").json() == {"chats": [], "total": 0}
+    from pipeline.metadata import profile
+
+    assert client.get("/chats?user_id=7").json() == {
+        "chats": [], "total": 0, "welcome": profile().welcome()}
 
     import pipeline.run_access as access
     monkeypatch.setattr(access, "user_roles", lambda s, uid: frozenset({"authenticated"}))
