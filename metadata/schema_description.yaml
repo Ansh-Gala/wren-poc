@@ -3,7 +3,6 @@
 # by hand. Descriptions ARE preserved across regeneration, so improving one
 # here is safe; run --check in CI to catch drift from the database.
 data_source: postgres
-catalog: ''
 schema: public
 tables:
   tms_initiative_flat:
@@ -25,9 +24,6 @@ tables:
       business_unit:
         type: VARCHAR
         description: Business unit associated with the Initiative.
-        values:
-        - PVH
-        - unit1
       initiative_type:
         type: VARCHAR
         description: 'Type of the Initiative, e.g. AR_YD_Suiting, AR_NPD_Shirting. This is the canonical
@@ -35,32 +31,9 @@ tables:
           items", filter on this column. Values are case-sensitive and include near-duplicates that are
           genuinely distinct types (AR_YD_Shirting and AR_YD_SHIRTING). Do not substitute workflow_code
           or workflow_name for it.'
-        values:
-        - AR_NPD_Shirting
-        - AR_NPD_Suiting
-        - AR_NPD_YD_SALESPLAN
-        - AR_NPD_YD_SHIRTING
-        - AR_PD_Shirting
-        - AR_PD_Suiting
-        - AR_PRINT_Shirting
-        - AR_PRINT_Suiting
-        - AR_Print_Shirting
-        - AR_Printing_Shirting
-        - AR_SALESPLAN_Shirting
-        - AR_SALESPLAN_Suiting
-        - AR_YD_SHIRTING
-        - AR_YD_Shirting
-        - AR_YD_Suiting
-        - TESTING_MG
-        - test
       initiative_color:
         type: VARCHAR
         description: Priority/color classification of the Initiative.
-        values:
-        - Black
-        - Green
-        - Red
-        - White
       initiative_note:
         type: VARCHAR
         description: Business note or remark associated with the Initiative.
@@ -99,41 +72,13 @@ tables:
         description: 'Code of the workflow attached to the Initiative. NOT a substitute for initiative_type:
           it is NULL for 72 of 307 rows and differs from the type on 75, so filtering on it silently drops
           rows. Use it only when the question is explicitly about the workflow rather than the item type.'
-        values:
-        - AR_NPD_Shirting
-        - AR_NPD_Suiting
-        - AR_PD_Shirting
-        - AR_PD_Suiting
-        - AR_PRINT_Shirting
-        - AR_SALESPLAN_Shirting
-        - AR_SALESPLAN_Suiting
-        - AR_YD_Shirting
-        - AR_YD_Suiting
-        - TESTING_MG
-        - test
       workflow_name:
         type: VARCHAR
         description: Name of the workflow attached to the Initiative. NULL for 72 of 307 rows, and like
           workflow_code not a substitute for initiative_type.
-        values:
-        - AR_NPD_Shirting
-        - AR_NPD_Suiting
-        - AR_PD_Shirting
-        - AR_PD_Suiting
-        - AR_PRINT_Shirting
-        - AR_SALESPLAN_Shirting
-        - AR_SALESPLAN_Suiting
-        - AR_YD_Shirting
-        - AR_YD_Suiting
-        - TESTING_MG
-        - test
       initiative_status:
         type: VARCHAR
         description: Initiative process status, mapped as Active, Closed, or Short Closed.
-        values:
-        - Active
-        - Closed
-        - Short Closed
       initiative_start_date:
         type: TIMESTAMP
         description: Start timestamp of the Initiative process.
@@ -149,8 +94,6 @@ tables:
       short_closed_by:
         type: VARCHAR
         description: User who short-closed the Initiative.
-        values:
-        - WCMS Admin
       short_closed_on:
         type: TIMESTAMP
         description: Timestamp when the Initiative was short-closed.
@@ -207,16 +150,10 @@ tables:
         type: VARCHAR
         description: 'Database status of the task, lowercase. Observed values: ''open'', ''closed''. This
           is the canonical status column -- use it for all filtering, grouping and status breakdowns.'
-        values:
-        - closed
-        - open
       task_display_status:
         type: VARCHAR
         description: Capitalised presentation form of task_status ('Open', 'Closed'), for UI display only.
           Do not filter or group by this column; use task_status.
-        values:
-        - Closed
-        - Open
       is_open_task:
         type: BOOLEAN
         description: Boolean flag, true when the task is open.
@@ -246,36 +183,12 @@ tables:
       assigned_role:
         type: VARCHAR
         description: Role to which the task is assigned.
-        values:
-        - Master Scheduler
-        - admin
-        - central_sales_team
-        - channel_planning_team
-        - design_team
-        - design_team_and_sales_team
-        - developer
-        - planner
-        - sales_team
-        - sourcing_team
-        - testertestertestertestertestertestertestertesterte
-        - wh_team
       task_sub_department:
         type: VARCHAR
         description: Sub-department associated with the task.
       task_department:
         type: VARCHAR
         description: Department associated with the task.
-        values:
-        - Central Sales Team block
-        - Channel Planning team block
-        - Design Team block
-        - Design team and Sales team block
-        - Developer
-        - Master Scheduler
-        - Sales team block
-        - Sourcing Team block
-        - WH team block
-        - planner
       created_at:
         type: TIMESTAMP
         description: Timestamp when the task was created.
@@ -308,27 +221,15 @@ tables:
       is_delayed_open_task:
         type: VARCHAR
         description: '''Yes'' when an open task has breached SLA, else ''Not Applicable''.'
-        values:
-        - Not Applicable
-        - 'Yes'
       is_delayed_closed_task:
         type: VARCHAR
         description: '''Yes'' when a closed task breached SLA, else ''Not Applicable''.'
-        values:
-        - Not Applicable
-        - 'Yes'
       task_sla_status:
         type: VARCHAR
         description: SLA status of the task (e.g. Delayed, On Time).
-        values:
-        - Delayed
-        - On Time
       business_unit:
         type: VARCHAR
         description: Business unit of the parent Initiative.
-        values:
-        - PVH
-        - unit1
       initiative_id:
         type: INTEGER
         description: Foreign key to tms_initiative_flat.initiative_id.
@@ -338,44 +239,17 @@ tables:
       initiative_status:
         type: VARCHAR
         description: Status of the parent Initiative, as text.
-        values:
-        - Active
-        - Closed
-        - Short Closed
       initiative_type:
         type: VARCHAR
         description: Type of the associated Initiative, copied onto the task row so TASKS can be filtered
           by the type of the Initiative they belong to. A question about the items or Initiatives themselves
           -- how many there are, their status -- is about tms_initiative_flat, not this table.
-        values:
-        - AR_NPD_Shirting
-        - AR_NPD_Suiting
-        - AR_NPD_YD_SALESPLAN
-        - AR_NPD_YD_SHIRTING
-        - AR_PD_Shirting
-        - AR_PD_Suiting
-        - AR_PRINT_Shirting
-        - AR_SALESPLAN_Shirting
-        - AR_SALESPLAN_Suiting
-        - AR_YD_SHIRTING
-        - AR_YD_Shirting
-        - AR_YD_Suiting
-        - TESTING_MG
-        - test
       initiative_color:
         type: VARCHAR
         description: Priority/colour of the parent Initiative.
-        values:
-        - a_bl
-        - b_re
-        - d_gr
-        - e_wh
       is_initiative_delayed:
         type: VARCHAR
         description: Indicates whether the parent Initiative is delayed.
-        values:
-        - 'No'
-        - 'Yes'
   tms_user_flat:
     description: Flat TMS user table containing user identity, roles and organizational information.
     primary_key: user_id
@@ -443,31 +317,7 @@ tables:
           view, one row per task.
       tag_name:
         type: VARCHAR
-        description: What the attachment is for, from the tagging configuration, for example 'Costing
-          details and mail copy'. This is the column to filter on when a question names a kind of document.
-        values:
-        - Attach email from sales team
-        - Blend and Merchants final selection
-        - Costing details and mail copied to Sales
-        - Costing files from each vendor
-        - Data base and CAD number
-        - EPI PPI Sheet
-        - Final Excel with EPI PPI
-        - Final sourcing plan
-        - Generated PO
-        - Generated PR
-        - Mail containing updates
-        - Mail to vendors
-        - Mail with Merchants and MOQs
-        - Mail with- Region, Blends, Variety , Shade
-        - Mail/Suggestion sheet
-        - 'Penelope copy of Color pallet '
-        - Priority list
-        - SO number, tech sheet and CAD number
-        - SO number, tech sheet and CAD numbers
-        - Tech sheet
-        - Vendor to merchant list
-        - test attachment 3
+        description: What the attachment is for, from the tagging configuration, for example. This is the column to filter on when a question names a kind of document.
       tag_desc:
         type: VARCHAR
         description: Description of the tag. Empty in this database, '' in every row, so a filter on it
@@ -475,11 +325,6 @@ tables:
       folder_path:
         type: VARCHAR
         description: Storage folder the file was filed under.
-        values:
-        - ArvindRetail/Sales
-        - ArvindRetail/Shirting
-        - ArvindRetail/Suiting
-        - bo_files
       task_names:
         type: VARCHAR
         description: Comma-separated task names the tag applies to. Configuration of the tag, not of this
@@ -488,33 +333,17 @@ tables:
         type: VARCHAR
         description: Comma-separated file extensions the tag permits. Configuration of the tag, not of
           this attachment, so it does not say what this file's extension is. For that, read file_name.
-        values:
-        - msg
-        - pptx,docx,csv,xlsx,jpeg,png,pdf
-        - pptx,docx,csv,xlsx,jpeg,png,pdf,msg,oft,eml,zip
       max_file_size:
         type: VARCHAR
         description: Maximum upload size the tag permits, in bytes, held as text. Configuration of the
           tag. It is not this file's size, which is file_size, and file_size is in KB, so multiply
           file_size by 1024 before comparing the two.
-        values:
-        - '2097152'
-        - '20971520'
       initiative_name:
         type: VARCHAR
         description: Despite its name this holds Initiative TYPE values such as AR_YD_Shirting and AR_NPD_Shirting,
           the same vocabulary as tms_initiative_flat.initiative_type. It is the Initiative type the tag
           applies to, configuration of the tag rather than a name of any one Initiative. To filter attachments
           by the type of their Initiative, join tms_initiative_flat on initiative_id instead.
-        values:
-        - AR_NPD_Shirting
-        - AR_PD_Shirting
-        - AR_PD_Suiting
-        - AR_SALESPLAN_Shirting
-        - AR_SALESPLAN_Suiting
-        - AR_YD_Shirting
-        - AR_YD_Suiting
-        - TESTING_MG
       sequence:
         type: INTEGER
         description: Ordering position of the tag. Empty in this database, 0 in every row, so ordering
@@ -543,8 +372,6 @@ tables:
         description: Constant in this database, 'active' in every row, because the view selects only active
           attachments. A count of active attachments is therefore just a count of rows, and there are
           no inactive ones to find.
-        values:
-        - active
       attachment_created_at:
         type: TIMESTAMP
         description: When the attachment was uploaded.
@@ -573,44 +400,19 @@ tables:
       issue_description:
         type: VARCHAR
         description: Free-text description of the issue.
-        values:
-        - TEST
-        - abc
-        - issue test
-        - issue_desc
       issue_sub_department:
         type: VARCHAR
         description: Sub-department the issue was raised against, resolved from the issue's department
           role.
-        values:
-        - Arvind Retail QA Team
-        - Central Sales Team
-        - Design Team
-        - QA and Design Team
-        - Sales team
-        - Sourcing Team
-        - User Management
       issue_category_name:
         type: VARCHAR
         description: The issue category as a name, for example 'Delay from Vendor'. This is the column
           to filter on when a question names a reason or a category.
-        values:
-        - Delay due to internal training
-        - Delay from Vendor
-        - Delay in Manufacturing
-        - Incorrect format used
-        - Mail not received
-        - Other Issues
-        - Stock Mismatch
       issue_status:
         type: VARCHAR
         description: Issue status. The vocabulary differs from tasks, an issue may be 'resolved' as well
           as 'open' or 'closed', and tms_task_flat.task_status has no such value. A question about resolved
           work means issues, not tasks.
-        values:
-        - closed
-        - open
-        - resolved
       issue_hold_days:
         type: INTEGER
         description: Days the issue was on hold. Empty in this database, 0 in every row, so a filter on
@@ -654,13 +456,6 @@ tables:
       last_comment:
         type: VARCHAR
         description: Text of the most recent comment, or NULL where there are none.
-        values:
-        - Attaching the details of products
-        - Attaching the product details
-        - Fixed the incorrect formatting
-        - cde
-        - resolved
-        - test comment
       last_comment_at:
         type: TIMESTAMP
         description: When the most recent comment was posted. NULL for issues with no comments.
@@ -700,9 +495,6 @@ tables:
       unit:
         type: VARCHAR
         description: Business unit of the Initiative. Empty on Initiative rows.
-        values:
-        - PVH
-        - unit1
       open_green:
         type: INTEGER
         description: Open at the snapshot with colour green. On task rows it counts tasks, on Initiative
@@ -736,22 +528,9 @@ tables:
         type: VARCHAR
         description: Which kind of row this is. NULL for task rows, 'initiative' for Initiative rows.
           Every query filters on it.
-        values:
-        - initiative
       field_1:
         type: VARCHAR
         description: Category of the Initiative.
-        values:
-        - Apparel
-        - Apparel2
-        - Apparel6
-        - Clothing
-        - event01
-        - Heather
-        - Pants
-        - Prints
-        - Shirting
-        - Suiting
       field_2:
         type: VARCHAR
         description: Empty in this database, '' in every row. Do not use it.
@@ -795,10 +574,6 @@ tables:
           the SLA, B2 is 7 to 15 days, B3 is more than 15 days. NULL or a blank means not late. Delayed
           work is TRIM(bucket) IN (''B1'', ''B2'', ''B3''). Lateness comes from this column only, never
           from the colour columns.'
-        values:
-        - B1
-        - B2
-        - B3
       open_white:
         type: INTEGER
         description: Empty in this database, 0 in every row. Do not use it.

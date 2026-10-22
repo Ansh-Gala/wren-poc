@@ -83,33 +83,9 @@ PRIMARY_KEYS = {
     "tms_task_issue_flat": "issue_id",
 }
 
-# Below this many distinct values a column is an enumeration, and listing the
-# values is worth the tokens: without them the model has to guess which column
-# a literal belongs to. Asked for "AR_NPD_YD_SHIRTING items for PVH" it read
-# PVH as a buyer name -- reasonable, since PVH is an apparel group, and wrong,
-# because here PVH is a business_unit. Naming the values settles it.
-MAX_ENUM_VALUES = 12
-
-# Columns that name the *subject* of a question, enumerated however many
-# values they have.
-#
-# The cap above is the right trade for dimensions: not knowing every season
-# makes an answer imprecise. It is the wrong trade for the subject column,
-# where not knowing a value makes the question unanswerable and the model
-# cannot tell "this type does not exist" from "I was not told about it".
-# initiative_type has 17 values, so the cap dropped it, and the model
-# reconstructed the valid set from workflow_code -- which omits four of them,
-# including AR_NPD_YD_SHIRTING, the largest type in the database at 59 rows.
-# Two turns were scored as model failures for that.
-#
-# Raising the cap instead would have cost ~870 tokens and enumerated 24
-# free-text notes and a column of dates-as-strings. This costs ~116.
-# tag_name joined this set on 16 September 2026 for the same reason. It has
-# 22 values, the cap dropped it, and the first suite run showed the model
-# inventing 'Costing details and mail copy' for the real 'Costing details
-# and mail copied to Sales'. A filter on an invented tag returns nothing,
-# and nothing is indistinguishable from a true empty answer.
-ALWAYS_ENUMERATE = frozenset({"initiative_type", "tag_name"})
+# Column values are not listed (since 22 October 2026): the schema holds
+# names, types and descriptions only, and a description names a value
+# where the model must know it.
 
 SQL_TO_MDL = {
     "integer": "INTEGER", "bigint": "BIGINT", "smallint": "INTEGER",
@@ -170,26 +146,8 @@ def main() -> int:
             return set()
         return {c for c, n in zip(columns, r.rows[0]) if n == 0}
 
-    def enum_values(table: str, column: str, dtype: str) -> list[str] | None:
-        """Distinct values, when there are few enough to be an enumeration."""
-        if dtype not in ("character varying", "text"):
-            return None
-        cap = None if column in ALWAYS_ENUMERATE else MAX_ENUM_VALUES
-        q = (
-            f'SELECT DISTINCT "{column}" FROM {table} '
-            f"""WHERE "{column}" IS NOT NULL AND "{column}" <> '' """
-            + (f"LIMIT {cap + 1}" if cap is not None else "")
-        )
-        r = run_readonly(settings, q, settings.statement_timeout_ms)
-        if r.error or not r.rows:
-            return None
-        if cap is not None and len(r.rows) > cap:
-            return None
-        return sorted(str(row[0]) for row in r.rows)
-
     tables_doc: dict = {}
     generated = 0
-    enumerated = [0]
     noted = [0]
     for table in TABLES:
         if table not in live:
@@ -221,12 +179,7 @@ def main() -> int:
             if column in empty and "NULL for every row" not in desc:
                 desc = f"{desc}{EMPTY_NOTE}"
                 noted[0] += 1
-            entry_col = {"type": SQL_TO_MDL.get(dtype, "VARCHAR"), "description": desc}
-            vals = enum_values(table, column, dtype)
-            if vals:
-                entry_col["values"] = vals
-                enumerated[0] += 1
-            cols[column] = entry_col
+            cols[column] = {"type": SQL_TO_MDL.get(dtype, "VARCHAR"), "description": desc}
 
         entry: dict = {}
         entry["description"] = (
@@ -241,7 +194,6 @@ def main() -> int:
 
     doc = {
         "data_source": existing.get("data_source", "postgres"),
-        "catalog": existing.get("catalog", ""),
         "schema": existing.get("schema", "public"),
         "tables": tables_doc,
         "relationships": existing.get("relationships") or [
@@ -281,7 +233,6 @@ def main() -> int:
     print(f"wrote {OUT.relative_to(ROOT)}")
     print(f"  {len(tables_doc)} tables, {total} columns "
           f"({generated} description(s) auto-generated, "
-          f"{enumerated[0]} column(s) with enumerated values, "
           f"{noted[0]} column(s) marked empty)")
     return 0
 

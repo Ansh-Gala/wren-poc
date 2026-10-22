@@ -14,11 +14,10 @@ does not read the schema from the database.
 
 | File | What it holds |
 |---|---|
-| [metadata/schema_description.yaml](metadata/schema_description.yaml) | The tables (views), columns, column types, descriptions, primary keys and allowed values. The relationships start at [line 808](metadata/schema_description.yaml#L808). |
+| [metadata/schema_description.yaml](metadata/schema_description.yaml) | The tables (views), columns, column types, descriptions and primary keys. The relationships start at [line 584](metadata/schema_description.yaml#L584). |
 | [metadata/business_rules.yaml](metadata/business_rules.yaml) | The business rules and the default filters. |
 | [metadata/question_sql_pairs.yaml](metadata/question_sql_pairs.yaml) | Example questions with their correct SQL. |
 | [metadata/column_hierarchy.yaml](metadata/column_hierarchy.yaml) | The column order, the hidden columns and the row groups in the result table. |
-| [metadata/entity_gazetteer.yaml](metadata/entity_gazetteer.yaml) | The names that the chatbot can find in a question. |
 | [metadata/site/](metadata/site/) | The additions for the Arvind site (Initiative attributes). |
 
 The code that reads these files is [pipeline/metadata.py](pipeline/metadata.py):
@@ -29,7 +28,7 @@ The code that reads these files is [pipeline/metadata.py](pipeline/metadata.py):
 - `pairs()` at [line 80](pipeline/metadata.py#L80).
 - `enable_site_metadata()` at [line 33](pipeline/metadata.py#L33). This function adds the `metadata/site/` files.
 
-**Caution:** Keep the five files in `metadata/` the same as the Drupal module
+**Caution:** Keep the four YAML files in `metadata/` the same as the Drupal module
 files, byte for byte. Make each change in Drupal first. Then copy the file.
 
 **Caution:** Keep the `metadata/site/` files with CRLF line ends. The Drupal
