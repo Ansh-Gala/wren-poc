@@ -60,7 +60,7 @@ def turn_status(r) -> str:
     """What happened, from a turn result. Branch order matters: flags are
     False on paths that never set them."""
     # First: a clarification is correct but looks like several failures.
-    if r.preflight_clarified or r.clarification is not None:
+    if r.clarification is not None:
         return CLARIFICATION
     # A timeout counts as a provider failure; the detail stays in metadata.
     if r.generated_sql is None:
@@ -105,7 +105,6 @@ def state_array(state: ConversationState | None) -> dict | None:
     return {
         "active_goal": state.active_goal,
         "active_subject": state.active_subject,
-        "active_entity": state.active_entity,
         "active_tables": list(state.active_tables),
         "active_filters": dict(state.active_filters),
         "active_grouping": list(state.active_grouping),
@@ -372,7 +371,6 @@ def metadata_for(r, question: str, state: ConversationState | None = None) -> st
         "pipeline": {
             "decision": str(r.decision or ""),
             "parse_strategy": str(r.parse_strategy or "none"),
-            "preflight_clarified": bool(r.preflight_clarified),
             "resumed_from": r.resumed_from,
             "resumed_answering": r.resumed_answering,
             # Only when the repair layer actually changed the question.

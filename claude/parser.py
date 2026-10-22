@@ -315,8 +315,8 @@ def parse_options(text: str) -> list[str]:
 
     Only the model can produce these. When it says a question has five
     possible meanings, those meanings exist nowhere in the schema -- they are
-    readings of the sentence, not values in a column -- so the gazetteer has
-    nothing to offer and the user is left retyping one of them by hand.
+    readings of the sentence, not values in a column -- so nothing else can
+    offer them and the user is left retyping one of them by hand.
     """
     return _parse_string_list(text, "options")
 

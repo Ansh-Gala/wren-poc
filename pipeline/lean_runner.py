@@ -21,16 +21,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import yaml
-
 from pipeline.context import (
     ConversationState, _EXPLICIT_RESET, accept_recap, classify_turn,
-    detect_entity, remember_question,
-    is_complete_request, render_context, update_state, without_entity_filters,
+    remember_question, is_complete_request, render_context, update_state,
 )
 from pipeline.identity import CallerIdentity, render_identity
 from pipeline.followup import (
-    FollowUp, clarify_entity, decide, resolve_clarification,
+    FollowUp, decide, resolve_clarification,
 )
 from pipeline.normalize import normalize
 from pipeline.evaluator import (
@@ -61,27 +58,6 @@ log = get_logger("lean_runner")
 # classifier can be reused on turns that have no expected answer.
 _NO_RESULT = QueryResult(columns=[], rows=[], duration_ms=0.0)
 
-GAZETTEER_FILE = Path(__file__).resolve().parents[1] / "metadata" / "entity_gazetteer.yaml"
-
-
-def load_gazetteer(path: Path | None = None) -> list[str]:
-    """Entity values that can end a conversational block.
-
-    Only the 'entity' role is returned. Dimension values such as PVH or Active
-    narrow the current subject; treating them as subjects would reset the
-    block on "what about PVH?", which is precisely the wrong answer.
-    """
-    p = path or GAZETTEER_FILE
-    if not p.exists():
-        log.warning("no gazetteer at %s; topic switching will be disabled", p)
-        return []
-    doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    values: list[str] = []
-    for _, vals in (doc.get("entity") or {}).items():
-        values.extend(vals or [])
-    return values
-
-
 # Ways of saying "not like that". Matched against the question as typed, so
 # the check is over before the model is asked anything.
 _NO_GROUPING = re.compile(
@@ -108,7 +84,6 @@ class TurnResult:
     decision: str = ""
     expected_decision: str | None = None
     decision_match: bool | None = None
-    resolved_entity: str | None = None
 
     expected_sql: str | None = None
     generated_sql: str | None = None
@@ -172,8 +147,6 @@ class TurnResult:
     followup_match: bool | None = None
     expected_action: dict | None = None
     action_match: bool | None = None
-    # True when the clarification was decided without asking the model at all.
-    preflight_clarified: bool = False
     # What the user typed, when this turn was an answer to a question the
     # system asked and was resolved back into the original wording.
     resumed_from: str | None = None
@@ -283,24 +256,6 @@ def _classify_failure(r: TurnResult, expected, actual) -> str:
 #              the one that grows without bound.
 #   state   -- the compact structured state from pipeline.context.
 CONTEXT_MODES = ("none", "history", "state")
-
-
-def _has_expectations(turn: SuiteTurn) -> bool:
-    """Whether this turn came from a suite rather than from a person.
-
-    A benchmark turn always states something: the SQL it should produce, or --
-    when there is no valid SQL answer -- the behaviour it should choose
-    instead. A question typed into the console states neither, and scoring it
-    against the defaults would report defects nobody observed.
-
-    expect_columns counts as a statement of its own: a turn may name the
-    columns its answer must carry without naming the SQL, because more than
-    one query is often right and only the projection is really being asked
-    about.
-    """
-    return (turn.expected_sql is not None
-            or turn.expect_behavior != "sql"
-            or bool(turn.expect_columns))
 
 
 def _action_matches(followup: FollowUp, expected: dict | None) -> bool | None:
@@ -626,7 +581,6 @@ def _repair(
 def run_turn(
     turn: SuiteTurn,
     state: ConversationState,
-    gazetteer: list[str],
     settings: Settings,
     mcp_config_path: Path,
     privacy_mode: str,
@@ -706,12 +660,11 @@ def run_turn(
             unresolved = pending
 
     # 1. Decide how this turn relates to the block, before asking anything.
-    decision, entity = classify_turn(question, state, gazetteer)
+    decision = classify_turn(question, state)
     if resumed is not None:
         # The resumed text is the original question, so it starts a block in
         # its own right; naming it separately keeps the resumption visible.
         decision = "clarification_response"
-        entity = detect_entity(question, gazetteer)
     # A reply to a question the system asked is an answer, not a new topic --
     # unless the user ignored the question and asked something whole instead,
     # which they are entitled to do.
@@ -743,19 +696,14 @@ def run_turn(
         state.forget_history()
         r.context_reset = True
 
-    r.decision, r.resolved_entity = decision, entity
+    r.decision = decision
     if turn.expect_decision is not None:
         r.decision_match = decision == turn.expect_decision
 
-    # 2. The context block. A rebase keeps the shape of the question before it
-    #    but drops the old subject's filters; every other decision renders the
-    #    state as update_state left it.
+    # 2. The context block: the state as update_state left it.
     if context_mode in ("none", "history"):
         context = ""          # history: the provider replays session.turns
     else:
-        if decision == "rebase":
-            state.active_filters = without_entity_filters(state)
-            state.active_entity = entity
         context = render_context(state)
     # Who is asking rides at the top of the same block, on every turn --
     # including the first, which has no conversation context at all. It is not
@@ -777,38 +725,6 @@ def run_turn(
         # in state mode that would double-count, and in none mode it would
         # defeat the point of the baseline.
         session.turns = []
-
-    # 2b. Some questions can be settled without asking at all. "Show the AR_YD
-    #     items" names no type that exists, but three of them start with
-    #     AR_YD, and the gazetteer knows which three. Asking the model to pick
-    #     invites it to pick one; asking the user costs nothing and is right.
-    if followup_mode:
-        preflight = clarify_entity(question, gazetteer)
-        if preflight is not None:
-            r.preflight_clarified = True
-            r.followup_type, r.followup = preflight.type, preflight.to_dict()
-            r.clarification = preflight.question
-            if turn.expect_followup is not None:
-                r.followup_match = preflight.type == turn.expect_followup
-            r.action_match = _action_matches(preflight, turn.expect_action)
-            if not _has_expectations(turn):
-                # A real question, asked by a person. Clarifying is the system
-                # working; scoring it against expect_behavior's "sql" default
-                # would paint its best behaviour as a failure.
-                r.result_match = r.semantic_match = None
-            elif turn.expect_behavior in ("clarify", "zero_or_clarify"):
-                r.behavior_match = r.result_match = r.semantic_match = True
-            else:
-                r.behavior_match = False
-                r.failure_category = "SHOULD_NOT_HAVE_CLARIFIED"
-            update_state(state, question, None, None, entity, decision)
-            session.turns.append(Turn(index=turn.turn_index, question=question,
-                                      generated_sql=None))
-            # After update_state, which resets the block and would clear it.
-            state.pending_clarification = preflight
-            state.pending_question = question
-            r.latency_ms = (time.perf_counter() - started) * 1000
-            return r
 
     # 3. Ask.
     provider = get_provider(settings)
@@ -920,7 +836,7 @@ def run_turn(
         else:
             r.behavior_match = r.result_match = False
             r.failure_category = "PROMPT_ERROR"
-        update_state(state, question, parsed.sql, None, entity, decision)
+        update_state(state, question, parsed.sql, None, decision)
         session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=parsed.sql))
         _attach_followup(r, turn, state, None, followup_mode)
@@ -933,7 +849,7 @@ def run_turn(
         if not r.behavior_match:
             r.failure_category = ("HALLUCINATION" if not r.schema_grounded
                                   else "SHOULD_HAVE_CLARIFIED")
-        update_state(state, question, None, None, entity, decision)
+        update_state(state, question, None, None, decision)
         session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=None))
         _attach_followup(r, turn, state, None, followup_mode)
@@ -1112,7 +1028,6 @@ def run_turn(
         question,
         parsed.sql or turn.expected_sql,
         len(actual.rows) if actual is not None and actual.ok else None,
-        entity,
         decision,
     )
     # After update_state, which is what sets the goal from the question that
@@ -1175,15 +1090,13 @@ def run_suite(
     # instead, which is the same thing a request does, from a different source.
     identity = CallerIdentity(settings.benchmark_user_id,
                               settings.benchmark_user_name)
-    gazetteer = load_gazetteer()
-    log.info("gazetteer: %d entity value(s)", len(gazetteer))
 
     results: list[TurnResult] = []
     for conv in conversations:
         state = ConversationState()
         session = Session(session_id=conv.id, turns=[])
         for turn in conv.turns:
-            r = run_turn(turn, state, gazetteer, settings,
+            r = run_turn(turn, state, settings,
                          mcp_config_path, privacy_mode, session,
                          context_mode=context_mode,
                          followup_mode=followup_mode,

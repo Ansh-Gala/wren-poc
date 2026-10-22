@@ -146,7 +146,7 @@ questions:
         The hard case. Eleven turns of state -- status, colour, sort, limit --
         must all be dropped. Anything that leaks shows up immediately: 22 is
         correct, and any smaller number means a filter survived the switch.
-      expect_decision: switch
+      expect_decision: new_block
       expected_sql: |
         SELECT initiative_id, initiative_ref_id, initiative_status
         FROM tms_initiative_flat

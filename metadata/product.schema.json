@@ -47,7 +47,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "The column naming its type, whose values entity_gazetteer.yaml lists under `entity`. A half-typed type gets a \"which one did you mean?\" question. One entity at most.",
+            "description": "The column naming its type. Never offered as a grouping. One entity at most.",
             "type": "string"
           },
           "colour": {

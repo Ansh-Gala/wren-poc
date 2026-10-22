@@ -39,13 +39,11 @@
 
      {
        // -------------------------------------------------- what it decided
-       "decision":             "new_block | follow_up | switch | rebase |
-                                clarification_response",
+       "decision":             "new_block | follow_up | clarification_response",
        "question":             "only the active ones",       // as typed
        "normalized_question":  "only the active ones",       // after repair
        "repairs":              [{original, corrected, kind}],
        "resumed_from":         null,   // set when this answered a clarification
-       "preflight_clarified":  false,  // decided without calling the model
 
        // ------------------------------------------------------- the query
        "generated_sql":        "SELECT ...",   // null if it asked instead
@@ -97,14 +95,14 @@
        "followup": {
          "follow_up_required": true,
          "type":     "clarification | exploration | none",
-         "reason":   "ambiguous_entity | unknown_value | ambiguous_request |
-                      useful_next_actions",
-         "question": "Which AR_YD type did you mean?",
+         "reason":   "unknown_value | ambiguous_interpretation |
+                      ambiguous_request | useful_next_actions",
+         "question": "Which SLA status did you mean?",
          "suggestions": [
-           { "id": "set_entity_AR_YD_Suiting",
-             "label": "AR_YD_Suiting",
-             "action": {"type": "set_entity", "field": "business_object_type",
-                        "operator": "=", "value": "AR_YD_Suiting"} }
+           { "id": "filter_task_sla_status_Delayed",
+             "label": "Delayed",
+             "action": {"type": "add_filter", "field": "task_sla_status",
+                        "operator": "=", "value": "Delayed"} }
          ],
          "allow_free_text": true
        },
@@ -285,7 +283,6 @@ const API = (() => {
       normalized_question: r.normalized_question || r.question || "",
       repairs: r.repairs || [],
       resumed_from: r.resumed_from ?? null,
-      preflight_clarified: !!r.preflight_clarified,
 
       generated_sql: r.generated_sql ?? null,
       sql_valid: r.sql_valid ?? null,

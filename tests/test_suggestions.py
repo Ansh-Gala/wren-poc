@@ -13,8 +13,7 @@ from pipeline.followup import explore
 
 def _state_after(sql: str, rows: int = 5) -> ConversationState:
     state = ConversationState()
-    update_state(state, "Show the AR_NPD_Shirting items", sql, rows,
-                 "AR_NPD_Shirting", "new_block")
+    update_state(state, "Show the AR_NPD_Shirting items", sql, rows, "new_block")
     return state
 
 
@@ -160,7 +159,7 @@ def test_grouping_is_not_offered_when_every_row_shares_the_value():
     assert grouped == []
 
 
-def test_grouping_is_still_offered_when_the_value_varies():
+def test_grouping_is_still_offered_when_the_value_varies(listed_values):
     followup = explore(_state_after(_DEFAULTED), row_count=3, result=_TWO_COLOURS)
     grouped = [s for s in followup.suggestions
                if s.action.type == "add_group_by"

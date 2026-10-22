@@ -16,14 +16,12 @@ question that decides whether a layer like this is worth having:
 |---|---|---|
 | Repair a misspelling | Deterministic | Closed vocabulary. It's a string comparison. |
 | Classify the turn | Deterministic | The signals are unambiguous; a model call here could itself be wrong. |
-| Ask which entity was meant | Deterministic | The gazetteer knows the candidates. A model would invent plausible ones. |
 | Explain *why* a question can't be answered | **LLM** | Already happens inside the existing call. No extra round trip. |
 | Attach candidates to that explanation | Deterministic | The schema has the values; the model does not reliably. |
 | Suggest next moves | Deterministic | Derived from the state and the business registry. |
 | Turn a chosen suggestion into a query | **LLM** | The existing pipeline, unchanged. |
 
-The only LLM calls are the ones the system already made. One case removes a
-call that used to happen.
+The only LLM calls are the ones the system already made.
 
 ## Why not use the LLM for suggestions?
 
@@ -35,7 +33,7 @@ They will look right. They will be plausible in exactly the way that makes
 them hard to catch — correct format, believable range, consistent with the
 domain. And they will be invented, because the model has never seen the table.
 
-Deriving candidates from the gazetteer and the schema makes fabrication
+Deriving candidates from the schema makes fabrication
 structurally impossible rather than merely unlikely. There is nowhere for a
 made-up value to come from. That is a stronger guarantee than any prompt.
 
@@ -79,10 +77,7 @@ question as typed
       │                     schema vocabulary + edit distance
       ▼
   classify turn             deterministic, 0 tokens
-      │                     new_block / follow_up / switch / rebase
-      ▼
-  ambiguous entity? ──yes──▶ clarification            0 tokens, 0 LLM CALLS
-      │ no                   (candidates from gazetteer)
+      │                     new_block / follow_up
       ▼
   render context            fixed-size structured state
       │

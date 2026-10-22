@@ -132,7 +132,6 @@
       const mode = r.decision || (followup.type === "clarification" ? "clarification" : "answer");
       head.append(text("span", `mode mode-${mode}`, mode));
 
-      if (r.preflight_clarified) head.append(text("span", "tag", "no model call"));
       const repairs = r.repairs || [];
       if (repairs.length) head.append(text("span", "tag", `${repairs.length} repair(s)`));
       if (r.resumed_from) head.append(text("span", "tag", `resumed from "${r.resumed_from}"`));
@@ -295,7 +294,6 @@
         ? r.repairs.map((x) => `${x.original} → ${x.corrected} (${x.kind})`).join(", ")
         : "-"],
       ["resumed from", show(r.resumed_from)],
-      ["preflight clarified", r.preflight_clarified ? "yes" : "no"],
       ["context chars", show(r.context_chars)],
     ])));
 
@@ -365,7 +363,6 @@
   function renderState() {
     const s = session.state || {};
     el.stateFields = swap(el.stateFields, kv([
-      ["entity", show(s.entity)],
       ["tables", show(s.tables)],
       ["filters", show(s.filters)],
       ["grouping", show(s.grouping)],
@@ -450,10 +447,7 @@
       session.turns += 1;
       session.repairs += r.repairs.length;
       session.tokens += (r.tokens.prompt || 0) + (r.tokens.completion || 0);
-      // A preflight clarification is the one path that never reaches a model.
-      // Counting on token figures instead would undercount any backend that
-      // does not report usage.
-      if (!r.preflight_clarified) session.llmCalls += 1;
+      session.llmCalls += 1;
       session.state = r.state || {};
       addResponse(r);
       renderState();

@@ -203,11 +203,8 @@ class ConversationState:
     # model may replace it with a better statement of the same intent.
     active_goal: str | None = None
 
-    # The particular record under discussion, if there is one.
-    #
-    # Distinct from active_entity, which is a business object TYPE out of the
-    # gazetteer -- AR_YD_Suiting names a family, not a thing. This names one
-    # row: initiative 123, task 4711.
+    # The particular record under discussion, if there is one: one row, such
+    # as initiative 123 or task 4711.
     #
     # Kept apart from active_filters because it obeys a different rule. Filters
     # are replaced wholesale from each new query, deliberately, so they can be
@@ -220,7 +217,6 @@ class ConversationState:
     #         "label": "initiative 123"}.
     active_subject: dict | None = None
 
-    active_entity: str | None = None
     active_tables: list[str] = field(default_factory=list)
     active_filters: dict[str, str] = field(default_factory=dict)
     active_grouping: list[str] = field(default_factory=list)
@@ -264,13 +260,12 @@ class ConversationState:
     dropped_filters: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return self.previous_sql is None and not self.active_entity
+        return self.previous_sql is None
 
     def reset(self) -> None:
         """Begin a new conversational block, keeping nothing."""
         self.active_goal = None
         self.active_subject = None
-        self.active_entity = None
         self.active_tables = []
         self.active_filters = {}
         self.active_grouping = []
@@ -450,107 +445,33 @@ def _tokens(text: str) -> list[str]:
     return [t for t in re.split(r"[^A-Za-z0-9]+", text.lower()) if t]
 
 
-def detect_entity(question: str, gazetteer: list[str]) -> str | None:
-    """The subject the question names outright, if any.
-
-    Matched on token runs, not substrings: the entity value "test" must not
-    fire on the word "latest". AR_YD_Suiting, ar_yd_suiting and "AR YD
-    Suiting" all tokenise the same, so any spelling of the value resolves.
-
-    An exact hit on the raw text wins first, because initiative_type
-    contains case-variant near-duplicates that are genuinely distinct values
-    (AR_YD_Shirting and AR_YD_SHIRTING); when the user typed one of them
-    verbatim that is the one they meant. Otherwise the longest token run wins,
-    so AR_NPD_YD_SHIRTING is not shadowed by AR_YD_Shirting.
-    """
-    if not question:
-        return None
-
-    for value in sorted(gazetteer, key=len, reverse=True):
-        if not value:
-            continue
-        # Bounded on both sides, or "test" fires on "latest".
-        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(value)}(?![A-Za-z0-9_])", question):
-            return value
-
-    haystack = _tokens(question)
-    best: str | None = None
-    best_len = 0
-    for value in gazetteer:
-        needle = _tokens(value)
-        if not needle or len(needle) <= best_len:
-            continue
-        for i in range(len(haystack) - len(needle) + 1):
-            if haystack[i:i + len(needle)] == needle:
-                best, best_len = value, len(needle)
-                break
-    return best
-
-
-def classify_turn(
-    question: str,
-    state: ConversationState,
-    gazetteer: list[str],
-) -> tuple[str, str | None]:
+def classify_turn(question: str, state: ConversationState) -> str:
     """Decide whether this question continues the block or starts a new one.
 
-    Returns (decision, entity) where decision is one of:
+    Returns one of:
       new_block  -- unrelated subject, or the user said so outright
-      switch     -- a different subject, stated in full, so the old state goes
-      rebase     -- a different subject named elliptically ("what about X?"),
-                    which swaps the subject but keeps the question's shape
       follow_up  -- refines what is already on the table
 
-    The distinction between switch and rebase matters. "Show AR_NPD_Shirting
-    items" after filtering the previous subject to Active is a fresh request
-    and must not inherit Active. "What about AR_PD_Suiting?" after "how many
-    delayed tasks?" is the same question about a different subject, and
-    discarding the state leaves nothing to answer -- the system can only ask
-    what was meant, which is what it did before this case was separated out.
+    A change of subject inside a follow-up ("what about AR_PD_Suiting?") is
+    left to the model, which sees the filters in force and the question.
 
     Done without an LLM call on purpose. The signals are unambiguous enough to
     decide deterministically, and a model call here would cost more than the
     context it saves and could itself be wrong.
     """
     if _EXPLICIT_RESET.search(question) or state.is_empty():
-        return "new_block", detect_entity(question, gazetteer)
+        return "new_block"
 
-    named = detect_entity(question, gazetteer)
-
-    # A different subject invalidates the filters that were narrowing the old
-    # one. "Show AR_NPD_Shirting items" after AR_YD_Suiting is a new subject,
-    # even mid-conversation -- unless it arrives elliptically, in which case
-    # only the subject changes and everything else was meant to carry.
-    if named and state.active_entity and named != state.active_entity:
-        # Only the elliptical form rebases. Length is not the discriminator:
-        # "Show AR_NPD_Shirting items" is four words and still a complete
-        # request that carries its own shape, so it starts clean.
-        if _ELLIPTICAL.match(question):
-            return "rebase", named
-        return "switch", named
-    if named:
-        return "follow_up", named
-
-    # No subject named. Anaphora or an elliptical opener means it leans on the
-    # previous turn.
+    # Anaphora or an elliptical opener means it leans on the previous turn.
     if _REFERENTIAL.search(question) or _ELLIPTICAL.match(question):
-        return "follow_up", state.active_entity
+        return "follow_up"
 
-    # No subject and no referential cue. What separates "Show my active tasks"
-    # from "Show their status too" is not length -- both are four words -- but
-    # whether the question names a subject of its own.
+    # No referential cue. What separates "Show my active tasks" from "Show
+    # their status too" is not length -- both are four words -- but whether
+    # the question names a subject of its own.
     if is_complete_request(question):
-        return "new_block", None
-    return "follow_up", state.active_entity
-
-
-def without_entity_filters(state: ConversationState) -> dict:
-    """The filters left when a rebase drops the ones naming the old subject.
-
-    Drupal's ConversationContext::withoutEntityFilters.
-    """
-    return {col: pred for col, pred in state.active_filters.items()
-            if state.active_entity is None or state.active_entity not in pred}
+        return "new_block"
+    return "follow_up"
 
 
 def update_state(
@@ -558,7 +479,6 @@ def update_state(
     question: str,
     sql: str | None,
     row_count: int | None,
-    entity: str | None,
     decision: str,
 ) -> ConversationState:
     """Fold one completed turn into the state.
@@ -574,18 +494,8 @@ def update_state(
     replacing is both simpler and correct: adding, replacing and removing a
     filter all fall out of it with no special case.
     """
-    if decision in ("new_block", "switch"):
+    if decision == "new_block":
         state.reset()
-    elif decision == "rebase":
-        # Keep the shape, drop only what identified the old subject.
-        state.active_filters = without_entity_filters(state)
-        # The record under discussion is precisely what a rebase replaces, so
-        # it goes with the old subject's filters. The goal does not: "what
-        # about John?" after "show me Amit's delayed tasks" still wants delayed
-        # tasks, and the elliptical phrasing would make a far worse goal than
-        # the question that opened the block.
-        state.active_subject = None
-        state.turns_in_block = 0
 
     # The goal is set exactly once per block. reset() clears it, so this fires
     # on the turn that opens a block and never again -- which is what makes it
@@ -593,9 +503,6 @@ def update_state(
     # ones", a phrase that states no goal at all.
     if state.active_goal is None and (question or "").strip():
         state.active_goal = " ".join(str(question).split())
-
-    if entity:
-        state.active_entity = entity
 
     parsed = parse_sql_state(sql or "")
     if parsed["tables"]:

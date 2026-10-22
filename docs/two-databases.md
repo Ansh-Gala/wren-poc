@@ -38,7 +38,6 @@ The other metadata files add what SQL generation needs for the listed views:
 | `metadata/business_rules.yaml` | business rules and default filters |
 | `metadata/column_hierarchy.yaml` | column order, hidden columns, row groups |
 | `metadata/question_sql_pairs.yaml` | example questions and their SQL |
-| `metadata/entity_gazetteer.yaml` | names the chatbot recognises in a question |
 | `metadata/site/*.yaml` | the site's additions, merged at start-up (`pipeline/metadata.py`) |
 
 **To add a view:** add it under `tables:` in `schema_description.yaml`, with
@@ -54,7 +53,7 @@ example that names it. Restart the server.
 
 **Rules for these files:**
 
-- The five files directly under `metadata/` must stay byte-identical to the
+- The four YAML files directly under `metadata/` must stay byte-identical to the
   Drupal module's `metadata/` (parity checks this). Make the same change in
   Drupal, then copy the file byte for byte, so the line endings do not change.
 - `metadata/site/` must stay CRLF, like the Drupal site module's copies.

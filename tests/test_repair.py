@@ -63,7 +63,7 @@ def _run(monkeypatch, settings, *replies, repair_mode=True):
                      expected_sql=None, category="runtime",
                      conversation_id="RP", turn_index=0)
     result = run_turn(
-        turn, ConversationState(), [], settings, mcp_config_path=None,
+        turn, ConversationState(), settings, mcp_config_path=None,
         privacy_mode="strict", session=Session(session_id="rp", turns=[]),
         repair_mode=repair_mode,
     )
@@ -182,7 +182,7 @@ def test_a_failed_repair_still_counts_its_tokens(settings, monkeypatch):
     turn = SuiteTurn(id="RP02", question="how many per workflow?",
                      expected_sql=None, category="runtime",
                      conversation_id="RP", turn_index=0)
-    result = run_turn(turn, ConversationState(), [], settings, mcp_config_path=None,
+    result = run_turn(turn, ConversationState(), settings, mcp_config_path=None,
                       privacy_mode="strict", session=Session(session_id="rp2", turns=[]))
 
     assert result.repair_attempted and not result.repair_succeeded
@@ -210,7 +210,7 @@ def test_a_repair_that_raises_leaves_the_original_failure(settings, monkeypatch)
     turn = SuiteTurn(id="RP03", question="how many per workflow?",
                      expected_sql=None, category="runtime",
                      conversation_id="RP", turn_index=0)
-    result = run_turn(turn, ConversationState(), [], settings, mcp_config_path=None,
+    result = run_turn(turn, ConversationState(), settings, mcp_config_path=None,
                       privacy_mode="strict", session=Session(session_id="rp3", turns=[]))
 
     assert result.repair_attempted and not result.repair_succeeded

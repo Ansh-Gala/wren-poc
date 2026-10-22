@@ -356,7 +356,7 @@ questions:
       '
   - id: Y03.3
     question: Show AR_NPD_Suiting items
-    expect_decision: switch
+    expect_decision: new_block
     expected_sql: 'SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat WHERE
       initiative_type = ''AR_NPD_Suiting''
 
@@ -413,7 +413,7 @@ questions:
       '
   - id: Y05.3
     question: What about AR_PD_Suiting?
-    expect_decision: rebase
+    expect_decision: follow_up
     expected_sql: 'SELECT COUNT(*) FROM tms_task_flat WHERE initiative_type = ''AR_PD_Suiting'' AND
       task_sla_status = ''Delayed''
 

@@ -57,7 +57,7 @@ def _run(monkeypatch, settings, reply, on_sql=None, question="how many?"):
     provider = StreamingProvider(reply)
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
     result = run_turn(
-        _turn(question), ConversationState(), [], settings,
+        _turn(question), ConversationState(), settings,
         mcp_config_path=None, privacy_mode="strict",
         session=Session(session_id="st", turns=[]), on_sql=on_sql,
     )
@@ -158,7 +158,7 @@ def test_a_provider_that_cannot_stream_still_answers(monkeypatch, settings):
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: Unstreaming())
     seen = []
     result = run_turn(
-        _turn("how many?"), ConversationState(), [], settings,
+        _turn("how many?"), ConversationState(), settings,
         mcp_config_path=None, privacy_mode="strict",
         session=Session(session_id="st", turns=[]), on_sql=seen.append,
     )

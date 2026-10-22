@@ -34,7 +34,7 @@ import _bootstrap  # noqa: F401
 import yaml
 
 from pipeline.context import ConversationState, update_state
-from pipeline.followup import clarify_entity, explore
+from pipeline.followup import explore
 from pipeline.normalize import normalize
 from config.logging import register_secrets
 from config.settings import load_settings
@@ -127,16 +127,15 @@ REPAIR = [
 ]
 
 # --------------------------------------------------- B. clarification ------
-# A partial name that matches several real types. The system must ask which,
-# and the candidates it offers must all exist.
+# A partial name that matches several real types. The system must ask which.
 #
-# (id, question, expected_action_value)
+# (id, question)
 AMBIGUOUS_ENTITY = [
-    ("F21", "Show the AR_YD items", "AR_YD_Suiting"),
-    ("F22", "How many AR_NPD items are there?", "AR_NPD_Shirting"),
-    ("F23", "Show the SALESPLAN items", "AR_SALESPLAN_Suiting"),
-    ("F24", "Give me the PRINT items", "AR_PRINT_Suiting"),
-    ("F25", "Show AR_PD items", "AR_PD_Suiting"),
+    ("F21", "Show the AR_YD items"),
+    ("F22", "How many AR_NPD items are there?"),
+    ("F23", "Show the SALESPLAN items"),
+    ("F24", "Give me the PRINT items"),
+    ("F25", "Show AR_PD items"),
 ]
 
 # No answerable form at all: the schema holds no such measure or column.
@@ -353,10 +352,10 @@ CONVERSATIONS = [
          "AND task_sla_status = 'Delayed'", "new_block", None, None),
         ("G06.2", "what about AR_PD_Suiting?",
          f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_PD_Suiting' "
-         "AND task_sla_status = 'Delayed'", "rebase", None, None),
+         "AND task_sla_status = 'Delayed'", "follow_up", None, None),
         ("G06.3", "and AR_NPD_Shirting?",
          f"SELECT COUNT(*) FROM {TK} WHERE initiative_type = 'AR_NPD_Shirting' "
-         "AND task_sla_status = 'Delayed'", "rebase", None, None),
+         "AND task_sla_status = 'Delayed'", "follow_up", None, None),
     ]),
     ("G07", "Analytical - Drill from Aggregate", [
         ("G07.1", "How many tasks are there by SLA status?",
@@ -470,8 +469,7 @@ CONVERSATIONS = [
     ("G14", "Multi-step - Ambiguity then Resolution", [
         # Asks which AR_YD type, then the user answers, and the thread carries
         # on normally from there.
-        ("G14.1", "Show the AR_YD items", None, "new_block", "clarification",
-         {"type": "set_entity", "value": "AR_YD_Suiting"}),
+        ("G14.1", "Show the AR_YD items", None, "new_block", "clarification", None),
         ("G14.2", "AR_YD_Suiting",
          f"SELECT initiative_id, initiative_ref_id FROM {BO} "
          "WHERE initiative_type = 'AR_YD_Suiting'", "clarification_response", None, None),
@@ -504,7 +502,7 @@ CONVERSATIONS = [
 
 def _state_for(sql: str) -> ConversationState:
     state = ConversationState()
-    update_state(state, "", sql, 1, None, "new_block")
+    update_state(state, "", sql, 1, "new_block")
     return state
 
 
@@ -516,9 +514,6 @@ def main() -> int:
 
     settings = load_settings()
     register_secrets(settings.secrets())
-
-    from pipeline.lean_runner import load_gazetteer
-    gazetteer = load_gazetteer()
 
     problems: list[str] = []
     questions: list[dict] = []
@@ -555,17 +550,11 @@ def main() -> int:
         })
 
     # -- B. clarification ----------------------------------------------------
-    for case_id, question, must_offer in AMBIGUOUS_ENTITY:
-        followup = clarify_entity(question, gazetteer)
-        if followup is None:
-            problems.append(f"{case_id}: {question!r} is not detected as ambiguous")
-        elif must_offer not in [s.action.value for s in followup.suggestions]:
-            problems.append(f"{case_id}: {must_offer} not among the offered types")
+    for case_id, question in AMBIGUOUS_ENTITY:
         questions.append({
             "id": case_id, "category": "Clarify - Ambiguous Entity",
             "question": question, "expected_sql": None,
             "expect_behavior": "clarify", "expect_followup": "clarification",
-            "expect_action": {"type": "set_entity", "value": must_offer},
         })
 
     for case_id, category, question in NO_SUCH_THING:

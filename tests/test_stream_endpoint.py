@@ -58,7 +58,6 @@ def server(monkeypatch, settings):
 
     runtime = api.Runtime.__new__(api.Runtime)
     runtime.settings = settings
-    runtime.gazetteer = []
     runtime.mcp_config_path = None
     runtime.privacy = "strict"
     runtime.context_mode = "state"

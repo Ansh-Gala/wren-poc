@@ -40,7 +40,7 @@ def test_first_turn_of_a_thread_opens_a_block():
     for c in CONVS:
         first = c.turns[0]
         if first.expect_decision is not None:
-            assert first.expect_decision in ("new_block", "switch"), first.id
+            assert first.expect_decision == "new_block", first.id
 
 
 def test_threads_declare_their_decisions():
@@ -76,8 +76,8 @@ def test_context_leakage_case_is_present_and_discriminating():
     c04 = next(c for c in CONVS if c.id == "C04")
     turns = c04.turns
     index = next((i for i, t in enumerate(turns)
-                  if t.expect_decision == "switch"), None)
-    assert index is not None, "C04 has no switch turn"
+                  if i > 0 and t.expect_decision == "new_block"), None)
+    assert index is not None, "C04 has no change of subject"
     assert index > 0, "the switch turn has nothing to leak from"
     switch, previous = turns[index], turns[index - 1]
 
@@ -146,7 +146,7 @@ def test_a_reset_expectation_never_carries_the_previous_filters():
         for conversation in load_suite(Path("benchmark") / suite):
             turns = conversation.turns
             for previous, turn in zip(turns, turns[1:]):
-                if turn.expect_decision not in ("switch", "new_block"):
+                if turn.expect_decision != "new_block":
                     continue
                 if not (previous.expected_sql and turn.expected_sql):
                     continue
@@ -185,7 +185,7 @@ def test_the_followup_suite_covers_the_dimensions_it_claims_to():
     # one the frontend is being promised.
     actions = {t.expect_action["type"] for t in turns if t.expect_action}
     assert {"add_filter", "add_group_by", "set_sort", "set_aggregate",
-            "remove_filter", "drill_down", "set_entity"} <= actions
+            "remove_filter", "drill_down"} <= actions
 
     assert sum(1 for t in turns if t.expect_normalized) >= 20
     assert sum(1 for t in turns if t.expect_behavior == "clarify") >= 15

@@ -46,7 +46,7 @@ def _run(monkeypatch, settings, reply, question="How many business objects are t
     provider = FakeProvider(reply)
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
     return run_turn(
-        _turn(question), state or ConversationState(), [], settings,
+        _turn(question), state or ConversationState(), settings,
         mcp_config_path=None, privacy_mode="strict",
         session=Session(session_id="rt", turns=[]),
     ), provider
@@ -110,35 +110,6 @@ def test_the_follow_up_layer_still_runs(monkeypatch, settings):
     assert result.followup["suggestions"]
 
 
-def test_a_clarification_at_runtime_is_not_a_failure(monkeypatch, settings):
-    """Asking which of three types was meant is the system working, not failing.
-
-    The preflight branch scored itself against expect_behavior, which defaults
-    to "sql". A real question carries no expectation at all, so a perfectly
-    correct clarification came back as SHOULD_NOT_HAVE_CLARIFIED with
-    result_match False -- the console would have painted its own best
-    behaviour red.
-    """
-    from pipeline.lean_runner import load_gazetteer
-
-    provider = FakeProvider("unused: preflight answers before the model is asked")
-    monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
-
-    result = run_turn(
-        _turn("Show the AR_YD items"), ConversationState(), load_gazetteer(),
-        settings, mcp_config_path=None, privacy_mode="strict",
-        session=Session(session_id="rt", turns=[]),
-    )
-
-    assert result.preflight_clarified is True
-    assert result.followup_type == "clarification"
-    assert provider.asked == [], "the model should never have been called"
-
-    assert result.failure_category == ""
-    assert result.result_match is None
-    assert result.semantic_match is None
-
-
 def test_the_model_asking_a_question_is_not_a_failed_turn(monkeypatch, settings):
     """A clarification has no SQL, and "no SQL" is what PROMPT_ERROR means.
 
@@ -176,7 +147,7 @@ def test_a_prose_clarification_is_answerable_on_the_next_turn(monkeypatch, setti
         'department with the most tasks?"}')
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: asking)
     run_turn(_turn("which user had most tasks, or which department?"),
-             state, [], settings, None, "strict", session)
+             state, settings, None, "strict", session)
 
     assert state.awaiting_answer_to.startswith("Do you want the user")
 
@@ -184,7 +155,7 @@ def test_a_prose_clarification_is_answerable_on_the_next_turn(monkeypatch, setti
         '{"sql": "SELECT assigned_user_name, COUNT(*) FROM tms_task_flat '
         'GROUP BY assigned_user_name"}')
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: answering)
-    run_turn(_turn("both"), state, [], settings, None, "strict", session)
+    run_turn(_turn("both"), state, settings, None, "strict", session)
 
     prompt = session.context_block or ""
     assert "Do you want the user with the most tasks" in prompt, (

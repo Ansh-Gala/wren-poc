@@ -151,7 +151,7 @@ def runtime(monkeypatch):
     rt = api.Runtime.__new__(api.Runtime)
     rt.settings = SimpleNamespace(freshness_tables=(), freshness_message="",
                                   monthly_token_limit=0, run_roles=("ticket_owner",))
-    rt.gazetteer, rt.mcp_config_path, rt.privacy = [], None, "strict"
+    rt.mcp_config_path, rt.privacy = None, "strict"
     rt.context_mode, rt.log_path = "state", None
     return rt, stores, identities
 

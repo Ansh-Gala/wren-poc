@@ -46,7 +46,7 @@ from pipeline.evaluator import SHOWN_ROWS, first_rows
 from pipeline.followup import ACTION_TYPES, Action, apply_action, label_for_ref
 from pipeline.freshness import freshness_note
 from pipeline.identity_provider import resolve_identity
-from pipeline.lean_runner import TurnResult, load_gazetteer, logged, run_turn
+from pipeline.lean_runner import TurnResult, logged, run_turn
 from pipeline.initiative import with_row_colour
 from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
@@ -139,7 +139,6 @@ def state_snapshot(state: ConversationState) -> dict:
     return {
         "goal": state.active_goal,
         "subject": state.active_subject,
-        "entity": state.active_entity,
         "tables": list(state.active_tables),
         "filters": dict(state.active_filters),
         "grouping": list(state.active_grouping),
@@ -160,10 +159,6 @@ def state_mutations(before: dict, after: dict) -> list[str]:
     only trustworthy if it is read back off the result.
     """
     out: list[str] = []
-
-    if before.get("entity") != after.get("entity"):
-        out.append(f"subject {before.get('entity') or 'none'} -> "
-                   f"{after.get('entity') or 'none'}")
 
     old_filters, new_filters = before.get("filters") or {}, after.get("filters") or {}
     for column in new_filters:
@@ -273,7 +268,6 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "repairs": r.repairs,
         "resumed_from": r.resumed_from,
         "resumed_answering": r.resumed_answering,
-        "preflight_clarified": r.preflight_clarified,
 
         # Written before the query runs: on an error it would describe an
         # answer that never arrived, so it is dropped.
@@ -435,7 +429,6 @@ class Runtime:
         self.settings = load_settings()
         register_secrets(self.settings.secrets())
         preflight(self.settings)
-        self.gazetteer = load_gazetteer()
         # Lean mode makes no MCP calls, so there is nothing to configure and
         # no wren_setup to import. Writing the file anyway was harmless but it
         # made the module a hard dependency of a path that never uses it.
@@ -591,7 +584,7 @@ class Runtime:
                 turn_index=conversation.turn_index,
             )
             result = run_turn(
-                turn, conversation.state, self.gazetteer, self.settings,
+                turn, conversation.state, self.settings,
                 self.mcp_config_path, self.privacy, conversation.session,
                 context_mode=self.context_mode,
                 on_sql=(lambda early: on_rows(self.rows_event(early, debug)))
@@ -1144,7 +1137,7 @@ def main() -> int:
         f"   written as {settings.history_db_user}" if settings.chats_configured
         else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
     print(f"run roles:         {', '.join(settings.run_roles) or 'none (CHATBOT_RUN_ROLES): nobody may ask'}")
-    print(f"context mode: {args.context_mode}   gazetteer: {len(runtime.gazetteer)} entity value(s)")
+    print(f"context mode: {args.context_mode}")
     print()
     print(f"  console   http://{args.host}:{args.port}/?user_id=<TMS user id>")
     print(f"  endpoint  POST http://{args.host}:{args.port}/ask")

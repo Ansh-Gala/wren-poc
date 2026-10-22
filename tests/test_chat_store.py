@@ -35,7 +35,6 @@ def _turn(**fields) -> TurnResult:
 
 @pytest.mark.parametrize("fields,status", [
     ({"clarification": "Which one?"}, "clarification"),
-    ({"preflight_clarified": True}, "clarification"),
     ({"generated_sql": None, "error": "boom"}, "llm_error"),
     ({"generated_sql": None, "timed_out": True}, "llm_error"),
     ({"generated_sql": None}, "no_sql"),
@@ -88,7 +87,7 @@ def test_a_title_is_the_question_clipped_at_a_word():
 def test_the_state_is_stored_with_drupals_keys():
     """ConversationState::toArray's keys, so either side reads the other."""
     keys = list(cs.state_array(ConversationState()))
-    assert keys == ["active_goal", "active_subject", "active_entity", "active_tables",
+    assert keys == ["active_goal", "active_subject", "active_tables",
                     "active_filters", "active_grouping", "active_sorting", "active_limit",
                     "last_intent", "previous_sql", "previous_result_summary",
                     "turns_in_block", "pending_clarification", "pending_question",

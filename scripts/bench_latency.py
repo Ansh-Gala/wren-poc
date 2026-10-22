@@ -38,7 +38,7 @@ if str(ROOT) not in sys.path:
 
 from config.settings import load_settings  # noqa: E402
 from pipeline.context import ConversationState  # noqa: E402
-from pipeline.lean_runner import load_gazetteer, run_turn  # noqa: E402
+from pipeline.lean_runner import run_turn  # noqa: E402
 from pipeline.lean_suite import SuiteTurn  # noqa: E402
 from pipeline.metadata import enable_site_metadata  # noqa: E402
 from pipeline.models import Session  # noqa: E402
@@ -132,7 +132,6 @@ def main() -> int:
     enable_site_metadata()
     questions = args.questions or DEFAULT_QUESTIONS
     settings = load_settings()
-    gazetteer = load_gazetteer()
 
     print(f"{len(questions)} questions x {args.reps} reps = "
           f"{len(questions) * args.reps} turns. This calls the real model.\n")
@@ -149,7 +148,7 @@ def main() -> int:
                              category="bench", conversation_id=f"bench{len(rows)}",
                              turn_index=0)
             started = time.perf_counter()
-            r = run_turn(turn, state, gazetteer, settings, None, "strict", session)
+            r = run_turn(turn, state, settings, None, "strict", session)
             wall = (time.perf_counter() - started) * 1000
             row = {"rep": rep, "question": q, "latency_ms": r.latency_ms or wall}
             for key, _ in STAGES:

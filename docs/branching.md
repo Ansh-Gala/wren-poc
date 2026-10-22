@@ -24,7 +24,7 @@ feature/*  bench/*  experiment/*  data/*
 | `feature/<slug>` | `develop` | New behaviour, with the tests for it. |
 | `bench/<slug>` | `develop` | Benchmark and evaluation runs, result archives. |
 | `experiment/<slug>` | `develop` | Spikes. Expected to be thrown away. |
-| `data/<slug>` | `develop` | Registry, gazetteer and question-set changes. |
+| `data/<slug>` | `develop` | Registry and question-set changes. |
 
 Use the whole prefix, including the slash. `feature/qa-console`, not
 `qa-console`.

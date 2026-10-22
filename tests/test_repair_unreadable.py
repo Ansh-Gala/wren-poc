@@ -53,7 +53,7 @@ def _run(monkeypatch, *sqls, repair_mode=True):
     monkeypatch.setattr("pipeline.lean_runner.get_provider", lambda s: provider)
     turn = SuiteTurn(id="UR01", question="how many initiatives?", expected_sql=None,
                      category="runtime", conversation_id="UR", turn_index=0)
-    result = run_turn(turn, ConversationState(), [], SETTINGS, mcp_config_path=None,
+    result = run_turn(turn, ConversationState(), SETTINGS, mcp_config_path=None,
                       privacy_mode="strict", session=Session(session_id="ur", turns=[]),
                       repair_mode=repair_mode)
     return result, provider

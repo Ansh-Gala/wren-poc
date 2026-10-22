@@ -8,6 +8,7 @@ project queries, reachable with the credentials in ``.env``. They are marked
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -52,3 +53,22 @@ def tmp_settings(tmp_path) -> Settings:
         wren_project_root=tmp_path / "wren_projects",
         wren_home=tmp_path / "wren_projects" / ".wren_home",
     )
+
+
+@pytest.fixture
+def listed_values(monkeypatch):
+    """The schema with a few columns' values listed.
+
+    metadata/schema_description.yaml lists no values since 22 October 2026,
+    but the chips built from them still work for a schema that does.
+    """
+    from pipeline import followup, metadata
+
+    doc = copy.deepcopy(metadata.schema())
+    tables = doc["tables"]
+    tables["tms_task_flat"]["columns"]["task_sla_status"]["values"] = ["Delayed", "On Time"]
+    tables["tms_initiative_flat"]["columns"]["initiative_color"]["values"] = ["Black", "Green", "Red", "White"]
+    monkeypatch.setattr(followup, "_schema", lambda: doc)
+    followup._enum_lookup.cache_clear()
+    yield
+    followup._enum_lookup.cache_clear()

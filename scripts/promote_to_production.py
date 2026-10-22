@@ -77,7 +77,6 @@ EXCLUDE = [
     # -- Generators and setup tooling for the above. Dropping build_wren.py and
     #    check_environment.py orphans three wren_setup modules, so they go too;
     #    mcp_config.py stays because serve_api.py and cli_provider.py import it.
-    "scripts/build_gazetteer.py",
     "scripts/build_schema_description.py",
     "scripts/build_expansion_suite.py",
     "scripts/build_followup_suite.py",

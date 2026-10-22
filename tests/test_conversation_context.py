@@ -107,7 +107,7 @@ def converse(monkeypatch, tmp_path):
                              expected_sql=None, category="runtime",
                              conversation_id="t", turn_index=index)
             results.append(lean_runner.run_turn(
-                turn, state, [], settings=_Settings(), mcp_config_path=tmp_path,
+                turn, state, settings=_Settings(), mcp_config_path=tmp_path,
                 privacy_mode="strict", session=session,
             ))
         return results, state, recorder

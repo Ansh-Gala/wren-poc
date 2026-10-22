@@ -425,7 +425,7 @@ questions:
         AR_NPD_YD_SHIRTING rather than AR_NPD_Shirting because that type splits
         5 Active / 5 Closed, so after the default arrived a leak and a correct
         answer both returned 5 and the count could no longer tell them apart.
-      expect_decision: switch
+      expect_decision: new_block
       expected_sql: |
         SELECT initiative_id, initiative_ref_id, initiative_status
         FROM tms_initiative_flat

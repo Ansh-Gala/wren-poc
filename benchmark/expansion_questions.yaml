@@ -523,7 +523,7 @@ questions:
       '
   - id: X05.3
     question: Show AR_NPD_Shirting items
-    expect_decision: switch
+    expect_decision: new_block
     expected_sql: 'SELECT initiative_id, initiative_ref_id, initiative_status FROM tms_initiative_flat
       WHERE initiative_type = ''AR_NPD_Shirting''
 
@@ -648,14 +648,14 @@ questions:
       '
   - id: X10.2
     question: Show AR_NPD_Shirting items
-    expect_decision: switch
+    expect_decision: new_block
     expected_sql: 'SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat WHERE
       initiative_type = ''AR_NPD_Shirting''
 
       '
   - id: X10.3
     question: Back to AR_YD_Suiting, how many are active?
-    expect_decision: switch
+    expect_decision: follow_up
     expected_sql: 'SELECT COUNT(*) FROM tms_initiative_flat WHERE initiative_type = ''AR_YD_Suiting''
       AND initiative_status = ''Active''
 

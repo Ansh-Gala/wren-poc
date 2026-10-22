@@ -116,7 +116,7 @@ def test_readings_written_in_business_words_survive():
         "Tasks still open", "Tasks already closed"]
 
 
-def test_real_values_are_still_offered():
+def test_real_values_are_still_offered(listed_values):
     """Chips built from the database are data, not identifiers.
 
     An initiative type like AR_YD_Suiting has the shape of an identifier and
@@ -197,7 +197,7 @@ def _drive(monkeypatch, reply, question):
     turn = SuiteTurn(id="SD01", question=question, expected_sql=None,
                      category="runtime", conversation_id="SD", turn_index=0)
     result = lean_runner.run_turn(
-        turn, ConversationState(), [], _Settings(), mcp_config_path=None,
+        turn, ConversationState(), _Settings(), mcp_config_path=None,
         privacy_mode="strict", session=Session(session_id="sd", turns=[]))
     return result, reached
 

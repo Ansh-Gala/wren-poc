@@ -1,17 +1,12 @@
-"""Conversation state: reference resolution, topic switching, and bounded size."""
+"""Conversation state: reference resolution, new blocks, and bounded size."""
 
 import pytest
 
 from pipeline.context import (
     remember_question,
-    ConversationState, classify_turn, detect_entity, parse_sql_state,
+    ConversationState, classify_turn, parse_sql_state,
     render_context, update_state,
 )
-
-GAZ = [
-    "AR_YD_Suiting", "AR_NPD_Shirting", "AR_NPD_YD_SHIRTING",
-    "AR_YD_Shirting", "AR_PD_Suiting", "AR_NPD_Suiting", "TESTING_MG", "test",
-]
 
 SQL_LIST = (
     "SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat "
@@ -23,105 +18,57 @@ SQL_ACTIVE = (
 )
 
 
-def _state_after(question, sql, rows=22, gaz=GAZ, state=None):
+def _state_after(question, sql, rows=22, state=None):
     state = state or ConversationState()
-    decision, entity = classify_turn(question, state, gaz)
-    return update_state(state, question, sql, rows, entity, decision), decision
-
-
-# ---------------------------------------------------------------- entity ----
-
-def test_detect_entity_matches_exact_and_spaced_spellings():
-    assert detect_entity("Show AR_YD_Suiting items", GAZ) == "AR_YD_Suiting"
-    assert detect_entity("show the ar yd suiting ones", GAZ) == "AR_YD_Suiting"
-
-
-def test_detect_entity_does_not_fire_on_substrings():
-    """'test' is a real entity value; the word 'latest' must not match it."""
-    assert detect_entity("show me the latest items", GAZ) is None
-    assert detect_entity("contested greatest", GAZ) is None
-
-
-def test_detect_entity_prefers_the_longest_match():
-    assert detect_entity("Show AR_NPD_YD_SHIRTING items", GAZ) == "AR_NPD_YD_SHIRTING"
-
-
-def test_detect_entity_returns_none_when_no_subject_is_named():
-    assert detect_entity("only the active ones", GAZ) is None
-    assert detect_entity("how many?", GAZ) is None
+    decision = classify_turn(question, state)
+    return update_state(state, question, sql, rows, decision), decision
 
 
 # ------------------------------------------------------------ classifying ----
 
 def test_first_question_opens_a_block():
-    assert classify_turn("Show AR_YD_Suiting items", ConversationState(), GAZ)[0] == "new_block"
+    assert classify_turn("Show AR_YD_Suiting items", ConversationState()) == "new_block"
 
 
 def test_anaphora_continues_the_block():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     for q in ("only the active ones", "how many?", "group those by status",
               "sort them by status", "show me the first 5", "what about PVH?"):
-        assert classify_turn(q, state, GAZ)[0] == "follow_up", q
+        assert classify_turn(q, state) == "follow_up", q
 
 
-def test_naming_a_different_entity_switches_subject():
-    state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
-    decision, entity = classify_turn("Show AR_NPD_Shirting items", state, GAZ)
-    assert decision == "switch"
-    assert entity == "AR_NPD_Shirting"
+def test_an_elliptical_subject_change_keeps_the_block_for_the_model():
+    """"What about X?" needs the previous question's shape.
 
-
-def test_naming_the_same_entity_is_still_a_follow_up():
-    state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
-    assert classify_turn("how many AR_YD_Suiting items are active?", state, GAZ)[0] == "follow_up"
-
-
-def test_an_elliptical_subject_change_rebases_rather_than_resetting():
-    """Regression: "What about X?" needs the previous question's shape.
-
-    After "how many delayed tasks in AR_NPD_Suiting?", the question "What
-    about AR_PD_Suiting?" means the same count for a different subject.
-    Clearing the state left nothing to answer, and the system could only ask
-    what was meant.
+    After "Show delayed tasks in AR_NPD_Suiting", the question "What about
+    AR_PD_Suiting?" means the same question for a different subject. The
+    block is kept, so the model sees the filters to change.
     """
     state, _ = _state_after(
         "Show delayed tasks in AR_NPD_Suiting",
         "SELECT task_id FROM tms_task_flat WHERE initiative_type = 'AR_NPD_Suiting' "
         "AND task_sla_status = 'Delayed'", 4)
-    decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
-    assert decision == "rebase"
-    assert entity == "AR_PD_Suiting"
+    assert classify_turn("What about AR_PD_Suiting?", state) == "follow_up"
 
 
-def test_a_rebase_keeps_the_other_filters_but_drops_the_subject():
-    state, _ = _state_after(
-        "Show delayed tasks in AR_NPD_Suiting",
-        "SELECT task_id FROM tms_task_flat WHERE initiative_type = 'AR_NPD_Suiting' "
-        "AND task_sla_status = 'Delayed'", 4)
-    decision, entity = classify_turn("What about AR_PD_Suiting?", state, GAZ)
-    update_state(state, "What about AR_PD_Suiting?", None, None, entity, decision)
-    assert state.active_entity == "AR_PD_Suiting"
-    assert "AR_NPD_Suiting" not in str(state.active_filters)
-
-
-def test_a_full_request_for_a_new_subject_still_switches():
-    """The other half: a complete request must not inherit the old filters."""
+def test_a_full_request_for_a_new_subject_starts_a_new_block():
+    """A complete request must not inherit the old filters."""
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     state, _ = _state_after("only the active ones", SQL_ACTIVE, 19, state=state)
-    decision, _ = classify_turn("Show AR_NPD_Shirting items", state, GAZ)
-    assert decision == "switch", "a self-contained request starts clean"
+    decision = classify_turn("Show AR_NPD_Shirting items", state)
+    assert decision == "new_block", "a self-contained request starts clean"
 
 
 def test_explicit_reset_wording_starts_a_new_block():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
-    assert classify_turn("New question: show AR_NPD_Shirting items", state, GAZ)[0] == "new_block"
+    assert classify_turn("New question: show AR_NPD_Shirting items", state) == "new_block"
 
 
 def test_a_long_self_contained_question_is_not_a_follow_up():
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
-    decision, _ = classify_turn(
+    decision = classify_turn(
         "Which department has the largest number of open tasks across the whole system?",
-        state, GAZ)
+        state)
     assert decision == "new_block"
 
 
@@ -178,8 +125,8 @@ def test_a_filter_can_be_removed():
     assert "PVH" not in render_context(state)
 
 
-def test_switching_subject_drops_the_old_filters():
-    """The whole point of a switch: Active must not leak onto the new subject."""
+def test_a_new_subject_drops_the_old_filters():
+    """Active must not leak onto the new subject."""
     state, _ = _state_after("Show AR_YD_Suiting items", SQL_LIST)
     state, _ = _state_after("only the active ones", SQL_ACTIVE, 19, state=state)
     state, decision = _state_after(
@@ -187,8 +134,7 @@ def test_switching_subject_drops_the_old_filters():
         "SELECT initiative_id FROM tms_initiative_flat "
         "WHERE initiative_type = 'AR_NPD_Shirting'",
         10, state=state)
-    assert decision == "switch"
-    assert state.active_entity == "AR_NPD_Shirting"
+    assert decision == "new_block"
     assert "AR_YD_Suiting" not in str(state.active_filters)
     assert state.turns_in_block == 1
 
@@ -241,13 +187,13 @@ def _thread_about_business_objects():
         state, "Show delayed AR_YD_Suiting items",
         "SELECT initiative_id FROM tms_initiative_flat "
         "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 0",
-        14, "AR_YD_Suiting", "new_block")
+        14, "new_block")
     update_state(
         state, "Only those above 10 days",
         "SELECT initiative_id FROM tms_initiative_flat "
         "WHERE initiative_type = 'AR_YD_Suiting' AND delayed_task_count > 0 "
         "AND days_to_due_date > 10",
-        6, "AR_YD_Suiting", "follow_up")
+        6, "follow_up")
     return state
 
 
@@ -261,7 +207,7 @@ def test_a_complete_request_about_another_entity_starts_a_new_block():
     describes.
     """
     state = _thread_about_business_objects()
-    decision, _ = classify_turn("Show my active tasks", state, GAZ)
+    decision = classify_turn("Show my active tasks", state)
     assert decision == "new_block"
 
 
@@ -276,7 +222,7 @@ def test_a_bare_fragment_still_continues_the_block():
     # Drupal's ConversationContext starts a new block on it too.
     for fragment in ("How many?", "How many are there?", "Make that 10",
                      "Show their status too"):
-        decision, _ = classify_turn(fragment, state, GAZ)
+        decision = classify_turn(fragment, state)
         assert decision == "follow_up", f"{fragment!r} should continue the block"
 
 
@@ -292,7 +238,7 @@ def test_a_question_the_system_asked_is_carried_into_the_next_turn():
     """
     state = ConversationState()
     update_state(state, "which user had most tasks, or which department?",
-                 None, None, None, "new_block")
+                 None, None, "new_block")
     state.awaiting_answer_to = ("Do you want the user with the most tasks, "
                                 "or the department with the most tasks?")
 

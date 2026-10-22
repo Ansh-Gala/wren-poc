@@ -127,45 +127,30 @@ questions:
   expected_sql: null
   expect_behavior: clarify
   expect_followup: clarification
-  expect_action:
-    type: set_entity
-    value: AR_YD_Suiting
 - id: F22
   category: Clarify - Ambiguous Entity
   question: How many AR_NPD items are there?
   expected_sql: null
   expect_behavior: clarify
   expect_followup: clarification
-  expect_action:
-    type: set_entity
-    value: AR_NPD_Shirting
 - id: F23
   category: Clarify - Ambiguous Entity
   question: Show the SALESPLAN items
   expected_sql: null
   expect_behavior: clarify
   expect_followup: clarification
-  expect_action:
-    type: set_entity
-    value: AR_SALESPLAN_Suiting
 - id: F24
   category: Clarify - Ambiguous Entity
   question: Give me the PRINT items
   expected_sql: null
   expect_behavior: clarify
   expect_followup: clarification
-  expect_action:
-    type: set_entity
-    value: AR_PRINT_Suiting
 - id: F25
   category: Clarify - Ambiguous Entity
   question: Show AR_PD items
   expected_sql: null
   expect_behavior: clarify
   expect_followup: clarification
-  expect_action:
-    type: set_entity
-    value: AR_PD_Suiting
 - id: F26
   category: Clarify - No Such Measure
   question: What is the total revenue for AR_YD_Suiting?
@@ -563,12 +548,12 @@ questions:
     question: what about AR_PD_Suiting?
     expected_sql: SELECT COUNT(*) FROM tms_task_flat WHERE initiative_type = 'AR_PD_Suiting' AND
       task_sla_status = 'Delayed'
-    expect_decision: rebase
+    expect_decision: follow_up
   - id: G06.3
     question: and AR_NPD_Shirting?
     expected_sql: SELECT COUNT(*) FROM tms_task_flat WHERE initiative_type = 'AR_NPD_Shirting' AND
       task_sla_status = 'Delayed'
-    expect_decision: rebase
+    expect_decision: follow_up
 - id: G07
   category: Analytical - Drill from Aggregate
   turns:
@@ -726,9 +711,6 @@ questions:
     expect_decision: new_block
     expect_behavior: clarify
     expect_followup: clarification
-    expect_action:
-      type: set_entity
-      value: AR_YD_Suiting
   - id: G14.2
     question: AR_YD_Suiting
     expected_sql: SELECT initiative_id, initiative_ref_id FROM tms_initiative_flat WHERE

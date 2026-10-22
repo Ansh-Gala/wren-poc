@@ -7,35 +7,12 @@ action's field and value may not.
 
 from __future__ import annotations
 
-from pipeline.followup import clarify_entity
-from pipeline.lean_runner import load_gazetteer
-
-
-def test_partial_entity_name_asks_which_one_and_offers_only_real_values():
-    """"AR_YD" names three business object types, so the system must ask.
-
-    The candidates come from the gazetteer, which is generated from the
-    database. Nothing here may be invented: offering a plausible-looking type
-    that does not exist is worse than asking an open question.
-    """
-    gazetteer = load_gazetteer()
-    followup = clarify_entity("Show the AR_YD items", gazetteer)
-
-    assert followup is not None
-    assert followup.type == "clarification"
-    assert followup.reason == "ambiguous_entity"
-
-    offered = [s.action.value for s in followup.suggestions]
-    assert "AR_YD_Suiting" in offered
-    assert "AR_YD_Shirting" in offered
-    assert set(offered) <= set(gazetteer), "offered a value the database does not have"
-
 
 def _state_after(sql: str, question: str = "Show the AR_YD_Suiting items",
                  rows: int = 22):
     from pipeline.context import ConversationState, update_state
     state = ConversationState()
-    update_state(state, question, sql, rows, "AR_YD_Suiting", "new_block")
+    update_state(state, question, sql, rows, "new_block")
     return state
 
 
@@ -82,7 +59,7 @@ def test_applying_a_filter_suggestion_narrows_the_state_and_asks_for_it():
     assert "SELECT" not in question.upper()
 
 
-def test_a_clarification_naming_a_known_column_offers_that_column_real_values():
+def test_a_clarification_naming_a_known_column_offers_that_column_real_values(listed_values):
     """The model says which column it could not satisfy; we supply the values.
 
     Splitting it this way is what keeps candidates honest. The model is good
@@ -182,7 +159,7 @@ def test_an_unknown_action_type_is_refused_at_construction():
         Action("do_something_clever", "status")
 
 
-def test_a_single_filter_can_still_be_dropped():
+def test_a_single_filter_can_still_be_dropped(listed_values):
     """"Show all again" is a next move even when only one thing is narrowing.
 
     Requiring two filters before offering to remove one left "How many items
@@ -217,37 +194,21 @@ def test_the_subject_itself_is_never_offered_for_removal():
     assert not any(s.action.type == "remove_filter" for s in followup.suggestions)
 
 
-def test_a_word_inside_an_entity_name_is_not_a_partial_entity_name():
-    """"the sales team" is a role. AR_SALESPLAN_Suiting is not what was meant.
+def _which_ar_yd():
+    """A pending "which AR_YD type?" question, as the model can ask it."""
+    from pipeline.followup import Action, FollowUp, Suggestion
 
-    Matching any substring made "sales" a candidate prefix for three business
-    object types, so a perfectly clear question about task assignment was
-    answered with "which sales type did you mean?" and never ran. A partial
-    name has to break on the underscores the names are built from.
-    """
-    from pipeline.followup import clarify_entity
-
-    gazetteer = load_gazetteer()
-    assert clarify_entity("Show the tasks assigned to the sales team", gazetteer) is None
-    # The genuinely truncated names must still be caught.
-    assert clarify_entity("Show the AR_YD items", gazetteer) is not None
-    assert clarify_entity("Show the SALESPLAN items", gazetteer) is not None
-
-
-def test_a_trailing_category_word_is_a_category_not_a_truncated_name():
-    """"suiting items" means all of them, not one of them.
-
-    Suiting is the last component of all five types that carry it, so it names
-    a family rather than an unfinished identifier. AR_YD is the last component
-    of none of its matches, which is what makes it a name the user stopped
-    typing.
-    """
-    from pipeline.followup import clarify_entity
-
-    gazetteer = load_gazetteer()
-    assert clarify_entity("how many suiting items are active?", gazetteer) is None
-    assert clarify_entity("show the shirting items", gazetteer) is None
-    assert clarify_entity("Show AR_PD items", gazetteer) is not None
+    return FollowUp(
+        type="clarification",
+        reason="unknown_value",
+        question="Which AR_YD type did you mean?",
+        suggestions=[
+            Suggestion(id=f"filter_initiative_type_{value}", label=value,
+                       action=Action(type="add_filter", field="initiative_type",
+                                     operator="=", value=value))
+            for value in ("AR_YD_SHIRTING", "AR_YD_Shirting", "AR_YD_Suiting")
+        ],
+    )
 
 
 def test_answering_a_clarification_resumes_the_original_question():
@@ -259,10 +220,10 @@ def test_answering_a_clarification_resumes_the_original_question():
     -- reasonably -- asked what to do with it. The thread deadlocked one turn
     after the clarification that was supposed to unblock it.
     """
-    from pipeline.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import resolve_clarification
 
     original = "Show the AR_YD items"
-    pending = clarify_entity(original, load_gazetteer())
+    pending = _which_ar_yd()
 
     assert resolve_clarification("AR_YD_Suiting", original, pending) == \
         "Show the AR_YD_Suiting items"
@@ -270,10 +231,10 @@ def test_answering_a_clarification_resumes_the_original_question():
 
 def test_a_clarification_can_be_answered_with_the_suggestion_id():
     """A frontend sends the id it was given, not the label a person read."""
-    from pipeline.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import resolve_clarification
 
     original = "Show the AR_YD items"
-    pending = clarify_entity(original, load_gazetteer())
+    pending = _which_ar_yd()
     chosen = next(s for s in pending.suggestions
                   if s.action.value == "AR_YD_Shirting")
 
@@ -283,31 +244,15 @@ def test_a_clarification_can_be_answered_with_the_suggestion_id():
 
 def test_an_unrelated_reply_is_not_treated_as_an_answer():
     """The user is allowed to ignore the question and ask something else."""
-    from pipeline.followup import clarify_entity, resolve_clarification
+    from pipeline.followup import resolve_clarification
 
     original = "Show the AR_YD items"
-    pending = clarify_entity(original, load_gazetteer())
+    pending = _which_ar_yd()
 
     assert resolve_clarification("how many tasks are open?", original, pending) is None
 
 
-def test_suggestion_ids_are_unique_within_a_follow_up():
-    """The id is the frontend's handle on a choice. Two choices cannot share one.
-
-    initiative_type contains case-variant near-duplicates that are
-    genuinely distinct values -- AR_YD_Shirting and AR_YD_SHIRTING, 52 rows
-    and 2 rows. Lowercasing the value to build the id collapsed them, so a
-    frontend sending back the id it was given would silently select the other
-    one.
-    """
-    from pipeline.followup import clarify_entity
-
-    followup = clarify_entity("Show the AR_YD items", load_gazetteer())
-    ids = [s.id for s in followup.suggestions]
-    assert len(ids) == len(set(ids)), f"duplicate suggestion id in {ids}"
-
-
-def test_the_column_can_be_named_in_its_own_key_instead_of_the_question():
+def test_the_column_can_be_named_in_its_own_key_instead_of_the_question(listed_values):
     """A question written for a person still gets the real values as chips.
 
     The scan of the prose could only find a column the question named out
@@ -325,7 +270,7 @@ def test_the_column_can_be_named_in_its_own_key_instead_of_the_question():
     assert {s.action.value for s in followup.suggestions} == {"Delayed", "On Time"}
 
 
-def test_the_question_is_still_scanned_when_no_column_is_named():
+def test_the_question_is_still_scanned_when_no_column_is_named(listed_values):
     """Replies that predate the key, and replies that omit it, still work."""
     from pipeline.followup import clarification_followup
 

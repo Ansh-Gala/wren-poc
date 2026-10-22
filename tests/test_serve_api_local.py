@@ -245,7 +245,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(api, "resolve_identity", lambda settings, user_id: None)
     api.SESSIONS.clear()
     rt = api.Runtime.__new__(api.Runtime)
-    rt.settings, rt.gazetteer, rt.mcp_config_path = SETTINGS, [], None
+    rt.settings, rt.mcp_config_path = SETTINGS, None
     rt.privacy, rt.context_mode, rt.log_path = "strict", "state", None
     return rt, asked
 

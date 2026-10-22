@@ -9,8 +9,7 @@ Three things can be worth saying at the end of a turn:
   none           the answer stood on its own.
 
 Every one of them is decided from state the pipeline already has -- the
-structured conversation state, the schema, and the gazetteer generated from
-the database. There is no LLM call in this module. That is not a performance
+structured conversation state and the schema. There is no LLM call in this module. That is not a performance
 compromise; it is what makes the candidates trustworthy. A model asked to
 propose "which order did you mean?" will produce plausible order numbers, and
 plausible is exactly wrong. Values offered here can only come from the
@@ -39,7 +38,6 @@ from pipeline.redact import names_a_database_object
 # ConversationState, and from there back through the normal pipeline -- so
 # there is still exactly one thing that writes SQL.
 ACTION_TYPES = (
-    "set_entity",
     "add_filter",
     "replace_filter",
     "remove_filter",
@@ -175,59 +173,6 @@ def _is_partial_name(token: str, value: str) -> bool:
         parts[i:i + len(needle)] == needle
         for i in range(len(parts) - len(needle) + 1)
     )
-
-
-def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
-    """Ask which entity was meant, when a partial name matches several.
-
-    "AR_YD" is not a business object type, but three of them begin with it.
-    Guessing picks one at random; refusing to answer helps nobody. Naming the
-    three is the only useful move, and it is only possible because the
-    gazetteer is generated from the database.
-
-    Returns None when the question names an entity outright, or names nothing
-    resembling one -- neither is this kind of ambiguity.
-    """
-    from pipeline.context import detect_entity
-
-    from pipeline.metadata import profile
-
-    if detect_entity(question, gazetteer) is not None:
-        return None  # unambiguous; nothing to ask
-    # The entity's kind column a choice filters; none, and there is nothing
-    # to offer.
-    kind_column = profile().kind_column()
-    if not kind_column:
-        return None
-
-    for token in _candidate_tokens(question):
-        matches = [v for v in gazetteer if _is_partial_name(token, v)]
-        if len(matches) < 2:
-            continue
-        # A word that ends every name it matches is naming a family, not an
-        # unfinished identifier. "Suiting" is the last component of all five
-        # types that carry it and means all of them; "AR_YD" is the last
-        # component of none of its matches, which is what makes it a name the
-        # user stopped typing.
-        if all(v.lower().endswith(token.lower()) for v in matches):
-            continue
-        return FollowUp(
-            type="clarification",
-            reason="ambiguous_entity",
-            question=f"Which {token} type did you mean?",
-            suggestions=[
-                Suggestion(
-                    id=f"set_entity_{_value_id(value)}",
-                    label=value,
-                    action=Action(type="set_entity",
-                                  field=kind_column,
-                                  operator="=",
-                                  value=value),
-                )
-                for value in sorted(matches)
-            ],
-        )
-    return None
 
 
 # ------------------------------------------------------------------ schema --
@@ -537,16 +482,6 @@ def apply_action(state, action: Action) -> str:
         state.last_intent = "aggregate"
         return "How many are there?"
 
-    if action.type == "set_entity":
-        state.active_entity = action.value
-        state.active_filters = {
-            column: predicate
-            for column, predicate in state.active_filters.items()
-            if column != action.field
-        }
-        state.active_filters[action.field] = f"{action.field} = '{action.value}'"
-        return f"{action.value}"
-
     raise ValueError(f"no mutation defined for action type {action.type!r}")
 
 
@@ -600,7 +535,7 @@ def clarification_followup(text: str, model_options: list[str] | None = None,
     # not scrub because a chip is normally a value rather than a sentence.
     #
     # Filtered here rather than at the boundary because only here is it known
-    # where a chip came from. The enum and gazetteer chips below are built
+    # where a chip came from. The enum chips below are built
     # from real data by this function, and must not be filtered: a genuine
     # initiative type like AR_YD_Suiting looks exactly like an identifier and
     # is exactly what the user needs offered.
@@ -824,7 +759,7 @@ def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
     Only ever offered against readings the model itself numbered in prose. Two
     reasons, and both are load-bearing.
 
-    Gazetteer candidates are not positionally answerable. "Show the AR_YD
+    Value chips are not positionally answerable. "Show the AR_YD
     items" offers names that differ only in case (AR_YD_Shirting and
     AR_YD_SHIRTING) -- asking someone to tell option 2 from option 3 by
     number when they read alike is not a question with an answer.

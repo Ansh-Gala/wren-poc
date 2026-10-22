@@ -119,9 +119,6 @@ def summarise(results, out_dir: Path) -> dict:
         "turns_with_repair": sum(1 for r in results if r.repairs),
         "turns_offering_suggestions": sum(
             1 for r in results if r.followup.get("suggestions")),
-        "preflight_clarified": sum(1 for r in results if r.preflight_clarified),
-        # Turns the follow-up layer answered without any model call at all.
-        "llm_calls_avoided": sum(1 for r in results if r.preflight_clarified),
     })
 
     print("\n" + "=" * 66)
@@ -168,7 +165,6 @@ def summarise(results, out_dir: Path) -> dict:
             print(f"    suggested action       {s['action_accuracy']:.1f}%  (n={s['action_n']})")
         print(f"    turns repaired         {s['turns_with_repair']}")
         print(f"    turns with suggestions {s['turns_offering_suggestions']}")
-        print(f"    clarified without LLM  {s['preflight_clarified']}")
 
         wrong_repair = [r for r in repaired if not r.normalized_match]
         if wrong_repair:

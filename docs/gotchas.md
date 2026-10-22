@@ -17,14 +17,13 @@ The work spans three folders:
 
 Python is the source of truth. The Drupal module is a copy of it.
 
-**Five files must be byte-for-byte identical in both:**
+**Four files must be byte-for-byte identical in both:**
 
 ```
 metadata/business_rules.yaml
 metadata/schema_description.yaml
 metadata/question_sql_pairs.yaml
 metadata/column_hierarchy.yaml
-metadata/entity_gazetteer.yaml
 ```
 
 Rule: edit in **Python first**, then copy across with a plain file copy.
@@ -39,7 +38,6 @@ Drupal holds LF:
 | `question_sql_pairs.yaml` | CRLF | LF |
 | `schema_description.yaml` | CRLF | LF |
 | `column_hierarchy.yaml` | CRLF | CRLF |
-| `entity_gazetteer.yaml` | CRLF | CRLF |
 
 The **content** is identical, which is what matters: both sides parse the YAML
 and build the prompt from the result, so the line endings never reach it.
@@ -73,7 +71,7 @@ and the PHP files matter.
 
 ## 2. After any prompt or metadata change, re-run the parity check
 
-Every edit to a prompt or to those five YAML files changes the built system
+Every edit to a prompt or to those four YAML files changes the built system
 prompt, which is compared byte-for-byte.
 
 Run `generate_expected.py` **from the Python project root**, not from the
@@ -473,7 +471,7 @@ the rows *are* the schema, and no text filter can reach them.
 `pipeline/redact.py`, mirrored by `Redactor::namesDatabaseObject()`. It used to
 be copied into three files and they drifted. Do not copy it again; import it.
 
-**Do not run the guard over chips built from real data.** Gazetteer and enum
+**Do not run the guard over chips built from real data.** Enum
 chips come from the database, and a real value like `AR_YD_Suiting` looks
 exactly like an identifier. Only model-written options get filtered, and that
 filtering happens in `Followup` where the provenance is known — not at the
@@ -549,7 +547,7 @@ create-react-app `src/App.test.js` is left, and it is not ours.
 
 ## 13. The question suites drift too, and nothing checks them
 
-The five metadata files are guarded by parity. **The question suites are not.**
+The four metadata files are guarded by parity. **The question suites are not.**
 They live in both repos, nobody compares them, and on 23 September 2026 two of
 the three in Drupal were still asking about `tms_business_object_flat` — a
 table the Initiative rename deleted. 183 stale references in

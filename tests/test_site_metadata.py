@@ -12,7 +12,7 @@ from pipeline import metadata
 
 _ROOT = Path(__file__).resolve().parents[1]
 _COMMON = ("business_rules.yaml", "schema_description.yaml", "question_sql_pairs.yaml",
-           "column_hierarchy.yaml", "entity_gazetteer.yaml")
+           "column_hierarchy.yaml")
 _SITE = ("attributes_schema_description.yaml", "attributes_business_rules.yaml",
          "attributes_column_hierarchy.yaml")
 

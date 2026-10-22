@@ -92,7 +92,6 @@ def full_turn() -> dict:
         "normalized_question": "show me the delayed tasks",
         "repairs": [],
         "resumed_from": None,
-        "preflight_clarified": False,
         "generated_sql": "SELECT task_id, task_start_at FROM tms_task_flat "
                          "WHERE task_sla_status = 'Delayed'",
         "sql_valid": True,
