@@ -128,9 +128,9 @@ messages:
 welcome:
   text: Ask about your tasks, issues, initiatives or attachments.
   starters:
-    - {question: Show me my delayed tasks, hint: Running past their SLA, icon: delayed}
+    - {question: Show my delayed orders, hint: Running behind schedule, icon: pending}
+    - {question: Show me my delayed task, hint: Running past their SLA, icon: delayed}
     - {question: Show me all issues, hint: Raised against any task, icon: issues}
-    - {question: Show me my pending tasks, hint: Still open and assigned to you, icon: pending}
 
 # Pasted into the fixed prompt sentences exactly as written. The TMS values
 # keep their line breaks so the prompt stays byte-identical to the Python

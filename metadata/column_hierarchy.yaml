@@ -91,6 +91,7 @@ tables:
     - instant_closer
     - is_followup
     - initiative_color
+    - assigned_role
     row_groups:
     - task_department
     value_columns:
@@ -160,7 +161,6 @@ tables:
     priority:
     - week_of_month
     - name
-    - assigned_role
     - task_display_name
     - bo_type
     - field_1
@@ -176,6 +176,7 @@ tables:
     hidden:
     - dt
     - assigned_uid
+    - assigned_role
     - report_type
     - last_week_dt
     - open_white
