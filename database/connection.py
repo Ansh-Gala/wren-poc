@@ -83,6 +83,15 @@ def close_thread_connection() -> None:
             pass
 
 
+def _type_name(oid: int) -> str:
+    """A column's type as PDO's native_type names it: "numeric", or "_text"
+    for an array of text. Empty for a type psycopg does not know."""
+    info = psycopg.postgres.types.get(oid)
+    if info is None:
+        return ""
+    return "_" + info.name if info.array_oid == oid else info.name
+
+
 def read_only_posture(settings: Settings) -> dict:
     """What the read-only role may do to tables; SELECT alone is the aim.
 
@@ -120,6 +129,7 @@ def run_readonly(
                 cur.execute(f"SET LOCAL statement_timeout = {int(timeout)}")
                 cur.execute(sql)
                 columns = [d.name for d in cur.description] if cur.description else []
+                types = [_type_name(d.type_code) for d in cur.description] if cur.description else []
                 rows = [tuple(r) for r in cur.fetchall()] if cur.description else []
         finally:
             # Always, on the success and the failure path alike. The
@@ -137,6 +147,7 @@ def run_readonly(
             columns=columns,
             rows=rows,
             duration_ms=(time.perf_counter() - started) * 1000,
+            types=types,
         )
     except psycopg.Error as exc:
         # A reused connection must never carry a fault into the next query,

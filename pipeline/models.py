@@ -40,6 +40,9 @@ class QueryResult:
     duration_ms: float
     error: str | None = None
     sqlstate: str | None = None
+    # Each column's PostgreSQL type name ("int4", "numeric", "_text"), as PDO's
+    # native_type reports it. Empty when unknown.
+    types: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
