@@ -138,12 +138,10 @@ def test_a_closed_pool_declines(fake_cli):
     assert pool.ask("q") is None
 
 
-def test_a_process_that_says_nothing_declines_rather_than_hanging(tmp_path):
-    """A wedged CLI must become a fallback, not a stalled request.
-
-    Returning None is what lets the provider spawn a one-shot process
-    instead, so the user still gets an answer -- slowly rather than never.
-    """
+def test_a_process_that_says_nothing_times_out_rather_than_asking_again(tmp_path):
+    """A wedged CLI must become a timed-out run, not a stalled request, and
+    not a fallback: the question was sent, and a one-shot process would ask
+    it a second time, which Drupal never does."""
     script = tmp_path / "mute.py"
     script.write_text("import sys, time\nsys.stdin.readline()\ntime.sleep(30)\n",
                       encoding="utf-8")
@@ -154,7 +152,8 @@ def test_a_process_that_says_nothing_declines_rather_than_hanging(tmp_path):
     pool._refill()
     try:
         started = time.perf_counter()
-        assert pool.ask("q") is None
+        run = pool.ask("q")
+        assert run is not None and run.timed_out and not run.ok
         assert time.perf_counter() - started < 5, "should give up on the timeout"
     finally:
         pool.close()

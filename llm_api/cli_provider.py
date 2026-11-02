@@ -281,7 +281,7 @@ def _pool_for(settings: Settings, system_prompt: str) -> "ClaudePool | None":
                 model=settings.claude_model or None,
                 size=settings.cli_pool_size,
                 warmup=settings.cli_pool_warmup_seconds,
-                reply_timeout=min(90.0, float(settings.claude_timeout_seconds)),
+                reply_timeout=float(settings.claude_timeout_seconds),
                 effort_level=settings.claude_effort_level,
                 config_dir=settings.claude_config_dir,
             )

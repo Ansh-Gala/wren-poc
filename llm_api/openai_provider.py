@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from pipeline.models import ClaudeRun, Session
@@ -89,9 +89,13 @@ class OpenAIProvider(LLMProvider):
         if not settings.openai_api_key:
             return ClaudeRun(ok=False, error="OPENAI_API_KEY is not set.")
 
+        # One attempt with Drupal's limit: the SDK's own defaults (600s, two
+        # retries) could ask the same question three times.
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=float(settings.claude_timeout_seconds),
+            max_retries=0,
         )
 
         messages: list[ChatCompletionMessageParam] = [
@@ -117,6 +121,7 @@ class OpenAIProvider(LLMProvider):
         except Exception as e:
             return ClaudeRun(
                 ok=False,
+                timed_out=isinstance(e, APITimeoutError),
                 error=str(e),
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
@@ -184,7 +189,9 @@ class OpenAIProvider(LLMProvider):
             
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url
+            base_url=settings.openai_base_url,
+            timeout=float(settings.claude_timeout_seconds),
+            max_retries=0,
         )
         
         bridge = WrenMCPBridge(settings.benchmark_config, privacy_mode, settings)

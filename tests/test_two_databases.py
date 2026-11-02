@@ -200,7 +200,7 @@ def test_a_missing_or_malformed_user_id_is_refused(value, code):
 
 # -------------------------------------------------------- run roles --
 
-def _roles_db(monkeypatch, known=True, roles=("ticket_owner",), error=None):
+def _roles_db(monkeypatch, known=True, roles=("ticket_owner",), error=None, active=True):
     access._roles.clear()
     asked: list[str] = []
 
@@ -208,6 +208,8 @@ def _roles_db(monkeypatch, known=True, roles=("ticket_owner",), error=None):
         asked.append(sql)
         if "tms_user_flat" in sql:
             rows = [[1]] if known else []
+        elif "vf_users_field_data" in sql:
+            rows = [[1]] if active else []
         else:
             rows = [[r] for r in roles]
         return QueryResult(columns=[], rows=rows, duration_ms=1.0, error=error)
@@ -243,6 +245,17 @@ def test_authenticated_means_any_known_user(monkeypatch):
     _roles_db(monkeypatch, roles=())
     access.check_run(dataclasses.replace(TWO, run_roles=("authenticated",)), 5)
     _roles_db(monkeypatch, known=False, roles=())
+    with pytest.raises(access.RunNotAllowed):
+        access.check_run(dataclasses.replace(TWO, run_roles=("authenticated",)), 5)
+
+
+def test_a_blocked_user_may_not_run_whatever_their_roles(monkeypatch):
+    """A blocked Drupal account cannot sign in, so on Drupal it never asks."""
+    asked = _roles_db(monkeypatch, roles=("ticket_owner",), active=False)
+    with pytest.raises(access.RunNotAllowed):
+        access.check_run(TWO, 5)
+    assert any("vf_users_field_data" in sql and "status = 1" in sql for sql in asked)
+    _roles_db(monkeypatch, roles=(), active=False)
     with pytest.raises(access.RunNotAllowed):
         access.check_run(dataclasses.replace(TWO, run_roles=("authenticated",)), 5)
 

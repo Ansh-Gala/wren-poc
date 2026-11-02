@@ -58,7 +58,7 @@ def user_id_from(value) -> int:
 
 def user_roles(settings, user_id: int) -> frozenset[str] | None:
     """The user's roles, with "authenticated" when the user exists. None when
-    the user is unknown or the roles cannot be read."""
+    the user is unknown, blocked, or the roles cannot be read."""
     hit = _roles.get(user_id)
     if hit is not None and time.monotonic() - hit[0] < CACHE_TTL_SECONDS:
         return hit[1]
@@ -76,10 +76,13 @@ def user_roles(settings, user_id: int) -> frozenset[str] | None:
     granted = run_readonly(
         settings, "SELECT roles_target_id FROM vf_user__roles"
         f" WHERE entity_id = {int(user_id)} AND bundle = 'user' AND deleted = 0")
-    if known.error or granted.error:
+    # A blocked Drupal account cannot sign in, so on Drupal it never asks.
+    active = run_readonly(
+        settings, f"SELECT 1 FROM vf_users_field_data WHERE uid = {int(user_id)} AND status = 1 LIMIT 1")
+    if known.error or granted.error or active.error:
         return None             # not cached: the next request tries again
     roles = None
-    if known.rows:
+    if known.rows and active.rows:
         roles = frozenset({AUTHENTICATED} | {str(r[0]) for r in granted.rows if r[0]})
     _roles[user_id] = (time.monotonic(), roles)
     return roles

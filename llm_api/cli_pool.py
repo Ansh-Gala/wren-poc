@@ -107,10 +107,10 @@ DEFAULT_WARMUP_SECONDS = 3.0
 # is produced, with one spare for the variance.
 DEFAULT_POOL_SIZE = 4
 
-# How long to wait for a `result` event before giving up on a process. Far
-# below CLAUDE_TIMEOUT_SECONDS (500s by default): a wedged CLI holding an HTTP
-# request for three minutes is a worse failure than a fast error.
-DEFAULT_REPLY_TIMEOUT = 90.0
+# How long to wait for a `result` event before the question times out. The
+# provider passes CLAUDE_TIMEOUT_SECONDS: one attempt with Drupal's limit,
+# since a timed-out question is not asked a second time.
+DEFAULT_REPLY_TIMEOUT = 500.0
 
 
 @dataclass
@@ -307,7 +307,9 @@ class ClaudePool:
         Returns None when the pool could not serve the question, which is the
         caller's signal to fall back to spawning a one-shot process. Returning
         None rather than raising keeps the fallback boring: a pool problem must
-        never turn into a failed answer.
+        never turn into a failed answer. A process that says nothing within
+        the reply timeout is the exception: that is a timed-out run, not a
+        fallback, so the question is never asked twice.
         """
         if self._size == 0 or self._closed:
             return None
@@ -354,11 +356,11 @@ class ClaudePool:
         while True:
             remaining = deadline - time.perf_counter()
             if remaining <= 0:
-                return None                       # wedged; caller falls back
+                return self._timed_out(started)
             try:
                 line = warm.lines.get(timeout=remaining)
             except queue.Empty:
-                return None
+                return self._timed_out(started)
             if line is None:
                 return None                       # process died mid-answer
             line = line.strip()
@@ -400,6 +402,14 @@ class ClaudePool:
             if not run.duration_ms:
                 run.duration_ms = run.wall_ms
             return run
+
+    def _timed_out(self, started: float) -> ClaudeRun:
+        """No reply in time. An answer, not a fallback: the question has been
+        sent, and asking it again would be a second model call, which Drupal
+        never makes."""
+        waited = (time.perf_counter() - started) * 1000
+        return ClaudeRun(ok=False, timed_out=True, duration_ms=waited, wall_ms=waited,
+                         error=f"claude timed out after {self._reply_timeout:g}s")
 
     # --------------------------------------------------------------- close --
 
