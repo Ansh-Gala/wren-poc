@@ -409,6 +409,39 @@ def test_the_reader_sees_values_and_the_chat_stores_aliases(world, server):
     assert FakeStore.rows[0]["generated_sql"] == BY_RAHUL
 
 
+def test_debug_shows_how_the_turn_was_aliased_and_public_answers_never_do(world, server):
+    from pipeline.redact import public_response
+
+    full = server("tasks of Rahul Sharma", reply(BY_RAHUL))
+    pii = full["pii"]
+    assert pii["enabled"] and pii["model"] == server.runtime.settings.pii_model
+    assert pii["sent_to_llm"] == "tasks of PERSON_001"
+    assert pii["aliases"] == [{"alias": "PERSON_001", "label": "person",
+                               "original": "Rahul Sharma", "new": True, "used": True}]
+    assert pii["generated_sql"] == BY_RAHUL
+    assert pii["executed_sql"].endswith("= 'Rahul Sharma'")
+    assert "WHERE\n  assigned_user_name = 'Rahul Sharma'" in pii["executed_sql_pretty"]
+    assert full["generated_sql_pretty"].startswith("SELECT\n  task_id\nFROM tms_task_flat")
+    # Debug off: the mapping and the SQL never leave the server.
+    public = public_response(full)
+    assert "pii" not in public and "generated_sql_pretty" not in public
+    assert "PERSON_001" not in json.dumps(public)
+
+
+def test_aliasing_off_is_reported_as_off(world, server):
+    server.runtime.anonymizer = None
+    assert server("tasks of Rahul Sharma", reply(BY_RAHUL))["pii"] == {"enabled": False}
+
+
+def test_the_console_is_told_the_model_and_the_modes(server):
+    from fastapi.testclient import TestClient
+
+    api.app.state.runtime = server.runtime
+    info = TestClient(api.app).get("/info").json()
+    assert info["llm"]["mode"] in ("cli", "api") and "model" in info["llm"]
+    assert info["pii"] == {"enabled": True, "model": server.runtime.settings.pii_model}
+
+
 def test_after_a_restart_a_new_person_gets_the_next_number_never_001_again(world, server,
                                                                           monkeypatch):
     server("tasks of Rahul Sharma", reply(BY_RAHUL))

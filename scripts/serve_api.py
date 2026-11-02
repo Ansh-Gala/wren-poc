@@ -226,6 +226,61 @@ def _no_chart(reason: str) -> tuple[None, str, str | None]:
     return None, reason, chart_note_for(reason)
 
 
+def pretty_sql(sql: str | None) -> str | None:
+    """`sql` laid out to be read: a clause per line, nested queries indented.
+    Display only. What runs, and what is stored, is the statement as written."""
+    if not sql:
+        return sql
+    try:
+        import sqlglot
+
+        return ";\n\n".join(sqlglot.transpile(sql, read="postgres", write="postgres",
+                                              pretty=True))
+    except Exception:
+        return sql
+
+
+def pii_debug(r: TurnResult, pii: PiiGuard | None, settings) -> dict:
+    """What aliasing did on this turn, for the debug pane.
+
+    It holds the real values -- the mapping and the SQL as it ran -- so it is
+    a debug field like the SQL itself: public_response leaves it out, and
+    debug is honoured only on this machine. Never stored with the turn.
+    """
+    if pii is None:
+        return {"enabled": False}
+    new = {e["alias"] for e in pii.vault.new}
+    seen = " ".join(filter(None, [r.normalized_question, r.generated_sql]))
+    executed = None
+    if r.generated_sql:
+        try:
+            executed = pii.restore_sql(r.generated_sql)
+        except PiiError as exc:
+            executed = f"-- not run: {exc}"
+    return {
+        "enabled": True,
+        "model": settings.pii_model,
+        "threshold": settings.pii_threshold,
+        "detect_ms": round(r.pii_ms, 1),
+        "sent_to_llm": r.normalized_question,
+        "aliases": [{**e, "new": e["alias"] in new, "used": e["alias"] in seen}
+                    for e in pii.vault.entries()],
+        "masked": r.pii_masked,
+        "generated_sql": r.generated_sql,
+        "executed_sql": executed,
+        "executed_sql_pretty": pretty_sql(executed),
+    }
+
+
+def console_info(settings) -> dict:
+    """GET /info: what the console says under its input box. No values, no
+    database names: the model and the modes only."""
+    mode, provider, model = llm_identity(settings)
+    return {"llm": {"mode": mode, "provider": provider, "model": model},
+            "pii": {"enabled": settings.pii_aliasing,
+                    "model": settings.pii_model if settings.pii_aliasing else None}}
+
+
 def displayed(full: dict, pii: PiiGuard) -> dict:
     """The response with the real values back in everything the model wrote
     that a reader sees. The SQL stays as generated: debug shows that."""
@@ -309,6 +364,7 @@ def to_response(r: TurnResult, asked: str, before: dict, after: dict,
         "context": pills or [],
 
         "generated_sql": r.generated_sql,
+        "generated_sql_pretty": pretty_sql(r.generated_sql),
         "sql_valid": r.sql_valid,
         "execution_success": r.execution_success,
         "error": error,
@@ -662,6 +718,8 @@ class Runtime:
             full = to_response(result, question, before, after, self.settings, pills)
             # The chart's verdict is reached in to_response, after the turn ran.
             result.chart_reason = full.get("chart_reason")
+            # Before displayed(): the pane shows what the model was sent.
+            full["pii"] = pii_debug(result, pii, self.settings)
             if pii is not None:
                 full = displayed(full, pii)
 
@@ -751,6 +809,7 @@ class Runtime:
                                 self.settings, [early.get("generated_sql")])
         event = {
             "generated_sql": early.get("generated_sql"),
+            "generated_sql_pretty": pretty_sql(early.get("generated_sql")),
             "sql_valid": early.get("sql_valid"),
             "execution_success": early.get("execution_success"),
             "error": safe_error(early.get("error"), early.get("sqlstate")),
@@ -1027,6 +1086,12 @@ async def _read_json(request: Request) -> dict | JSONResponse:
 @app.get("/health")
 def get_health():
     return _closing(lambda: _json(200, health(_runtime().settings)))
+
+
+@app.get("/info")
+def get_info():
+    """The model and the modes, for the line under the console's input."""
+    return _json(200, console_info(_runtime().settings))
 
 
 def _answer(payload: dict) -> tuple[int, dict]:

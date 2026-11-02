@@ -47,6 +47,7 @@
 
        // ------------------------------------------------------- the query
        "generated_sql":        "SELECT ...",   // null if it asked instead
+       "generated_sql_pretty": "SELECT\n  ...", // the same, laid out to read
        "sql_valid":            true,
        "execution_success":    true,
        "error":                null,           // safe to show; never the raw one
@@ -124,6 +125,24 @@
        },
        "state_mutations": ["+ filter business_object_status = 'Active'"],
 
+       // ------------------------------------------------ who answered
+       "llm": {"mode": "cli", "provider": "claude-cli", "model": "sonnet"},
+
+       // ---------------------------------------------------- PII aliasing
+       // {"enabled": false} when PII_ALIASING is off. On, what the model
+       // was sent and how each value was aliased -- real values, so debug only.
+       "pii": {
+         "enabled": true,
+         "model": "fastino/gliner2.5-small-v1", "threshold": 0.5, "detect_ms": 61.2,
+         "sent_to_llm": "tasks of PERSON_001",
+         "aliases": [{"alias": "PERSON_001", "label": "person",
+                      "original": "Rahul Sharma", "new": true, "used": true}],
+         "masked": 0,                       // known values the tripwire caught
+         "generated_sql": "SELECT ... 'PERSON_001'",
+         "executed_sql": "SELECT ... 'Rahul Sharma'",
+         "executed_sql_pretty": "SELECT\n  ..."
+       },
+
        // ---------------------------------------------------------- cost
        "tokens": {
          "prompt": 11072, "cache_read": 11070, "cache_write": 0,
@@ -153,6 +172,11 @@ const API = (() => {
 
   // The same turn, delivered in two parts. See streamMessageToBackend.
   const STREAM_ENDPOINT = ENDPOINT + "/stream";
+
+  // The model and the modes, for the line under the input box.
+  const INFO_ENDPOINT = location.protocol.startsWith("http")
+    ? `${location.origin}/info`
+    : "http://localhost:8000/info";
 
   const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
@@ -285,6 +309,7 @@ const API = (() => {
       resumed_from: r.resumed_from ?? null,
 
       generated_sql: r.generated_sql ?? null,
+      generated_sql_pretty: r.generated_sql_pretty ?? null,
       sql_valid: r.sql_valid ?? null,
       execution_success: r.execution_success ?? null,
       error: r.error ?? null,
@@ -303,6 +328,9 @@ const API = (() => {
       state: r.state || {},
       state_mutations: r.state_mutations || [],
 
+      llm: r.llm || null,
+      pii: r.pii || null,
+
       tokens: r.tokens || {},
       latency_ms: r.latency_ms ?? null,
       tool_calls: r.tool_calls ?? null,
@@ -311,5 +339,5 @@ const API = (() => {
   }
 
   return { sendMessageToBackend, streamMessageToBackend, normalize,
-           ENDPOINT, STREAM_ENDPOINT, DEBUG_ENDPOINT };
+           ENDPOINT, STREAM_ENDPOINT, DEBUG_ENDPOINT, INFO_ENDPOINT };
 })();

@@ -19,11 +19,18 @@
 
 * { box-sizing: border-box; }
 
+/* The page never scrolls; the conversation does, inside its own box. That
+   is what keeps the input pinned to the bottom however long the thread. */
+html, body { height: 100%; }
+
 body {
   margin: 0;
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
   background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .muted { color: var(--muted); }
@@ -31,6 +38,7 @@ body {
 /* ------------------------------------------------------------- bar */
 
 .bar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -69,22 +77,27 @@ body {
 /* ---------------------------------------------------------- layout */
 
 .layout {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
-  align-items: start;
+  align-items: stretch;
   max-width: 1500px;
   margin: 0 auto;
 }
 @media (max-width: 1000px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .rail { max-height: 35vh; }
 }
 
 .chat {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 90px);
+  min-height: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -157,19 +170,44 @@ body {
   margin-bottom: 10px;
 }
 
-/* The point of the console: the SQL is never more than a glance away. */
+/* The point of the console: the SQL is never more than a glance away.
+   Coloured as VS Code's Dark+ theme colours it (ui/sql-highlight.js). */
 .sql {
   margin: 0 0 10px;
   padding: 10px 12px;
-  background: var(--sql-bg);
-  color: var(--sql-ink);
+  background: #1e1e1e;
+  color: #d4d4d4;
   border-radius: 6px;
   font: 12.5px/1.55 var(--mono);
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
   overflow-x: auto;
+  tab-size: 2;
 }
-.sql-none { background: #f0f1f3; color: var(--muted); font-style: italic; }
+.sql-keyword  { color: #569cd6; }
+.sql-function { color: #dcdcaa; }
+.sql-type     { color: #4ec9b0; }
+.sql-string   { color: #ce9178; }
+.sql-number   { color: #b5cea8; }
+.sql-comment  { color: #6a9955; font-style: italic; }
+.sql-ident    { color: #9cdcfe; }
+.sql-op       { color: #d4d4d4; }
+/* A PII alias inside a string: the value the database will see instead. */
+.sql-alias {
+  color: #c586c0;
+  font-weight: 600;
+  background: rgba(197, 134, 192, .14);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.sql-none { background: #f0f1f3; color: var(--muted); font-style: italic; white-space: pre-wrap; }
+.sql-label { margin: 10px 0 4px; font: 600 11px/1.3 var(--mono); color: var(--muted); }
+
+/* Alias -> real value, in the debug pane and the rail. */
+.alias-table { border-collapse: collapse; font: 12px/1.45 var(--mono); margin-bottom: 4px; }
+.alias-table th, .alias-table td { padding: 2px 10px 2px 0; text-align: left; vertical-align: top; }
+.alias-table th { color: var(--muted); font-weight: 600; }
+.alias-table td.alias { color: #8b3d88; font-weight: 600; }
+.alias-table td.tag-new { color: var(--ok); }
 
 /* Debug off hides the state rail, so the chat takes the whole grid rather
    than leaving a 340px gutter. Set from app.js instead of :has(), so it does
@@ -264,11 +302,11 @@ details.debug[open] > summary::before { content: "▾ "; }
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px 16px;
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
+  align-self: start;
+  max-height: 100%;
   overflow-y: auto;
 }
+.rail .kv dd { white-space: pre-line; }
 .rail h2 { margin: 0 0 4px; font-size: 14px; }
 .rail h3 {
   margin: 16px 0 6px;
@@ -285,11 +323,24 @@ details.debug[open] > summary::before { content: "▾ "; }
 /* --------------------------------------------------------- compose */
 
 .composer {
+  flex: none;
   display: flex;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 12px 6px;
   border-top: 1px solid var(--line);
   background: var(--panel);
+}
+
+/* Under the input: which model answers, and in which modes. */
+.status-line {
+  flex: none;
+  padding: 0 12px 8px;
+  background: var(--panel);
+  font: 11.5px/1.4 var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .composer textarea {
   flex: 1;
@@ -372,7 +423,6 @@ body.chat-mode .chat {
   background: transparent;
   border: 0;
   border-radius: 0;
-  min-height: calc(100vh - 47px);
 }
 
 body.chat-mode .messages { padding: 28px 20px 8px; }
@@ -382,6 +432,7 @@ body.chat-mode .messages { padding: 28px 20px 8px; }
 body.chat-mode .msg,
 body.chat-mode .empty,
 body.chat-mode .composer > *,
+body.chat-mode .status-line,
 body.chat-mode .error-banner {
   max-width: 760px;
   margin-left: auto;
@@ -497,7 +548,13 @@ body.chat-mode .composer {
   gap: 0;
   border-top: 0;
   background: transparent;
-  padding: 10px 20px 22px;
+  padding: 10px 20px 8px;
+}
+body.chat-mode .status-line {
+  width: 100%;
+  background: transparent;
+  text-align: center;
+  padding: 0 20px 12px;
 }
 body.chat-mode .composer textarea {
   background: var(--panel);
@@ -516,7 +573,7 @@ body.chat-mode .composer textarea:focus {
 body.chat-mode .composer .btn-primary {
   position: absolute;
   right: calc(50% - 380px + 10px);
-  bottom: 30px;
+  bottom: 17px;
   width: 34px;
   height: 34px;
   padding: 0;

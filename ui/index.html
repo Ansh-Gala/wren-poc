@@ -57,31 +57,33 @@
                 autocomplete="off"></textarea>
       <button id="send" type="submit" class="btn btn-primary">Send</button>
     </form>
+    <!-- Which model is answering, and in which modes. Filled from GET /info. -->
+    <div id="status-line" class="status-line" aria-live="polite"></div>
   </section>
 
   <!-- ------------------------------------------ conversation state -->
   <aside class="rail" id="state-rail" aria-label="Conversation state" hidden>
     <h2>Conversation state</h2>
-    <p class="muted rail-note">
-      What the next turn will be understood against. Survives between turns
-      until something resets it.
-    </p>
 
     <dl id="state-fields" class="kv"></dl>
 
-    <h3>Pending question</h3>
-    <div id="state-pending" class="pending muted">none</div>
+    <h3>Waiting for</h3>
+    <div id="state-pending" class="pending muted">nothing</div>
 
-    <h3>Last mutations</h3>
+    <h3>Last change</h3>
     <ul id="state-mutations" class="mutations"><li class="muted">none yet</li></ul>
 
-    <h3>Session totals</h3>
+    <h3 id="aliases-title" hidden>PII aliases in this chat</h3>
+    <div id="state-aliases" hidden></div>
+
+    <h3>Session</h3>
     <dl id="totals" class="kv"></dl>
   </aside>
 
 </main>
 
 <script src="table-copy.js"></script>
+<script src="sql-highlight.js"></script>
 <script src="mock.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
