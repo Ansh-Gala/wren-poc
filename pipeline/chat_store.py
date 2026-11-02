@@ -8,7 +8,8 @@ Every connection here is made with the HISTORY_DATABASE_USER login.
 
 uid is the request's user_id. Every read and write is conditioned on it, so a
 session id can only reach that user's own chats. Someone else's chat reads as
-no chat at all.
+no chat at all, and so does a chat its owner deleted (status 0,
+database/migrations/2026-11-02_chat_status.sql).
 
 Working state stays in the server's memory, as it stays in Drupal's
 expiring key-value store. The recent questions and the recap are rebuilt from
@@ -46,6 +47,9 @@ METADATA_MAX = 32768
 TITLE_MAX = 120
 # How a chat's dates are shown: Drupal's 'd M y h:i A'.
 DATE_FORMAT = "%d %b %y %I:%M %p"
+# The chat list shows only chats used in this many days. Older chats stay in
+# the tables and still open by id. Drupal's ConversationStore::LIST_DAYS.
+LIST_DAYS = 60
 
 # Statuses: what happened in the pipeline. Response types: what was seen.
 SUCCESS = "success"
@@ -284,21 +288,30 @@ class ChatStore:
 
     # ------------------------------------------------------------- read path
 
+    @staticmethod
+    def _list_since() -> int:
+        """The oldest updated_at the chat list still shows."""
+        return int(time.time()) - LIST_DAYS * 86400
+
     def list_chats(self, limit=50, offset=0) -> list[dict]:
-        """This user's chats, most recently answered first."""
+        """This user's chats from the last LIST_DAYS days, most recently
+        answered first."""
         limit = max(1, min(200, _int(limit, 50)))
         with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(self._q(
                 "SELECT c.id, c.title, c.created_at, c.updated_at,"
                 " (SELECT COUNT(*) FROM {turns} t WHERE t.chat_id = c.id) AS turn_count"
-                " FROM {chats} c WHERE c.uid = %s"
+                " FROM {chats} c WHERE c.uid = %s AND c.status = 1 AND c.updated_at >= %s"
                 " ORDER BY c.updated_at DESC, c.id DESC LIMIT %s OFFSET %s"),
-                (self.uid, limit, max(0, _int(offset, 0))))
+                (self.uid, self._list_since(), limit, max(0, _int(offset, 0))))
             return cur.fetchall()
 
     def count_chats(self) -> int:
+        """How many chats list_chats() can show, for a pager."""
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(self._q("SELECT COUNT(*) FROM {chats} WHERE uid = %s"), (self.uid,))
+            cur.execute(self._q("SELECT COUNT(*) FROM {chats}"
+                                " WHERE uid = %s AND status = 1 AND updated_at >= %s"),
+                        (self.uid, self._list_since()))
             return int(cur.fetchone()[0])
 
     def open_chat(self, chat_id) -> dict | None:
@@ -311,13 +324,22 @@ class ChatStore:
         with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(self._q(
                 "SELECT id, session_id, title, created_at, updated_at FROM {chats}"
-                " WHERE id = %s AND uid = %s"), (_int(chat_id, 0), self.uid))
+                " WHERE id = %s AND uid = %s AND status = 1"), (_int(chat_id, 0), self.uid))
             chat = cur.fetchone()
             if chat is None:
                 return None
             cur.execute(self._q("SELECT * FROM {turns} WHERE chat_id = %s ORDER BY sequence_number"),
                         (chat["id"],))
             return {"chat": chat, "turns": cur.fetchall()}
+
+    def delete_chat(self, chat_id) -> bool:
+        """Take one of this user's chats off their list. Soft: the rows are
+        kept. False if there is no such active chat of this user's."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(self._q("UPDATE {chats} SET status = 0"
+                                " WHERE id = %s AND uid = %s AND status = 1"),
+                        (_int(chat_id, 0), self.uid))
+            return cur.rowcount > 0
 
     def monthly_effective_tokens(self) -> int:
         """Effective tokens every user together has used this calendar month.

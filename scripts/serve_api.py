@@ -42,12 +42,12 @@ from pipeline.chat_store import (CLARIFICATION, DATE_FORMAT, SUCCESS, ChatStore,
                                  safe_session_id)
 from pipeline.context import ConversationState, remember_question
 from pipeline.context_pills import context_pills, drop_by_ref
-from pipeline.evaluator import SHOWN_ROWS, first_rows
+from pipeline.evaluator import SHOWN_ROWS, first_rows, pg_text
 from pipeline.followup import ACTION_TYPES, Action, apply_action, label_for_ref
 from pipeline.freshness import freshness_note
 from pipeline.identity_provider import resolve_identity
 from pipeline.lean_runner import TurnResult, logged, run_turn
-from pipeline.initiative import with_row_colour
+from pipeline.initiative import colours_by_lookup, indices as initiative_indices, with_row_colour
 from pipeline.links import with_links
 from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
@@ -81,6 +81,11 @@ TOKEN_LIMIT_CODE = "monthly_token_limit"
 # this long for the first, then fails rather than queueing forever.
 LOCK_WAIT_SECONDS = 30
 
+# Drupal's ConversationStore::STATE_EXPIRY: how long an idle chat keeps its
+# working state (filters, subject, a pending clarification). The turns are in
+# the tables and do not expire; only this does.
+STATE_EXPIRY_SECONDS = 3600
+
 # Aliasing is on and this chat's aliases could not be read. Answering anyway
 # would number new aliases from 001 again, over ones the chat already uses.
 PII_UNAVAILABLE = ("This chat could not be loaded, so the question was not sent. "
@@ -95,6 +100,13 @@ DISPLAYED = ("question", "normalized_question", "resumed_from", "resumed_answeri
 
 class TokenLimitError(Exception):
     pass
+
+
+class BadRequest(ValueError):
+    """Something wrong with the request itself, said as is with a 400.
+    Drupal's InvalidArgumentException in AskResource. Any other error, a
+    ValueError from deep in the pipeline included, is a 500 through
+    safe_error."""
 
 
 # --------------------------------------------------------------- sessions --
@@ -121,6 +133,18 @@ class Conversation:
         # lock: reading or appending it must not wait for a whole turn.
         self.debug_log: list[dict] = []
         self.debug_lock = threading.Lock()
+        # When the state was last saved, by the monotonic clock. None until
+        # the first turn.
+        self.saved_at: float | None = None
+
+    def expire_if_idle(self) -> None:
+        """Start the working state over when it has sat unused for
+        STATE_EXPIRY_SECONDS, as Drupal's expiring key-value store drops it.
+        The turns, the turn count and the debug log are kept."""
+        if self.saved_at is not None and time.monotonic() - self.saved_at > STATE_EXPIRY_SECONDS:
+            self.state = ConversationState()
+            self.session = Session(session_id=self.id, turns=[])
+            self.saved_at = None
 
     def reset(self) -> None:
         self.state = ConversationState()
@@ -608,7 +632,7 @@ class Runtime:
         # A drop has no question; the goal fills it in once the state is in
         # hand. Checked again below.
         if not question and not drop_ref:
-            raise ValueError("question is required")
+            raise BadRequest("question is required")
         debug = bool(payload.get("debug"))
         # Cleaned once, here: the saved chat is keyed by the cleaned id, so the
         # in-memory session and its lock must be too.
@@ -624,6 +648,7 @@ class Runtime:
         if not conversation.lock.acquire(timeout=LOCK_WAIT_SECONDS):
             raise RuntimeError("another question is still being answered on this session")
         try:
+            conversation.expire_if_idle()
             reset = bool(payload.get("reset_context"))
             if reset:
                 conversation.reset()
@@ -685,7 +710,7 @@ class Runtime:
                 if dropped and not question and conversation.state.active_goal is not None:
                     question = conversation.state.active_goal
             if not question:
-                raise ValueError("question is required")
+                raise BadRequest("question is required")
 
             before = state_snapshot(conversation.state)
 
@@ -712,6 +737,8 @@ class Runtime:
             if reset:
                 result.context_reset = True
             conversation.turn_index += 1
+            # Drupal saves the state, and starts its hour, here.
+            conversation.saved_at = time.monotonic()
             after = state_snapshot(conversation.state)
             pills = context_pills(conversation.state)
             self.record(result, question, after)
@@ -948,6 +975,24 @@ def _is_number(text: str) -> bool:
         return False
 
 
+def csv_colour_names(result, settings) -> dict:
+    """Each row's colour name ("Green"), keyed by initiative id.
+
+    The grid draws a colour strip from colours_by_lookup when the answer has
+    an initiative id but no colour column; this is that strip as text. Empty
+    when the answer has its own colour column, or no colours. Drupal's
+    CsvController::colourNames.
+    """
+    where = initiative_indices(result.columns)
+    if where["colour"] is not None:
+        return {}
+    name_by_code = {str(colour["code"]): str(name)[:1].upper() + str(name)[1:]
+                    for name, colour in profile().colours().items()
+                    if isinstance(colour, dict) and "code" in colour}
+    found = colours_by_lookup({"rows": result.rows}, where, settings)
+    return {record_id: name_by_code.get(code, "") for record_id, code in found.items()}
+
+
 def full_csv(settings, store: ChatStore, chat_id, turn) -> tuple[int, dict | bytes]:
     """GET /chats/<id>/turns/<n>/csv -- every row of one answered question.
 
@@ -996,9 +1041,21 @@ def full_csv(settings, store: ChatStore, chat_id, turn) -> tuple[int, dict | byt
 
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
-    writer.writerow(column_labels(result.columns))
+    headings = column_labels(result.columns)
+    colours = csv_colour_names(result, settings)
+    if colours:
+        headings = ["Colour", *headings]
+    id_at = initiative_indices(result.columns)["id"]
+    types = result.types or []
+    writer.writerow(headings)
     for row in result.rows:
-        writer.writerow([csv_cell(v) for v in row])
+        # The database's own text, as Drupal's PDO hands it to fputcsv.
+        cells = [csv_cell(pg_text(v, types[i] if i < len(types) else ""))
+                 for i, v in enumerate(row)]
+        if colours:
+            record_id = row[id_at] if id_at < len(row) else None
+            cells.insert(0, "" if record_id is None else colours.get(str(record_id), ""))
+        writer.writerow(cells)
     # A BOM, so Excel reads the file as UTF-8.
     return 200, ("﻿" + out.getvalue()).encode("utf-8")
 
@@ -1023,7 +1080,7 @@ def failure(exc: Exception, what: str) -> tuple[int, dict]:
         return 400, {"error": str(exc), "code": exc.code}
     if isinstance(exc, RunNotAllowed):
         return 403, {"error": str(exc), "code": exc.code}
-    if isinstance(exc, ValueError):
+    if isinstance(exc, BadRequest):
         return 400, {"error": str(exc)}
     log.exception(what)
     return 500, {"error": safe_error(str(exc)) or GENERIC}
@@ -1230,6 +1287,17 @@ def get_chat(request: Request, chat_id: int, debug: str = ""):
         # PHP's !empty(): "0" is off, as on Drupal.
         return _json(200, present_chat(opened, debug not in ("", "0") and _local(request)))
     return _closing(_chats_call, request, "I couldn't load that chat.", opened_chat)
+
+
+@app.delete("/chats/{chat_id}")
+def delete_chat(request: Request, chat_id: int):
+    """Takes the chat off its owner's list; its turns stay in the database.
+    Drupal's ChatResource::delete."""
+    def deleted(store: ChatStore, user_id: int) -> Response:
+        if not store.enabled or not store.delete_chat(chat_id):
+            return _json(404, {"error": "No such chat."})
+        return _json(200, {"deleted": True})
+    return _closing(_chats_call, request, "I couldn't delete that chat.", deleted)
 
 
 @app.get("/chats/{chat_id}/turns/{turn}/csv")
