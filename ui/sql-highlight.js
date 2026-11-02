@@ -100,7 +100,50 @@ const SqlHighlight = (() => {
     if (at < text.length) span.appendChild(doc.createTextNode(text.slice(at)));
   }
 
-  return { tokenize, render };
+  /* Two versions of a statement, line by line: [{op, text}] with op " " for
+     a line both share, "-" for one only `before` has, "+" for one only
+     `after` has. A longest-common-subsequence diff, so lines that moved
+     because a longer value re-wrapped the layout still pair up correctly. */
+  function diffLines(before, after) {
+    const a = String(before ?? "").split("\n");
+    const b = String(after ?? "").split("\n");
+    const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      }
+    }
+    const out = [];
+    let i = 0;
+    let j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { out.push({ op: " ", text: a[i] }); i++; j++; }
+      else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ op: "-", text: a[i++] });
+      else out.push({ op: "+", text: b[j++] });
+    }
+    while (i < a.length) out.push({ op: "-", text: a[i++] });
+    while (j < b.length) out.push({ op: "+", text: b[j++] });
+    return out;
+  }
+
+  /* diffLines as coloured lines: one block per line, marked and tinted. */
+  function renderDiff(before, after, doc = document) {
+    const fragment = doc.createDocumentFragment();
+    const kind = { " ": "same", "-": "del", "+": "add" };
+    for (const line of diffLines(before, after)) {
+      const row = doc.createElement("span");
+      row.className = `diff-line diff-${kind[line.op]}`;
+      const mark = doc.createElement("span");
+      mark.className = "diff-mark";
+      mark.textContent = line.op;
+      row.appendChild(mark);
+      row.appendChild(render(line.text, doc));
+      fragment.appendChild(row);
+    }
+    return fragment;
+  }
+
+  return { tokenize, render, diffLines, renderDiff };
 })();
 
 if (typeof module !== "undefined") module.exports = SqlHighlight;

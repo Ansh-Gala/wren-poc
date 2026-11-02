@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 
-const { tokenize, render } = require("./sql-highlight.js");
+const { tokenize, render, diffLines, renderDiff } = require("./sql-highlight.js");
 
 const kinds = (sql) => tokenize(sql).filter((t) => t.type !== "space")
   .map((t) => `${t.type}:${t.text}`);
@@ -58,6 +58,24 @@ test("render builds text nodes, so markup in a value stays text", () => {
   assert.strictEqual(fragment.text, sql);
   const str = fragment.children.find((c) => c.className === "sql-string");
   assert.strictEqual(str.children[0].tag, "#text");
+});
+
+test("the diff pairs the aliased and the executed SQL line by line", () => {
+  const aliased = "SELECT\n  task_id\nFROM t\nWHERE\n  n = 'PERSON_001'\n  AND s = 'open'";
+  const executed = "SELECT\n  task_id\nFROM t\nWHERE\n  n = 'Rahul Sharma'\n  AND s = 'open'";
+  assert.deepStrictEqual(diffLines(aliased, executed).map((l) => `${l.op}${l.text}`), [
+    " SELECT", "   task_id", " FROM t", " WHERE",
+    "-  n = 'PERSON_001'", "+  n = 'Rahul Sharma'", "   AND s = 'open'"]);
+  assert.deepStrictEqual(diffLines("a\nb", "a\nb").map((l) => l.op), [" ", " "]);
+  // A longer value re-wrapping the layout still diffs cleanly.
+  assert.deepStrictEqual(diffLines("x\ny = 'A'\nz", "x\ny =\n  'A long one'\nz").map((l) => l.op),
+    [" ", "-", "+", "+", " "]);
+});
+
+test("the diff renders every line, marked, losing nothing", () => {
+  const rows = renderDiff("a = 'PERSON_001'", "a = 'Rahul'", fakeDocument()).children;
+  assert.deepStrictEqual(rows.map((r) => r.className), ["diff-line diff-del", "diff-line diff-add"]);
+  assert.deepStrictEqual(rows.map((r) => r.text), ["-a = 'PERSON_001'", "+a = 'Rahul'"]);
 });
 
 test("a PII alias inside a string is marked out", () => {

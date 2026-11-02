@@ -179,10 +179,37 @@ body {
   color: #d4d4d4;
   border-radius: 6px;
   font: 12.5px/1.55 var(--mono);
-  white-space: pre;
-  overflow-x: auto;
+  /* Wrapped, never scrolled sideways: the layout's indentation is kept, and
+     a line too long for the box breaks rather than hiding its end. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
   tab-size: 2;
 }
+
+/* Diff / LLM / Executed, over one SQL box. */
+.sql-views { margin: 0 0 10px; }
+.sql-views .sql { margin: 0; border-top-left-radius: 0; }
+.sql-tabs { display: flex; gap: 2px; }
+.sql-tab {
+  font: 600 11.5px/1 var(--mono);
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: #2d2d2d;
+  color: #9d9d9d;
+  cursor: pointer;
+}
+.sql-tab:hover { color: #d4d4d4; }
+.sql-tab.active { background: #1e1e1e; color: #ffffff; box-shadow: inset 0 2px 0 #0e639c; }
+
+/* One line of the diff. Removed: what the LLM wrote; added: what ran. */
+.diff-line { display: block; padding-left: 1.6em; text-indent: -1.6em; }
+.diff-mark { display: inline-block; width: 1.6em; text-indent: 0; color: #6e7681; user-select: none; }
+.diff-del { background: rgba(244, 71, 71, .16); }
+.diff-del .diff-mark { color: #f14c4c; }
+.diff-add { background: rgba(35, 209, 139, .14); }
+.diff-add .diff-mark { color: #23d18b; }
 .sql-keyword  { color: #569cd6; }
 .sql-function { color: #dcdcaa; }
 .sql-type     { color: #4ec9b0; }
@@ -338,9 +365,13 @@ details.debug[open] > summary::before { content: "▾ "; }
   background: var(--panel);
   font: 11.5px/1.4 var(--mono);
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+}
+.status-line.status-warn { color: var(--warn); }
+.status-line.status-pii-on::before {
+  content: "●";
+  color: var(--ok);
+  margin-right: 6px;
 }
 .composer textarea {
   flex: 1;
