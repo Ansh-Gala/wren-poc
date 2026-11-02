@@ -1,0 +1,25 @@
+{
+  "default_labels": [
+    "person",
+    "email",
+    "phone number",
+    "age",
+    "location",
+    "company name",
+    "vendor name"
+  ],
+  "label_expansions": {
+    "location": ["address", "city", "country"]
+  },
+  "custom_words": {
+    "company name": ["PVH", "Sunrise Retail Pvt Ltd"],
+    "vendor name": ["test-vendor", "Shree Balaji Packaging", "Apex Pallets & Crates"]
+  },
+  "never_mask": [
+    "i", "me", "my", "mine", "myself", "we", "us", "our", "ours", "you", "your",
+    "he", "him", "his", "she", "her", "hers", "they", "them", "their", "someone",
+    "users", "user", "bo", "assignee", "wcms_admin", "na", "TMS",
+    "AR_YD_Suiting", "tms_user_flat", "Sales", "department", "workflow",
+    "attachments", "file uri", "workflow code", "SLA", "pie chart", "top workflow"
+  ]
+}

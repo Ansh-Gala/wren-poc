@@ -61,6 +61,8 @@ EXCLUDE = [
     "scripts/analyze_followup.py",
     "scripts/analyze_lean.py",
     "scripts/verify_ground_truth.py",
+    # Measures the PII detector on question sets; the detector itself ships.
+    "scripts/pii_eval.py",
     "tests/test_classify.py",
     "tests/test_ground_truth.py",
     "tests/test_lean_suite.py",

@@ -22,3 +22,7 @@ uvicorn>=0.30            # serves it
 # as the Drupal port's AnthropicApiProvider does. The CLI remains the default.
 anthropic>=1.15.0
 openai>=1.0.0
+
+# PII_ALIASING=true: GLiNER finds the personal data in a question, locally.
+# torch and transformers, which it needs, already come with wrenai[memory].
+gliner2[local]==2.1.0

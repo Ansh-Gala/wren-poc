@@ -161,10 +161,15 @@ class ChatStore:
     # ------------------------------------------------------------ write path
 
     def load(self, session_id) -> dict:
-        """The chat's id, how many turns it has, and its history. A chat that
-        cannot be loaded is an empty chat, not a failed question."""
-        out = {"chat_id": None, "turn_index": 0,
-               "history": {"questions": [], "recap": None}}
+        """The chat's id, how many turns it has, its history and its aliases.
+
+        A chat that cannot be loaded is an empty chat, not a failed question --
+        unless aliasing is on, when an empty chat would number its aliases
+        from 001 again. `ok` says which happened, so the caller can refuse.
+        """
+        out = {"chat_id": None, "turn_index": 0, "ok": True, "aliases": [],
+               "history": {"questions": [], "screened": [], "recap": None,
+                           "recap_screened": True}}
         if not self.enabled:
             return out
         try:
@@ -176,9 +181,11 @@ class ChatStore:
                                 (chat_id,))
                     out["turn_index"] = int(cur.fetchone()[0])
                     out["history"] = self._history(cur, chat_id)
+                    out["aliases"] = self._aliases(cur, chat_id)
                 out["chat_id"] = chat_id
         except Exception as exc:
             log.error("Could not load chat %s: %s", session_id, exc)
+            out["ok"] = False
         return out
 
     def _history(self, cur, chat_id: int) -> dict:
@@ -187,24 +194,42 @@ class ChatStore:
         The repaired or resumed question when there is one: a stored "4" means
         nothing without the question it answered. Questions stop at the latest
         explicit reset, which is kept.
+
+        `screened` marks the questions whose turn ran with aliasing on, and
+        `recap_screened` the recap: anything else was stored with its values
+        and has to be anonymized before it reaches a prompt.
         """
         cur.execute(self._q(
             "SELECT COALESCE(metadata->'pipeline'->>'normalized_question', question),"
             "       metadata->'pipeline'->>'context_reset',"
             "       CASE WHEN metadata->'state' IS NOT NULL THEN 1 ELSE 0 END,"
-            "       metadata->'state'->>'rolling_recap'"
+            "       metadata->'state'->>'rolling_recap',"
+            "       CASE WHEN metadata->'pii' IS NOT NULL THEN 1 ELSE 0 END"
             " FROM {turns} WHERE chat_id = %s"
             f" ORDER BY sequence_number DESC LIMIT {int(RECENT_QUESTIONS)}"), (chat_id,))
         questions: list[str] = []
-        recap, found = None, False
-        for question, context_reset, has_state, row_recap in cur.fetchall():
+        screened: list[bool] = []
+        recap, recap_screened, found = None, True, False
+        for question, context_reset, has_state, row_recap, has_pii in cur.fetchall():
             # The newest row that kept its state; a NULL there means forgotten.
             if not found and int(has_state) == 1:
-                recap, found = row_recap, True
+                recap, recap_screened, found = row_recap, int(has_pii) == 1, True
             questions.append(str(question or ""))
+            screened.append(int(has_pii) == 1)
             if context_reset == "true" or _EXPLICIT_RESET.search(str(question or "")):
                 break
-        return {"questions": list(reversed(questions)), "recap": recap}
+        return {"questions": list(reversed(questions)), "screened": list(reversed(screened)),
+                "recap": recap, "recap_screened": recap_screened}
+
+    def _aliases(self, cur, chat_id: int) -> list[dict]:
+        """Every alias the chat's turns introduced, oldest first. All turns,
+        not the recent ten: a recap can carry an alias from turn one."""
+        from pipeline.pii import stored_aliases
+
+        cur.execute(self._q(
+            "SELECT metadata->'pii'->'new_aliases' FROM {turns}"
+            " WHERE chat_id = %s ORDER BY sequence_number"), (chat_id,))
+        return stored_aliases(row[0] for row in cur.fetchall())
 
     def save(self, session_id, question: str = "") -> int | None:
         """Make sure the chat row exists, and move its clock. The question
@@ -231,10 +256,11 @@ class ChatStore:
             return None
 
     def record_turn(self, chat_id, turn_index: int, question: str, r, full: dict,
-                    state: ConversationState | None = None) -> None:
-        """One answered turn. Best-effort: any failure is logged and dropped."""
+                    state: ConversationState | None = None) -> bool:
+        """One answered turn. Best-effort: any failure is logged and dropped.
+        False when nothing was written, which aliasing has to act on."""
         if not self.enabled or not chat_id or int(chat_id) <= 0:
-            return
+            return False
         try:
             status = turn_status(r)
             with self._connect() as conn, conn.cursor() as cur:
@@ -251,8 +277,10 @@ class ChatStore:
                      _clip(r.llm_mode, 32), _clip(r.llm_model, 64),
                      effective_tokens(r), step_timings(r),
                      metadata_for(r, question, state), int(time.time())))
+            return True
         except Exception as exc:
             log.error("Could not record turn %s of chat %s: %s", turn_index, chat_id, exc)
+            return False
 
     # ------------------------------------------------------------- read path
 
@@ -406,6 +434,14 @@ def metadata_for(r, question: str, state: ConversationState | None = None) -> st
         metadata["state"] = state_array(state)
     if r.raw_output:
         metadata["raw_output"] = str(r.raw_output)
+    if getattr(r, "pii_active", False):
+        # The aliases this turn introduced, written in the same INSERT as the
+        # question that introduced them. Present even when empty: it is also
+        # what marks the turn's question and recap as already anonymized.
+        # Never shed below -- the chat's later turns cannot be restored
+        # without it.
+        metadata["pii"] = {"new_aliases": list(r.pii_new_aliases),
+                           "masked": int(getattr(r, "pii_masked", 0) or 0)}
 
     # Degrade deterministically rather than risk a failed insert.
     encoded = _encode(metadata)

@@ -143,6 +143,17 @@ class Settings:
     anthropic_api_key: str = field(repr=False, default="")
     anthropic_model: str = "claude-opus-5-5"
 
+    # PII aliasing (pipeline/pii.py, docs/pii-aliasing-design.md): names,
+    # emails and places in a question reach the LLM as PERSON_001 and the
+    # like, and are put back into the SQL before it runs. Off by default, so
+    # the suites and the parity harness run exactly as before.
+    pii_aliasing: bool = False
+    pii_model: str = "fastino/gliner2.5-small-v1"
+    pii_threshold: float = 0.5
+    # Questions detected at the same time. More than the CPU can use only
+    # slows every one of them down (measured: 4 threads best of 4, 8 and 16).
+    pii_concurrency: int = 4
+
     def secrets(self) -> list[str]:
         """Non-empty secret values, for the redacting log formatter."""
         return [s for s in (self.pg_password, self.pg_readonly_password,
@@ -168,6 +179,11 @@ class Settings:
         elif self.history_db_name or self.history_db_user:
             out.append("Saved chats need both HISTORY_DATABASE_NAME and "
                        "HISTORY_DATABASE_USER.")
+        if self.pii_aliasing and not self.chats_configured:
+            out.append("PII_ALIASING needs saved chats (HISTORY_DATABASE_*): each "
+                       "chat's aliases are stored with its turns.")
+        if not 0.0 <= self.pii_threshold <= 1.0:
+            out.append("PII_THRESHOLD must be between 0 and 1.")
         return out
 
     def project_dir(self, config_name: str) -> Path:
@@ -230,6 +246,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "MONTHLY_TOKEN_LIMIT", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
         "GROQ_API_KEY", "GEMINI_API_KEY", "CLI_POOL_SIZE", "CLI_POOL_WARMUP_SECONDS",
         "BENCHMARK_USER_ID", "BENCHMARK_USER_NAME", "STREAM_ANSWERS",
+        "PII_ALIASING", "PII_MODEL", "PII_THRESHOLD", "PII_CONCURRENCY",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -288,6 +305,10 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         stream_answers=_as_bool(g("STREAM_ANSWERS"), True),
         cli_pool_size=_as_int(g("CLI_POOL_SIZE"), 4),
         cli_pool_warmup_seconds=_as_float(g("CLI_POOL_WARMUP_SECONDS"), 3.0),
+        pii_aliasing=_as_bool(g("PII_ALIASING"), False),
+        pii_model=(g("PII_MODEL") or "fastino/gliner2.5-small-v1").strip(),
+        pii_threshold=_as_float(g("PII_THRESHOLD"), 0.5),
+        pii_concurrency=max(1, _as_int(g("PII_CONCURRENCY"), 4)),
         # Each branch falls back to "" -- naming a provider whose key is absent
         # is a configuration mistake, and it should be reported as one rather
         # than raising AttributeError from inside the loader, before any code

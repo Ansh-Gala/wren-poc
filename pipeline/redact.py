@@ -174,7 +174,12 @@ def names_a_database_object(text: str | None) -> bool:
     sentence containing "status" or "department", which are columns and
     ordinary English at the same time.
     """
-    flat = " ".join(str(text or "").split())
+    # A PII alias (PERSON_001, pipeline/pii.py) has the snake_case shape, but
+    # it stands for a value the user gave, not for anything in the schema.
+    # Upper case and only our prefixes: no table or column here looks like one.
+    from pipeline.pii import without_aliases
+
+    flat = " ".join(without_aliases(str(text or "")).split())
     return bool(flat) and any(t.search(flat) for t in _TELLS)
 
 # What a clarification becomes when it trips a tell.

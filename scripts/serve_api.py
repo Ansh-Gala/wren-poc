@@ -53,6 +53,8 @@ from pipeline.labels import with_column_labels, with_presentation
 from pipeline.lean_suite import SuiteTurn
 from pipeline.metadata import enable_site_metadata, profile
 from pipeline.models import Session
+from pipeline.pii import (AliasRefused, PiiError, PiiGuard, PiiVault, get_anonymizer,
+                          restore_deep, restore_sql, stored_aliases)
 from pipeline.redact import (
     GENERIC, names_a_database_object, public_response, safe_error, safe_explanation,
 )
@@ -78,6 +80,17 @@ TOKEN_LIMIT_CODE = "monthly_token_limit"
 # Drupal's ChatRuntime::LOCK_WAIT: a second question on a busy chat waits
 # this long for the first, then fails rather than queueing forever.
 LOCK_WAIT_SECONDS = 30
+
+# Aliasing is on and this chat's aliases could not be read. Answering anyway
+# would number new aliases from 001 again, over ones the chat already uses.
+PII_UNAVAILABLE = ("This chat could not be loaded, so the question was not sent. "
+                   "Please try again.")
+
+# The parts of a response a reader sees that the model wrote, and so can
+# carry aliases. Rows come from the database and need nothing.
+DISPLAYED = ("question", "normalized_question", "resumed_from", "resumed_answering",
+             "explanation", "clarification", "followup", "context", "state",
+             "state_mutations")
 
 
 class TokenLimitError(Exception):
@@ -211,6 +224,26 @@ def chart_for(r: TurnResult, result) -> tuple[dict | None, str | None, str | Non
 
 def _no_chart(reason: str) -> tuple[None, str, str | None]:
     return None, reason, chart_note_for(reason)
+
+
+def displayed(full: dict, pii: PiiGuard) -> dict:
+    """The response with the real values back in everything the model wrote
+    that a reader sees. The SQL stays as generated: debug shows that."""
+    out = {**full, **{key: pii.restore_deep(full[key]) for key in DISPLAYED if key in full}}
+    result = out.get("result")
+    if isinstance(result, dict) and isinstance(result.get("chart"), dict):
+        out["result"] = {**result, "chart": pii.restore_deep(result["chart"])}
+    return out
+
+
+def stored_vault(turns: list[dict]) -> PiiVault | None:
+    """A saved chat's aliases, from its turns. None when they contradict each
+    other, which a reader of the chat must not paper over."""
+    try:
+        return PiiVault.from_entries(stored_aliases(row.get("metadata") for row in turns))
+    except PiiError as exc:
+        log.error("A saved chat's aliases are unusable: %s", exc)
+        return None
 
 
 def shown_result(actual_result, settings) -> dict | None:
@@ -440,6 +473,13 @@ class Runtime:
         self.privacy = args.privacy
         self.context_mode = args.context_mode
 
+        # Loaded now, like the warm processes below: a few seconds the first
+        # question would otherwise wait through.
+        self.anonymizer = None
+        if self.settings.pii_aliasing:
+            self.anonymizer = get_anonymizer(self.settings)
+            self.anonymizer.load()
+
         # Questions people actually type are the only source of test cases
         # nobody thought to write, and they were previously going to stderr and
         # dying with the terminal. Same filename the suites use, so
@@ -479,6 +519,16 @@ class Runtime:
                 fh.write(json.dumps(row, default=str) + "\n")
         except OSError as exc:      # a full disk must not lose the answer
             log.warning("could not append to %s: %s", self.log_path, exc)
+
+    def pii_guard(self, loaded: dict) -> PiiGuard | None:
+        """This turn's aliasing, with the chat's aliases as stored. None when
+        aliasing is off. Raises rather than start a chat's numbering over."""
+        anonymizer = getattr(self, "anonymizer", None)
+        if anonymizer is None:
+            return None
+        if not loaded.get("ok", True):
+            raise PiiError(PII_UNAVAILABLE)
+        return PiiGuard(anonymizer, PiiVault.from_entries(loaded.get("aliases") or []))
 
     def authorize(self, payload: dict) -> int:
         """The request's user_id, once they are allowed to run a question.
@@ -527,15 +577,24 @@ class Runtime:
             # what it was about. On a reset this turn is the new start. The
             # turn number is counted from the rows, so it continues them.
             loaded = store.load(session_id)
+            pii = self.pii_guard(loaded)
             if loaded["chat_id"] is not None:
                 conversation.turn_index = loaded["turn_index"]
                 state = conversation.state
                 state.recent_questions = []
                 state.rolling_recap = None
                 if not reset:
-                    for asked in loaded["history"]["questions"]:
-                        remember_question(state, asked)
-                    state.rolling_recap = loaded["history"]["recap"]
+                    history = loaded["history"]
+                    # A turn saved before aliasing was on kept its values;
+                    # they are anonymized here, before any prompt holds them.
+                    screened = history.get("screened") or [True] * len(history["questions"])
+                    for asked, clean in zip(history["questions"], screened):
+                        remember_question(state, asked if clean or pii is None
+                                          else pii.anonymize(asked))
+                    recap = history["recap"]
+                    if recap and pii is not None and not history.get("recap_screened", True):
+                        recap = pii.anonymize(recap)
+                    state.rolling_recap = recap
 
             # A clicked suggestion carries a structured action. Applying it
             # here means the context the model sees already reflects the
@@ -592,6 +651,7 @@ class Runtime:
                 # Every turn: the business rules, not this code, decide what
                 # is personal. A cached lookup is cheap.
                 identity=resolve_identity(self.settings, user_id),
+                pii=pii,
             )
             if reset:
                 result.context_reset = True
@@ -602,17 +662,29 @@ class Runtime:
             full = to_response(result, question, before, after, self.settings, pills)
             # The chart's verdict is reached in to_response, after the turn ran.
             result.chart_reason = full.get("chart_reason")
+            if pii is not None:
+                full = displayed(full, pii)
 
             # Inside the lock: the next question reads its recent questions
             # from these rows, and must not load before this one lands.
-            chat_id = store.save(session_id, question)
+            chat_id = store.save(session_id, question if pii is None
+                                 else pii.restore_text(question))
             # Lets the page ask for every row. Only now: the chat id does not
             # exist until save().
             if chat_id is not None and isinstance(full.get("result"), dict) \
                     and full["result"].get("truncated"):
                 full["result"] = {**full["result"],
                                   "download": {"chat_id": chat_id, "turn": turn_index + 1}}
-            store.record_turn(chat_id, turn_index, question, result, full, conversation.state)
+            saved = store.record_turn(chat_id, turn_index, question, result, full,
+                                      conversation.state)
+            if pii is not None and not saved:
+                # The aliases this turn introduced were not stored, and the
+                # state in memory already refers to them. Start the thread
+                # clean rather than carry aliases nothing can restore.
+                log.error("Turn %s of session %s was not saved; its conversation "
+                          "state is reset so no unsaved alias outlives it.",
+                          turn_index, session_id)
+                conversation.reset()
         finally:
             conversation.lock.release()
 
@@ -744,6 +816,8 @@ def present_chat(opened: dict, debug: bool) -> dict:
     the rows, which are never stored. Drupal's ChatResource::present; each
     turn goes through public_response, the one audited whitelist."""
     turns = []
+    # What the model wrote was stored with aliases; the reader sees values.
+    vault = stored_vault(opened["turns"])
     for row in opened["turns"]:
         metadata = row.get("metadata") or {}
         if isinstance(metadata, str):
@@ -764,6 +838,8 @@ def present_chat(opened: dict, debug: bool) -> dict:
                        # Rows are never stored.
                        "rows": []},
         }
+        if vault is not None:
+            shaped = restore_deep(shaped, vault)
         turn = {**public_response(shaped),
                 "sequence_number": int(row["sequence_number"]),
                 # Safe to expose: neither names a table, column or statement.
@@ -840,6 +916,16 @@ def full_csv(settings, store: ChatStore, chat_id, turn) -> tuple[int, dict | byt
         return 422, {"error": CSV_REFUSED}
     if not check_against_schema(sql).grounded:
         return 422, {"error": CSV_REFUSED}
+    # Stored as the model wrote it, aliases and all: the values go back in
+    # here, from the aliases the chat's turns stored, as they did when it ran.
+    vault = stored_vault(opened["turns"])
+    if vault is None:
+        return 422, {"error": CSV_REFUSED}
+    if not vault.empty:
+        try:
+            sql = restore_sql(sql, vault)
+        except AliasRefused:
+            return 422, {"error": CSV_REFUSED}
 
     from database.connection import run_readonly
     from pipeline.labels import column_labels
@@ -1138,6 +1224,9 @@ def main() -> int:
         else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
     print(f"run roles:         {', '.join(settings.run_roles) or 'none (CHATBOT_RUN_ROLES): nobody may ask'}")
     print(f"context mode: {args.context_mode}")
+    print("PII aliasing:      " + (
+        f"on ({settings.pii_model}, threshold {settings.pii_threshold})"
+        if settings.pii_aliasing else "off (PII_ALIASING)"))
     print()
     print(f"  console   http://{args.host}:{args.port}/?user_id=<TMS user id>")
     print(f"  endpoint  POST http://{args.host}:{args.port}/ask")

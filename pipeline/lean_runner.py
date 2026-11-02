@@ -17,7 +17,7 @@ import json
 import math
 import re
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Callable
 
@@ -38,6 +38,7 @@ from pipeline.lean_suite import Conversation, SuiteTurn
 from pipeline.chart_check import MAX_ROWS as CHART_MAX_ROWS, TIMEOUT_MS as CHART_TIMEOUT_MS
 from pipeline.sql_semantics import check_against_schema, compare as compare_semantics
 from pipeline.models import ParsedSQL, QueryResult, Session, Turn
+from pipeline.pii import AliasRefused, PiiGuard, PiiVault, get_anonymizer
 from pipeline.safety import UnparseableSQLError, UnsafeSQLError, assert_read_only
 from claude.prompts import build_repair_question
 from claude.parser import (
@@ -207,6 +208,14 @@ class TurnResult:
     chart_error: str | None = None
     chart_reason: str | None = None
 
+    # PII aliasing (pipeline/pii.py). With it off these stay empty and nothing
+    # is stored for them. new_aliases holds the real values: it goes to the
+    # chat database with the turn, and never to a log.
+    pii_active: bool = False
+    pii_new_aliases: list[dict] = field(default_factory=list)
+    pii_masked: int = 0
+    pii_ms: float = 0.0
+
 
 def _classify_failure(r: TurnResult, expected, actual) -> str:
     """Name the failure so patterns are visible across the suite."""
@@ -341,21 +350,41 @@ def _attach_followup(
 # memo was either rewriting that or running the user's query twice.
 
 
+def _pii(pii: PiiGuard | None) -> dict:
+    """The aliasing argument, passed only when aliasing is on. A test double
+    standing in for one of these helpers was written before the argument
+    existed and rejects it -- the reason on_delta is only sent when asked for."""
+    return {"pii": pii} if pii is not None else {}
+
+
 def _execute(settings: Settings, sql: str, timeout_ms: int,
-             memo: dict | None = None) -> QueryResult:
+             memo: dict | None = None, pii: PiiGuard | None = None) -> QueryResult:
     """Run `sql`, or hand back the run that already happened.
 
     The memo is per turn and keyed on the statement, so it can only ever
     return the result of the identical query. It is consulted, never
     populated, on this path: only the early execution puts anything in it, and
     only after the same two gates run_turn applies.
+
+    With aliasing on, `sql` is the model's, aliases and all, and the real
+    values go into it here -- the one place every query passes on its way to
+    the database. The restored statement is run and dropped: it is never
+    stored, logged or memoised. One that cannot be restored safely fails like
+    a database error, so the turn's one repair can still put it right.
     """
     if memo is not None and sql in memo:
         return memo[sql]
+    if pii is not None:
+        try:
+            sql = pii.restore_sql(sql)
+        except AliasRefused as exc:
+            return QueryResult(columns=[], rows=[], duration_ms=0.0,
+                               error=f"refused before running: {exc}", sqlstate="42601")
     return run_readonly(settings, sql, timeout_ms)
 
 
-def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
+def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict,
+                     pii: PiiGuard | None = None) -> None:
     """Run the chart's own query, through the main query's gates.
 
     Ported from the Drupal port's TurnRunner::runChartQuery. Called only once
@@ -383,7 +412,7 @@ def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
     if not check_against_schema(sql).grounded:
         r.chart_error = "ungrounded"
         return
-    result = _execute(settings, sql, CHART_TIMEOUT_MS, memo)
+    result = _execute(settings, sql, CHART_TIMEOUT_MS, memo, **_pii(pii))
     if not result.ok:
         # query_canceled: the statement timeout fired.
         r.chart_error = "timeout" if result.sqlstate == "57014" else "db_error"
@@ -395,7 +424,7 @@ def _run_chart_query(r: "TurnResult", settings: Settings, memo: dict) -> None:
 
 
 def _execute_early(settings: Settings, text: str, memo: dict,
-                   on_sql: Callable[[dict], None]) -> None:
+                   on_sql: Callable[[dict], None], pii: PiiGuard | None = None) -> None:
     """Vet and run the SQL out of a reply that is still arriving.
 
     Declining is always safe: nothing is memoised, and run_turn then runs the
@@ -412,7 +441,7 @@ def _execute_early(settings: Settings, text: str, memo: dict,
     if not sql or _gated(sql) is None:
         return
 
-    res = _execute(settings, sql, settings.statement_timeout_ms)
+    res = _execute(settings, sql, settings.statement_timeout_ms, **_pii(pii))
     memo[sql] = res
     on_sql({
         "generated_sql": sql,
@@ -425,8 +454,8 @@ def _execute_early(settings: Settings, text: str, memo: dict,
     })
 
 
-def _delta_watcher(settings: Settings, memo: dict,
-                   on_sql: Callable[[dict], None]) -> Callable[[str], None]:
+def _delta_watcher(settings: Settings, memo: dict, on_sql: Callable[[dict], None],
+                   pii: PiiGuard | None = None) -> Callable[[str], None]:
     """An on_delta that fires once, the moment the sql value closes.
 
     A clarification carries no sql key, so the mark never arrives and this
@@ -446,7 +475,7 @@ def _delta_watcher(settings: Settings, memo: dict,
             return
         fired = True
         try:
-            _execute_early(settings, text, memo, on_sql)
+            _execute_early(settings, text, memo, on_sql, **_pii(pii))
         except Exception:
             # An answer matters more than the two seconds. Whatever went
             # wrong here, run_turn is about to do the same work itself.
@@ -488,7 +517,7 @@ def _add_tokens(r: TurnResult, run) -> None:
 
 
 def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mode,
-                    r: TurnResult, executed):
+                    r: TurnResult, executed, pii: PiiGuard | None = None):
     """The one repair: ask again with the error, gate the answer, run it.
 
     Returns (fixed SQL, its schema check, its result) when the corrected
@@ -501,7 +530,7 @@ def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mod
     r.repair_attempted = True
     try:
         fixed, cost_ms = _repair(question, sql, error, settings, mcp_config_path,
-                                 privacy_mode, r)
+                                 privacy_mode, r, **_pii(pii))
     except Exception:
         # The original failure is still reported; a repair that cannot run
         # must not turn a failed query into a crash.
@@ -514,7 +543,7 @@ def _second_attempt(question, sql, error, settings, mcp_config_path, privacy_mod
     sc = _gated(fixed)
     if sc is None:
         return None
-    retried = _execute(settings, fixed, settings.statement_timeout_ms, executed)
+    retried = _execute(settings, fixed, settings.statement_timeout_ms, executed, **_pii(pii))
     r.db_ms += retried.duration_ms
     return (fixed, sc, retried) if retried.ok else None
 
@@ -538,6 +567,7 @@ def _repair(
     mcp_config_path,
     privacy_mode: str,
     r: TurnResult,
+    pii: PiiGuard | None = None,
 ) -> tuple[str | None, float]:
     """One more attempt, with the database's complaint attached.
 
@@ -561,11 +591,12 @@ def _repair(
     The call's tokens are added to ``r``, as Drupal adds them, so the turn
     records what it really cost.
     """
+    asked = build_repair_question(question, sql, error)
+    if pii is not None:
+        # The database ran the real values, so its complaint can quote one.
+        asked = pii.guard(pii.note(asked) + asked)
     provider = get_provider(settings)
-    run = provider.ask(
-        build_repair_question(question, sql, error),
-        mcp_config_path, privacy_mode, settings, None,
-    )
+    run = provider.ask(asked, mcp_config_path, privacy_mode, settings, None)
     # Counted before any return: a repair that fails still cost tokens.
     _add_tokens(r, run)
     if not run.ok or not run.result_text:
@@ -590,8 +621,14 @@ def run_turn(
     identity: CallerIdentity | None = None,
     on_sql: Callable[[dict], None] | None = None,
     repair_mode: bool = True,
+    pii: PiiGuard | None = None,
 ) -> TurnResult:
     """One turn, end to end.
+
+    ``pii`` turns on aliasing for this turn (pipeline/pii.py): the question
+    is anonymized before anything reads it, so the state, the context and
+    every prompt hold aliases, and the real values return only inside
+    _execute. None leaves the turn exactly as it was.
 
     ``on_sql`` is optional and changes nothing about the answer. When it is
     set the reply is streamed, and the moment the sql value closes the query
@@ -617,14 +654,27 @@ def run_turn(
     )
     r.turn_started = time.time()
 
+    question = turn.question
+    if pii is not None:
+        # Before the repair below, so the model sees the user's own spelling.
+        # Aliases are capitalised mid-sentence, which normalize leaves alone.
+        _t = time.perf_counter()
+        r.pii_active = True
+        # The same list the vault appends to, so anything aliased later in the
+        # turn -- the caller's name below -- is stored with it.
+        r.pii_new_aliases = pii.vault.new
+        question = pii.anonymize(question)
+        if identity is not None and identity.display_name:
+            identity = replace(identity, display_name=pii.alias_name(identity.display_name))
+        r.pii_ms = (time.perf_counter() - _t) * 1000
+
     # 0. Repair the question before anything reads it. A misspelt schema term
     #    is not a hard question, but it reaches the model as a word the schema
     #    has never heard of, and the model can then only guess or ask. This
     #    costs no tokens and no round-trip.
-    question = turn.question
     if followup_mode:
         _t = time.perf_counter()
-        repaired = normalize(turn.question)
+        repaired = normalize(question)
         r.normalize_ms = (time.perf_counter() - _t) * 1000
         question = repaired.question
         r.repairs = [asdict(x) for x in repaired.repairs]
@@ -712,6 +762,8 @@ def run_turn(
     # After the block is built, so a question is never in its own history.
     remember_question(state, question)
     context = render_identity(identity) + context
+    if pii is not None:
+        context = pii.guard(pii.note(question, context) + context)
     r.context_chars = len(context)
     state.awaiting_answer_to = None
     # Named for this turn only; the SQL that runs now carries the change.
@@ -732,9 +784,9 @@ def run_turn(
     # would still be sending it, and a provider written before streaming
     # existed -- or a test double standing in for one -- takes five arguments
     # and rejects a sixth.
-    streaming = {"on_delta": _delta_watcher(settings, executed, on_sql)} if on_sql else {}
-    run = provider.ask(question, mcp_config_path, privacy_mode, settings, session,
-                       **streaming)
+    streaming = {"on_delta": _delta_watcher(settings, executed, on_sql, **_pii(pii))} if on_sql else {}
+    run = provider.ask(question if pii is None else pii.guard(question),
+                       mcp_config_path, privacy_mode, settings, session, **streaming)
     r.llm_mode, r.llm_provider, r.llm_model = llm_identity(settings)
     r.timed_out = run.timed_out
     r.llm_ms = run.duration_ms
@@ -822,7 +874,7 @@ def run_turn(
             r.failure_category = ("HALLUCINATION" if not r.schema_grounded
                                   else "SQL_SYNTAX_ERROR")
         elif parsed.sql:
-            res = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
+            res = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed, **_pii(pii))
             r.db_ms += res.duration_ms
             r.actual_result = result_summary(res, max_rows=None)
             r.execution_success = res.ok
@@ -840,6 +892,7 @@ def run_turn(
         session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=parsed.sql))
         _attach_followup(r, turn, state, None, followup_mode)
+        r.pii_masked = pii.masked if pii is not None else 0
         r.latency_ms = (time.perf_counter() - started) * 1000
         return r
 
@@ -853,6 +906,7 @@ def run_turn(
         session.turns.append(Turn(index=turn.turn_index, question=question,
                                   generated_sql=None))
         _attach_followup(r, turn, state, None, followup_mode)
+        r.pii_masked = pii.masked if pii is not None else 0
         r.latency_ms = (time.perf_counter() - started) * 1000
         return r
 
@@ -882,7 +936,7 @@ def run_turn(
     # repair goes on the parser's words, and its answer must pass both gates.
     if unreadable and repair_mode:
         repaired = _second_attempt(question, parsed.sql, unreadable, settings,
-                                   mcp_config_path, privacy_mode, r, executed)
+                                   mcp_config_path, privacy_mode, r, executed, **_pii(pii))
         if repaired:
             fixed, sc, actual = repaired
             r.sql_valid = True
@@ -912,7 +966,7 @@ def run_turn(
     elif r.sql_valid and parsed.sql:
         # Already run when it was the repair of an unreadable statement.
         if actual is None:
-            actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed)
+            actual = _execute(settings, parsed.sql, settings.statement_timeout_ms, executed, **_pii(pii))
             r.db_ms += actual.duration_ms
 
             # The database rejected the statement, and it said why. Tell the
@@ -921,7 +975,7 @@ def run_turn(
             # work around one would be asking it to defeat a gate.
             if not actual.ok and actual.error and repair_mode:
                 repaired = _second_attempt(question, parsed.sql, actual.error, settings,
-                                           mcp_config_path, privacy_mode, r, executed)
+                                           mcp_config_path, privacy_mode, r, executed, **_pii(pii))
                 if repaired:
                     fixed, sc, actual = repaired
                     parsed = _take_repair(r, parsed, fixed, sc)
@@ -931,7 +985,7 @@ def run_turn(
         r.actual_result = result_summary(actual, max_rows=None)
         r.execution_success = actual.ok
         if actual.ok and actual.rows:
-            _run_chart_query(r, settings, executed)
+            _run_chart_query(r, settings, executed, **_pii(pii))
         if actual.error:
             r.error = r.error or actual.error
             r.sqlstate = r.sqlstate or actual.sqlstate
@@ -1055,6 +1109,7 @@ def run_turn(
         followup_mode,
     )
     r.followup_ms = (time.perf_counter() - _t) * 1000
+    r.pii_masked = pii.masked if pii is not None else 0
     r.latency_ms = (time.perf_counter() - started) * 1000
     return r
 
@@ -1065,10 +1120,14 @@ def logged(r: TurnResult) -> dict:
     A turn holds every row its query returned. A log that wrote them all would
     grow by thousands of rows per question, and it has never needed more than
     enough to read the answer back.
+
+    The aliases a turn introduced are logged by name only: the values they
+    stand for belong in the chat database, not in a log file.
     """
     row = asdict(r)
     for key in ("actual_result", "expected_result"):
         row[key] = first_rows(row.get(key), LOGGED_ROWS)
+    row["pii_new_aliases"] = [a.get("alias") for a in row.get("pii_new_aliases") or []]
     return row
 
 
@@ -1092,15 +1151,23 @@ def run_suite(
                               settings.benchmark_user_name)
 
     results: list[TurnResult] = []
+    aliasing = getattr(settings, "pii_aliasing", False)
     for conv in conversations:
         state = ConversationState()
         session = Session(session_id=conv.id, turns=[])
+        # A suite has no chat database: one conversation's aliases live in
+        # memory for as long as the conversation runs.
+        vault = PiiVault()
         for turn in conv.turns:
+            pii = None
+            if aliasing:
+                pii = PiiGuard(get_anonymizer(settings), vault)
+                vault.new = []
             r = run_turn(turn, state, settings,
                          mcp_config_path, privacy_mode, session,
                          context_mode=context_mode,
                          followup_mode=followup_mode,
-                         identity=identity)
+                         identity=identity, pii=pii)
             results.append(r)
 
             if jsonl_path is not None:
