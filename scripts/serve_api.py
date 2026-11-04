@@ -296,13 +296,28 @@ def pii_debug(r: TurnResult, pii: PiiGuard | None, settings) -> dict:
     }
 
 
-def console_info(settings) -> dict:
-    """GET /info: what the console says under its input box. No values, no
-    database names: the model and the modes only."""
+def console_info(settings, local: bool = False) -> dict:
+    """GET /info: what the console's setup panel shows. The model and the
+    modes for anyone; for a caller on this machine, also the metadata folder
+    and the databases it reads and writes, by name and login -- never a
+    password. `stream` tells the console which endpoint to ask: /ask/stream
+    when on, /ask when off."""
     mode, provider, model = llm_identity(settings)
-    return {"llm": {"mode": mode, "provider": provider, "model": model},
+    info = {"llm": {"mode": mode, "provider": provider, "model": model},
             "pii": {"enabled": settings.pii_aliasing,
-                    "model": settings.pii_model if settings.pii_aliasing else None}}
+                    "model": settings.pii_model if settings.pii_aliasing else None},
+            "stream": settings.stream_answers}
+    if local:
+        try:
+            info["metadata"] = settings.metadata_dir.relative_to(ROOT).as_posix()
+        except ValueError:
+            info["metadata"] = str(settings.metadata_dir)
+        info["databases"] = {
+            "read": {"name": settings.pg_database, "user": settings.pg_readonly_user},
+            "write": ({"name": settings.history_db_name, "user": settings.history_db_user}
+                      if settings.chats_configured else None),
+        }
+    return info
 
 
 def displayed(full: dict, pii: PiiGuard) -> dict:
@@ -1146,9 +1161,9 @@ def get_health():
 
 
 @app.get("/info")
-def get_info():
-    """The model and the modes, for the line under the console's input."""
-    return _json(200, console_info(_runtime().settings))
+def get_info(request: Request):
+    """The model, the modes and the databases, for the console's setup panel."""
+    return _json(200, console_info(_runtime().settings, local=_local(request)))
 
 
 def _answer(payload: dict) -> tuple[int, dict]:

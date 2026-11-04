@@ -12,17 +12,13 @@
   <div class="bar-left">
     <strong>SQL chatbot</strong>
     <span class="muted">QA console</span>
-    <span id="source-badge" class="badge badge-mock">mock</span>
   </div>
   <div class="bar-right">
-    <label class="toggle">
-      <input type="checkbox" id="use-mock" checked>
-      use mock responses
-    </label>
     <label class="toggle" title="Off by default. The server omits SQL, metadata and diagnostics entirely rather than the page hiding them, so this applies from the next question onwards.">
       <input type="checkbox" id="debug-mode">
       debug mode
     </label>
+    <button id="toggle-setup" type="button" class="btn" aria-controls="setup-rail">Hide setup</button>
     <button id="reset-context" type="button" class="btn">Reset context</button>
     <button id="clear-chat" type="button" class="btn">Clear chat</button>
   </div>
@@ -36,17 +32,6 @@
       <div class="empty" id="empty-hint">
         <h1 class="chat-hero">Ready when you are.</h1>
         <p>Ask anything. Every turn shows what the backend decided.</p>
-        <p class="muted">Try a thread:</p>
-        <div class="starters">
-          <button class="chip" data-send="Show AR_YD_Suiting items">Show AR_YD_Suiting items</button>
-          <button class="chip" data-send="only active">only active</button>
-          <button class="chip" data-send="how many?">how many?</button>
-        </div>
-        <p class="muted">Or a clarification flow:</p>
-        <div class="starters">
-          <button class="chip" data-send="Show the AR_YD items">Show the AR_YD items</button>
-          <button class="chip" data-send="show the AR_YD_Suiting itmes">show the AR_YD_Suiting itmes <span class="muted">(typo)</span></button>
-        </div>
       </div>
     </div>
 
@@ -57,34 +42,19 @@
                 autocomplete="off"></textarea>
       <button id="send" type="submit" class="btn btn-primary">Send</button>
     </form>
-    <!-- Which model is answering, and in which modes. Filled from GET /info. -->
-    <div id="status-line" class="status-line" aria-live="polite"></div>
   </section>
 
-  <!-- ------------------------------------------ conversation state -->
-  <aside class="rail" id="state-rail" aria-label="Conversation state" hidden>
-    <h2>Conversation state</h2>
-
-    <dl id="state-fields" class="kv"></dl>
-
-    <h3>Waiting for</h3>
-    <div id="state-pending" class="pending muted">nothing</div>
-
-    <h3>Last change</h3>
-    <ul id="state-mutations" class="mutations"><li class="muted">none yet</li></ul>
-
-    <h3 id="aliases-title" hidden>PII aliases in this chat</h3>
-    <div id="state-aliases" hidden></div>
-
-    <h3>Session</h3>
-    <dl id="totals" class="kv"></dl>
+  <!-- ------------------------------------------------ setup panel -->
+  <!-- Which databases, modes and model answer. Filled from GET /info. -->
+  <aside class="rail" id="setup-rail" aria-label="Setup">
+    <h2>Setup</h2>
+    <div id="setup" aria-live="polite"></div>
   </aside>
 
 </main>
 
 <script src="table-copy.js"></script>
 <script src="sql-highlight.js"></script>
-<script src="mock.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 </body>

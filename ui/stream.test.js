@@ -64,7 +64,7 @@ for (const size of [BODY.length, 64, 7, 1]) {
   test(`rows arrive before the answer, in ${label}`, async () => {
     const seen = [];
     const answer = await apiServing(BODY, size).streamMessageToBackend(
-      { question: "q" }, { useMock: false, onRows: (r) => seen.push(r) });
+      { question: "q" }, { onRows: (r) => seen.push(r) });
 
     assert.strictEqual(seen.length, 1, "the rows event was missed or repeated");
     assert.deepStrictEqual(seen[0].result.rows, [[3]]);
@@ -77,7 +77,7 @@ test("a clarification sends no rows, and the page still gets its answer", async 
   const body = 'event: answer\ndata: {"clarification":"which one?"}\n\n';
   const seen = [];
   const answer = await apiServing(body, 5).streamMessageToBackend(
-    { question: "q" }, { useMock: false, onRows: (r) => seen.push(r) });
+    { question: "q" }, { onRows: (r) => seen.push(r) });
 
   assert.deepStrictEqual(seen, []);
   assert.strictEqual(answer.clarification, "which one?");
@@ -86,19 +86,19 @@ test("a clarification sends no rows, and the page still gets its answer", async 
 test("a stream that ends without an answer is an error, not a blank turn", async () => {
   const body = `event: rows\ndata: ${ROWS}\n\n`;
   await assert.rejects(
-    apiServing(body, 16).streamMessageToBackend({ question: "q" }, { useMock: false }),
+    apiServing(body, 16).streamMessageToBackend({ question: "q" }),
     /without an answer/);
 });
 
 test("an error event is raised rather than silently dropped", async () => {
   const body = 'event: error\ndata: {"error":"the database refused"}\n\n';
   await assert.rejects(
-    apiServing(body, 9).streamMessageToBackend({ question: "q" }, { useMock: false }),
+    apiServing(body, 9).streamMessageToBackend({ question: "q" }),
     /the database refused/);
 });
 
 test("onRows is optional", async () => {
   const answer = await apiServing(BODY, 11).streamMessageToBackend(
-    { question: "q" }, { useMock: false });
+    { question: "q" });
   assert.deepStrictEqual(answer.result.rows, [[3]]);
 });

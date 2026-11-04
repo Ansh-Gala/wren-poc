@@ -1,8 +1,8 @@
-/* The console itself: chat, per-turn debug, conversation state.
+/* The console itself: chat, per-turn debug, and the setup panel.
  *
- * Everything rendered here comes from one response object. The console keeps
- * no opinion of its own about what the state is -- it shows what the backend
- * last said it was, which is the only way a debugging view can be trusted.
+ * Everything rendered here comes from one response object, or from GET /info
+ * for the panel. The console keeps no opinion of its own -- it shows what the
+ * backend said, which is the only way a debugging view can be trusted.
  */
 
 (() => {
@@ -15,34 +15,41 @@
     composer: $("composer"),
     input: $("input"),
     send: $("send"),
-    useMock: $("use-mock"),
     debugMode: $("debug-mode"),
-    stateRail: $("state-rail"),
-    sourceBadge: $("source-badge"),
     errorBanner: $("error-banner"),
     resetContext: $("reset-context"),
     clearChat: $("clear-chat"),
-    stateFields: $("state-fields"),
-    statePending: $("state-pending"),
-    stateMutations: $("state-mutations"),
-    stateAliases: $("state-aliases"),
-    aliasesTitle: $("aliases-title"),
-    totals: $("totals"),
-    statusLine: $("status-line"),
+    setup: $("setup"),
+    setupRail: $("setup-rail"),
+    toggleSetup: $("toggle-setup"),
   };
 
   const session = {
     id: `qa-${Date.now()}`,
-    state: {},                  // last state the backend reported
     resetPending: false,        // send reset_context on the next request
     turns: 0,
-    tokens: 0,
-    llmCalls: 0,
-    repairs: 0,
     busy: false,
-    info: null,                 // GET /info: the model and the modes
-    aliases: [],                // this chat's PII aliases, as last reported
+    info: null,                 // GET /info: databases, modes and model
+    last: null,                 // the last answer's tokens (debug answers only)
+    tokens: { answers: 0, prompt: 0, completion: 0 },   // this chat, so far
+    usage: null,                // this month, all users: { used, limit }
   };
+
+  /* Per-browser preferences, kept across a refresh. Storage can be blocked
+     (private windows, policies), so every read and write may fail; the page
+     then simply starts with the defaults. */
+  function remembered(key, fallback) {
+    try {
+      const value = localStorage.getItem(key);
+      return value === null ? fallback : value === "1";
+    } catch {
+      return fallback;
+    }
+  }
+
+  function remember(key, on) {
+    try { localStorage.setItem(key, on ? "1" : "0"); } catch {}
+  }
 
   // Debug is a request parameter, not a stylesheet. The server omits SQL,
   // schema names and diagnostics when this is off, so there is nothing in the
@@ -465,54 +472,97 @@
     v === null || v === undefined ? absent : v ? "yes" : "no";
   const tone = (v) => (v === null || v === undefined ? "v-none" : v ? "v-ok" : "v-bad");
 
-  /* ------------------------------------------------- conversation state */
+  /* ------------------------------------------------------ setup panel */
 
-  /* What the next question will be read against, and nothing else: the
-     goal and the filters in force, plus grouping, sorting and a limit only
-     while one is set. The tables, the intent and the previous SQL are in
-     each answer's debug pane, where they belong to a turn. */
-  function renderState() {
-    const s = session.state || {};
-    const filters = Object.values(s.filters || {});
-    const rows = [
-      ["goal", show(s.goal)],
-      ["filters", filters.length ? filters.join("\n") : "-"],
-    ];
-    if ((s.grouping || []).length) rows.push(["grouped by", show(s.grouping)]);
-    if (s.sorting) rows.push(["sorted by", show(s.sorting)]);
-    if (s.limit) rows.push(["limit", show(s.limit)]);
-    el.stateFields = swap(el.stateFields, kv(rows));
-
-    el.statePending.textContent = s.pending_question || "nothing";
-    el.statePending.className = s.pending_question ? "pending" : "pending muted";
-
-    const aliased = session.aliases.length > 0;
-    el.aliasesTitle.hidden = !aliased;
-    el.stateAliases = swap(el.stateAliases, aliasTable(session.aliases));
-    el.stateAliases.hidden = !aliased;
-
-    el.totals = swap(el.totals, kv([
-      ["questions", String(session.turns)],
-      ["tokens", session.tokens.toLocaleString()],
-    ]));
-  }
-
-  /* Replace a node and hand back the new one. The caller has to keep the
-     returned reference: replaceWith leaves the old node detached, so a second
-     render against the stale handle updates nothing anyone can see. */
-  function swap(oldNode, newNode) {
-    newNode.id = oldNode.id;
-    oldNode.replaceWith(newNode);
-    return newNode;
-  }
-
-  function renderMutations(list) {
-    el.stateMutations.replaceChildren();
-    if (!list || !list.length) {
-      el.stateMutations.append(text("li", "muted", "none this turn"));
+  /* Which databases the chatbot reads and writes, its modes and its model.
+     From GET /info; answers refresh the model and PII from the turn itself. */
+  function renderSetup() {
+    const info = session.info;
+    if (!info) {
+      el.setup.replaceChildren(text("p", "setup-warn",
+        "The server did not answer /info. Is scripts/serve_api.py running?"));
       return;
     }
-    for (const m of list) el.stateMutations.append(text("li", null, m));
+    const read = (info.databases || {}).read || {};
+    const write = (info.databases || {}).write;
+    const llm = info.llm || {};
+    el.setup.replaceChildren(
+      card("Read database", [
+        ["name", show(read.name)],
+        ["user", show(read.user)],
+        ["metadata", show(info.metadata)],
+      ]),
+      card("Write database (chats)", write
+        ? [["name", show(write.name)], ["user", show(write.user)],
+           ["saving chats", onOff(write.saving)]]
+        : [["status", "not set: chats are not saved"]]),
+      card("Modes", [
+        ["PII aliasing", onOff(info.pii ? info.pii.enabled : null)],
+        ["streaming", onOff(info.stream)],
+        ["debug", onOff(debugEnabled())],
+      ]),
+      card("Model", [
+        ["model", show(llm.model, "CLI default")],
+        ["provider", show(llm.provider)],
+      ]),
+      card("Tokens", tokenRows()),
+    );
+  }
+
+  /* Token counts arrive only with debug answers: with debug off the server
+     sends the conversation and nothing else. */
+  function tokenRows() {
+    const n = (value) => Number(value || 0).toLocaleString();
+    const rows = [];
+    if (session.last) {
+      rows.push(["last answer: in", n(session.last.prompt)],
+                ["of which cached", n(session.last.cache_read)],
+                ["last answer: out", n(session.last.completion)]);
+    }
+    const t = session.tokens;
+    if (t.answers) {
+      rows.push(["this chat", `${n(t.prompt + t.completion)} (${t.answers} answers)`]);
+    }
+    if (session.usage) {
+      const { used, limit } = session.usage;
+      rows.push(["this month, all users", limit ? `${n(used)} of ${n(limit)}` : n(used)]);
+    }
+    if (!rows.length) {
+      rows.push(["status", debugEnabled() ? "no answer yet" : "shown in debug mode"]);
+    }
+    return rows;
+  }
+
+  function countTokens(r) {
+    const t = r.tokens || {};
+    if (!t.prompt && !t.completion) return;
+    session.last = t;
+    session.tokens.answers += 1;
+    session.tokens.prompt += t.prompt || 0;
+    session.tokens.completion += t.completion || 0;
+    if (r.token_usage) session.usage = r.token_usage;
+  }
+
+  function forgetTokens() {
+    session.last = null;
+    session.tokens = { answers: 0, prompt: 0, completion: 0 };
+  }
+
+  function card(title, rows) {
+    const box = text("section", "setup-card");
+    box.append(text("h3", null, title));
+    for (const [label, value] of rows) {
+      const row = text("div", "setup-row");
+      row.append(text("span", "setup-label", label),
+                 value instanceof Node ? value : text("span", "setup-value", value));
+      box.append(row);
+    }
+    return box;
+  }
+
+  function onOff(on) {
+    if (on === null || on === undefined) return text("span", "pill", "unknown");
+    return text("span", `pill ${on ? "pill-on" : "pill-off"}`, on ? "ON" : "OFF");
   }
 
   /* ---------------------------------------------------------- sending */
@@ -534,8 +584,6 @@
       reset_context: session.resetPending,
       action,
       debug: debugEnabled(),
-      // Only the mock needs this; a real backend keeps its own session state.
-      _state: session.state,
     };
 
     // The table as soon as the query has run, about a second before the
@@ -546,26 +594,24 @@
     let early = null;
 
     try {
-      const r = await API.streamMessageToBackend(payload, {
-        useMock: mockEnabled(),
-        onRows(partial) {
-          placeholder.remove();
-          early = addResponse(partial);
-        },
-      });
+      // /ask/stream only when the server streams (STREAM_ANSWERS, from
+      // /info); otherwise /ask, one plain JSON reply.
+      const r = session.info?.stream
+        ? await API.streamMessageToBackend(payload, {
+            onRows(partial) {
+              placeholder.remove();
+              early = addResponse(partial);
+            },
+          })
+        : await API.sendMessageToBackend(payload);
       if (early) early.remove();
       placeholder.remove();
       session.resetPending = false;
       session.turns += 1;
-      session.repairs += r.repairs.length;
-      session.tokens += (r.tokens.prompt || 0) + (r.tokens.completion || 0);
-      session.llmCalls += 1;
-      session.state = r.state || {};
-      if (r.pii && r.pii.enabled) session.aliases = r.pii.aliases || [];
+      countTokens(r);
       learnFrom(r);
+      renderSetup();
       addResponse(r);
-      renderState();
-      renderMutations(r.state_mutations);
     } catch (err) {
       placeholder.remove();
       // A stream that failed after the table arrived would otherwise leave a
@@ -615,20 +661,12 @@
     el.input.style.height = `${Math.min(el.input.scrollHeight, 140)}px`;
   });
 
-  // Starter chips in the empty state.
-  el.messages.addEventListener("click", (e) => {
-    const starter = e.target.closest("[data-send]");
-    if (starter) ask(starter.dataset.send);
-  });
-
   el.resetContext.addEventListener("click", () => {
-    session.state = {};
     session.resetPending = true;
-    session.id = `qa-${Date.now()}`;
     // A new session id is a new saved chat, with aliases of its own.
-    session.aliases = [];
-    renderState();
-    renderMutations(["context reset — next turn starts clean"]);
+    session.id = `qa-${Date.now()}`;
+    forgetTokens();
+    renderSetup();
     const note = text("div", "msg msg-bot");
     note.append(text("div", "muted", "— context reset; the next question starts a new thread —"));
     el.messages.append(note);
@@ -637,102 +675,43 @@
 
   el.clearChat.addEventListener("click", () => {
     el.messages.replaceChildren();
-    session.state = {};
     session.resetPending = true;
     session.id = `qa-${Date.now()}`;
-    session.turns = session.tokens = session.llmCalls = session.repairs = 0;
-    session.aliases = [];
+    session.turns = 0;
+    forgetTokens();
+    renderSetup();
     hideError();
-    renderState();
-    renderMutations(null);
   });
 
-  // The mock is optional: production builds ship no mock.js and no toggle,
-  // so every read of it goes through here rather than touching el.useMock.
-  function mockEnabled() {
-    return Boolean(window.MOCK && el.useMock && el.useMock.checked);
+  /* The setup panel, shown or hidden; remembered across a refresh. */
+  function paintSetupPanel(shown) {
+    el.setupRail.hidden = !shown;
+    document.querySelector(".layout").classList.toggle("no-rail", !shown);
+    el.toggleSetup.textContent = shown ? "Hide setup" : "Show setup";
+    el.toggleSetup.setAttribute("aria-expanded", String(shown));
   }
 
-  function paintSource() {
-    const mock = mockEnabled();
-    el.sourceBadge.textContent = mock ? "mock" : "live";
-    el.sourceBadge.className = `badge ${mock ? "badge-mock" : "badge-live"}`;
-    el.sourceBadge.title = mock ? "recorded fixtures" : API.ENDPOINT;
-  }
+  el.toggleSetup.addEventListener("click", () => {
+    const shown = el.setupRail.hidden;
+    remember("wren.setup", shown);
+    paintSetupPanel(shown);
+  });
 
-  if (el.useMock) {
-    el.useMock.addEventListener("change", () => {
-      paintSource();
-      hideError();
-      loadInfo();
-    });
-  }
-
-  /* The line under the input: which model answers, through what, and
-     whether aliasing and debug are on.
-
-     From GET /info. A server started before /info existed answers it with a
-     404, so the model comes from GET /health instead, and the line says
-     aliasing is unknown and why -- an old process still serving the new
-     page is exactly the case worth seeing. Each debug answer then confirms
-     both from the turn itself. */
   async function loadInfo() {
-    if (!mockEnabled() && !session.info) {
-      session.info = await fetchInfo();
-    }
-    paintStatus();
-  }
-
-  async function fetchInfo() {
     try {
       const res = await fetch(API.INFO_ENDPOINT);
-      if (res.ok) return await res.json();
-      const health = await fetch(API.INFO_ENDPOINT.replace(/\/info$/, "/health"));
-      if (health.ok) {
-        const h = await health.json();
-        return { llm: { mode: h.provider, provider: h.api_provider || "claude-cli", model: h.model },
-                 pii: null, stale: true };
-      }
+      if (res.ok) session.info = await res.json();
     } catch {
-      // No server to ask: the line says so rather than guessing.
+      // No server to ask: the panel says so rather than guessing.
     }
-    return null;
+    renderSetup();
   }
 
+  // A debug answer carries the model and PII the turn actually used.
   function learnFrom(r) {
-    if (!r.llm && !r.pii) return;
-    session.info = session.info || { llm: null, pii: null };
+    if (!session.info || (!r.llm && !r.pii)) return;
     if (r.llm) session.info.llm = r.llm;
     if (r.pii) session.info.pii = { enabled: Boolean(r.pii.enabled), model: r.pii.model || null };
-    if (r.pii) session.info.stale = false;
-    paintStatus();
-  }
-
-  function paintStatus() {
-    if (!el.statusLine) return;
-    const parts = [];
-    let warn = false;
-    if (mockEnabled()) {
-      parts.push("mock responses");
-    } else if (!session.info) {
-      parts.push("model: unknown (the server did not answer /info or /health)");
-      warn = true;
-    } else {
-      const llm = session.info.llm || {};
-      const pii = session.info.pii;
-      parts.push(`model: ${llm.model || "CLI default"}`);
-      parts.push(`mode: ${llm.provider || "?"} (${llm.mode || "?"})`);
-      if (!pii) {
-        parts.push("PII aliasing: unknown (this server predates it; restart it from .venv)");
-        warn = true;
-      } else {
-        parts.push(pii.enabled ? `PII aliasing: ON (${pii.model})` : "PII aliasing: OFF");
-      }
-    }
-    parts.push(`debug: ${debugEnabled() ? "on" : "off"}`);
-    el.statusLine.textContent = parts.join("   ·   ");
-    el.statusLine.classList.toggle("status-warn", warn);
-    el.statusLine.classList.toggle("status-pii-on", Boolean(session.info?.pii?.enabled));
   }
 
   /* Debug detail for answers already on screen.
@@ -753,7 +732,7 @@
       if (!res.ok) return;
       turns = (await res.json()).turns || [];
     } catch {
-      return;   // the mock has no history to offer, and that is not an error
+      return;   // no history to offer, and that is not an error
     }
 
     for (const r of turns) {
@@ -782,8 +761,9 @@
 
   if (el.debugMode) {
     el.debugMode.addEventListener("change", () => {
+      remember("wren.debug", debugEnabled());
       paintDebug();
-      paintStatus();
+      renderSetup();
       hideError();
       if (debugEnabled()) revealEarlierDebug();
       else hideEarlierDebug();
@@ -791,26 +771,14 @@
   }
 
   function paintDebug() {
-    const on = debugEnabled();
-    if (el.stateRail) el.stateRail.hidden = !on;
-    // The rail reports tables and filters, which is database metadata, so it
-    // is only populated when debug is on; with it hidden the chat takes the
-    // whole width rather than leaving its column empty.
-    const layout = document.querySelector(".layout");
-    if (layout) layout.classList.toggle("no-rail", !on);
     // Debug on is a QA console; debug off is a chatbot. The two want opposite
     // things from a stylesheet, so the whole chat theme hangs off this class.
-    document.body.classList.toggle("chat-mode", !on);
+    document.body.classList.toggle("chat-mode", !debugEnabled());
   }
 
+  if (el.debugMode) el.debugMode.checked = remembered("wren.debug", false);
   paintDebug();
-
-  // Served by scripts/serve_api.py rather than opened off disk? Then a real
-  // backend is demonstrably there, and asking it is what you came for.
-  if (location.protocol.startsWith("http") && el.useMock) el.useMock.checked = false;
-  paintSource();
+  paintSetupPanel(remembered("wren.setup", true));
   loadInfo();
-
-  renderState();
   el.input.focus();
 })();

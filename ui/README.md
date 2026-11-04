@@ -13,7 +13,7 @@ python scripts/serve_api.py
 
 Then open <http://localhost:8000/>. The console is served by the same process
 that answers it, so it is same-origin — there is no CORS to configure — and it
-starts in **live** mode, asking real questions of the real database.
+asks real questions of the real database.
 
 Every request goes through `pipeline.lean_runner.run_turn`, the same function
 the four benchmark suites run, with no expected SQL to compare against. There
@@ -29,30 +29,6 @@ so, rather than failing three seconds into your first question.
 python scripts/serve_api.py --port 9000
 python scripts/serve_api.py --context-mode none    # A/B the context layer by hand
 ```
-
-## Run it without a backend
-
-Open `ui/index.html` straight off disk. It starts in **mock mode**, so every
-flow works before anything is running. (Served from the API server, untick
-*use mock responses* to get the same thing.)
-
-The mock is not invented: each fixture is a real turn lifted from
-`results/followup_v2/raw/turns.jsonl`, so the SQL, row counts, suggestion ids
-and token figures are what the system actually produced. A mock with
-plausible-looking made-up fields would hide exactly the mismatches this page
-exists to catch.
-
-Flows worth trying:
-
-| Type | What it exercises |
-|---|---|
-| `Show AR_YD_Suiting items` → `only active` → `only black` → `how many?` | filters stacking across a thread |
-| `Show the AR_YD items` → click a chip | clarification, then the answer resolved back into the original question |
-| `show the AR_YD_Suiting itmes` | typo repair, shown as original → normalized |
-| `Show my open tasks` mid-thread | new-topic detection; the old filters must not leak |
-| `What is the total revenue?` | a measure the schema does not hold |
-| `Show tasks whose SLA status is Breached` | a value the column does not take, with the real values offered |
-| `fail now` | the error state |
 
 ## Connect a different backend
 
@@ -109,7 +85,6 @@ shows up in the rail, and a query that went wrong shows up in the turn.
 | `index.html` | Structure |
 | `styles.css` | Presentation |
 | `api.js` | **The only file that talks to a backend.** Contract documented inline |
-| `mock.js` | Recorded fixtures, so the console works before the backend does |
 | `app.js` | Chat, per-turn debug, state rail |
 
 ## Controls

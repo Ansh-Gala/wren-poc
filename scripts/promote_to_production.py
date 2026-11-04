@@ -19,7 +19,7 @@ Two files genuinely differ rather than being absent, and those live in
 promotion/overlay/ mirroring their real paths. Keep that set as small as
 possible -- an overlaid file has to be updated in two places forever. It is
 almost always better to make the shared file tolerate production's absences
-(as ui/app.js does for a missing mock.js) than to add an overlay.
+than to add an overlay.
 """
 
 from __future__ import annotations
@@ -101,8 +101,7 @@ EXCLUDE = [
     #    carries what someone deploying the thing actually needs.
     "docs",
 
-    # -- Fixtures, editor droppings, other agents' instruction files.
-    "ui/mock.js",
+    # -- Editor droppings, other agents' instruction files.
     "claude/.cph",
 
     # -- This machinery. It rebuilds production; it does not ship to it.

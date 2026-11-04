@@ -105,19 +105,17 @@ made there is lost by the next promotion. Fix it on `develop` and promote.
 
 ### Files that differ rather than being absent
 
-Two files are not the same on both branches, and those live in
+Two files (`README.md`, `requirements.txt`) are not the same on both branches, and those live in
 `promotion/overlay/`, mirroring their real paths:
 
 | Overlay | Why |
 |---|---|
 | `README.md` | `develop`'s documents the benchmark; production's documents running the app. |
-| `ui/index.html` | Production drops the mock-response toggle along with `ui/mock.js`. |
 | `requirements.txt` | Production imports five third-party packages. develop's list installs `wrenai[postgres,mcp,memory]` and `openai` on top. |
 
 Keep that set small. An overlaid file has to be changed in two places forever,
 and the second place is easy to forget. Prefer making the shared file tolerate
-production's absences: `ui/app.js` and `ui/api.js` check for a missing
-`window.MOCK` rather than being overlaid, which is why only the markup differs.
+production's absences.
 
 ## Checks
 

@@ -2,8 +2,8 @@
    API INTEGRATION — this is the only file that talks to a backend.
    ===========================================================================
 
-   Point ENDPOINT at your service, untick "use mock responses" in the header,
-   and nothing else in this console needs to change.
+   Point ENDPOINT at your service, and nothing else in this console needs to
+   change.
 
    REQUEST the console sends:
 
@@ -191,11 +191,7 @@ const API = (() => {
   }
 
   /* THE INTEGRATION POINT. Everything above is documentation for this call. */
-  async function sendMessageToBackend(payload, { useMock = true } = {}) {
-    // window.MOCK is absent in a production build, which drops mock.js. Asking
-    // the real backend is the right fallback; throwing would be a blank page.
-    if (useMock && window.MOCK) return MOCK.respond(payload);
-
+  async function sendMessageToBackend(payload) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
@@ -232,11 +228,10 @@ const API = (() => {
      `onAnswer` always fires, and carries everything, so the page is correct
      whether or not the early table arrived.
 
-     Falls back to the plain call when the browser cannot read a stream, or
-     when the mock is on -- the mock has nothing to stream. */
-  async function streamMessageToBackend(payload, { useMock = true, onRows } = {}) {
-    if ((useMock && window.MOCK) || !window.ReadableStream || !window.TextDecoder) {
-      return sendMessageToBackend(payload, { useMock });
+     Falls back to the plain call when the browser cannot read a stream. */
+  async function streamMessageToBackend(payload, { onRows } = {}) {
+    if (!window.ReadableStream || !window.TextDecoder) {
+      return sendMessageToBackend(payload);
     }
 
     const controller = new AbortController();
@@ -332,6 +327,7 @@ const API = (() => {
       pii: r.pii || null,
 
       tokens: r.tokens || {},
+      token_usage: r.token_usage || null,
       latency_ms: r.latency_ms ?? null,
       tool_calls: r.tool_calls ?? null,
       context_chars: r.context_chars ?? null,
