@@ -22,6 +22,7 @@
     setup: $("setup"),
     setupRail: $("setup-rail"),
     toggleSetup: $("toggle-setup"),
+    starters: $("starters"),
   };
 
   const session = {
@@ -494,7 +495,8 @@
       ]),
       card("Write database (chats)", write
         ? [["name", show(write.name)], ["user", show(write.user)],
-           ["saving chats", onOff(write.saving)]]
+           ["saving: this console", onOff(false)],
+           ["saving: other callers", onOff(write.saving)]]
         : [["status", "not set: chats are not saved"]]),
       card("Modes", [
         ["PII aliasing", onOff(info.pii ? info.pii.enabled : null)],
@@ -584,6 +586,8 @@
       reset_context: session.resetPending,
       action,
       debug: debugEnabled(),
+      // This console's chats are not saved; other callers' are.
+      save_chat: false,
     };
 
     // The table as soon as the query has run, about a second before the
@@ -705,7 +709,27 @@
       // No server to ask: the panel says so rather than guessing.
     }
     renderSetup();
+    renderStarters();
   }
+
+  /* The product's starter questions (product.yaml welcome.starters), as
+     chips in the empty chat. A click asks the question. */
+  function renderStarters() {
+    if (!el.starters) return;
+    const starters = (session.info?.welcome?.starters || []).filter((s) => s.question);
+    el.starters.replaceChildren(...starters.map((s) => {
+      const chip = text("button", "chip", s.question);
+      chip.type = "button";
+      chip.dataset.send = s.question;
+      if (s.hint) chip.title = s.hint;
+      return chip;
+    }));
+  }
+
+  el.messages.addEventListener("click", (e) => {
+    const starter = e.target.closest("[data-send]");
+    if (starter) ask(starter.dataset.send);
+  });
 
   // A debug answer carries the model and PII the turn actually used.
   function learnFrom(r) {
@@ -776,7 +800,8 @@
     document.body.classList.toggle("chat-mode", !debugEnabled());
   }
 
-  if (el.debugMode) el.debugMode.checked = remembered("wren.debug", false);
+  // On unless this browser has switched it off.
+  if (el.debugMode) el.debugMode.checked = remembered("wren.debug", true);
   paintDebug();
   paintSetupPanel(remembered("wren.setup", true));
   loadInfo();

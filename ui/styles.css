@@ -308,6 +308,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
   color: var(--accent);
 }
 .chip small { color: var(--muted); font-family: var(--mono); }
+.starters { margin-top: 14px; }
 
 /* ------------------------------------------------------ debug pane */
 
@@ -503,6 +504,7 @@ body.chat-mode .chat-hero {
 }
 /* Debug-oriented wording, and the section labels, are not part of this view. */
 body.chat-mode #empty-hint > p { display: none; }
+body.chat-mode .starters { justify-content: center; }
 
 /* ---- the question: a bubble. the answer: just content. */
 

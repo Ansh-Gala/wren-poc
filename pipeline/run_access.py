@@ -5,7 +5,8 @@ machine only and trusts the id as sent. There is no default user: a missing
 or malformed id is refused, never replaced.
 
 Running a question (POST /ask, /ask/stream, and the full CSV, which runs the
-stored SQL again) needs one of the roles in CHATBOT_RUN_ROLES. Roles are
+stored SQL again) needs one of the roles in CHATBOT_RUN_ROLES; with none set,
+every request may run and no role is read. Roles are
 Drupal's, read from vf_user__roles in the business database -- the same
 roles the TMS site gives its users -- so this adds no second user list.
 A product with its own user list names its role tables in product.yaml's
@@ -128,8 +129,11 @@ def _role_queries(users: dict, table: str, id_column: str,
 
 
 def check_run(settings, user_id: int) -> None:
-    """Raise RunNotAllowed unless the user holds one of the run roles."""
+    """Raise RunNotAllowed unless the user holds one of the run roles. With
+    no CHATBOT_RUN_ROLES, nothing is checked: every request may run."""
     allowed = set(settings.run_roles)
-    roles = user_roles(settings, user_id) if allowed else None
+    if not allowed:
+        return
+    roles = user_roles(settings, user_id)
     if not roles or not (roles & allowed):
         raise RunNotAllowed("You do not have permission to ask the chatbot.")

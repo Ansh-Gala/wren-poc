@@ -136,8 +136,8 @@ class Conversation:
         # When the state was last saved, by the monotonic clock. None until
         # the first turn.
         self.saved_at: float | None = None
-        # The chat's PII aliases while saving is paused (SAVE_CHATS=false);
-        # otherwise they are read from the saved turns.
+        # The chat's PII aliases while it is not saved (SAVE_CHATS=false, or
+        # save_chat: false); otherwise they are read from the saved turns.
         self.aliases: list[dict] = []
 
     def expire_if_idle(self) -> None:
@@ -301,15 +301,16 @@ def pii_debug(r: TurnResult, pii: PiiGuard | None, settings) -> dict:
 
 def console_info(settings, local: bool = False) -> dict:
     """GET /info: what the console's setup panel shows. The model and the
-    modes for anyone; for a caller on this machine, also the metadata folder
-    and the databases it reads and writes, by name and login -- never a
-    password. `stream` tells the console which endpoint to ask: /ask/stream
-    when on, /ask when off."""
+    modes and product.yaml's welcome (the starter questions) for anyone; for
+    a caller on this machine, also the metadata folder and the databases it
+    reads and writes, by name and login -- never a password. `stream` tells
+    the console which endpoint to ask: /ask/stream when on, /ask when off."""
     mode, provider, model = llm_identity(settings)
     info = {"llm": {"mode": mode, "provider": provider, "model": model},
             "pii": {"enabled": settings.pii_aliasing,
                     "model": settings.pii_model if settings.pii_aliasing else None},
-            "stream": settings.stream_answers}
+            "stream": settings.stream_answers,
+            "welcome": welcome()}
     if local:
         try:
             info["metadata"] = settings.metadata_dir.relative_to(ROOT).as_posix()
@@ -656,7 +657,9 @@ class Runtime:
         # Cleaned once, here: the saved chat is keyed by the cleaned id, so the
         # in-memory session and its lock must be too.
         session_id = safe_session_id(payload.get("session_id"))
-        store = ChatStore(self.settings, user_id)
+        # The Python console sends save_chat: false; every other caller's
+        # chats are saved (unless SAVE_CHATS pauses saving for everyone).
+        store = ChatStore(self.settings, user_id, save=payload.get("save_chat") is not False)
 
         # Before the state is touched: a refused question costs nothing and
         # never enters the recent-questions window.
@@ -1152,7 +1155,7 @@ def _local(request: Request) -> bool:
 
 async def _read_json(request: Request) -> dict | JSONResponse:
     """The request body as a JSON object, or the 400 to send instead.
-    Debug is honoured only on this machine."""
+    Debug, and save_chat: false, are honoured only on this machine."""
     try:
         payload = json.loads(await request.body() or b"{}")
     except (ValueError, json.JSONDecodeError) as exc:
@@ -1161,6 +1164,7 @@ async def _read_json(request: Request) -> dict | JSONResponse:
         return _json(400, {"error": "bad request body: expected a JSON object"})
     if not _local(request):
         payload["debug"] = False
+        payload.pop("save_chat", None)
     return payload
 
 
@@ -1381,7 +1385,7 @@ def main() -> int:
         + ("" if settings.save_chats else "   PAUSED (SAVE_CHATS=false): chats are not saved")
         if settings.chats_configured
         else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
-    print(f"run roles:         {', '.join(settings.run_roles) or 'none (CHATBOT_RUN_ROLES): nobody may ask'}")
+    print(f"run roles:         {', '.join(settings.run_roles) or 'not set (CHATBOT_RUN_ROLES): everyone may ask'}")
     print(f"context mode: {args.context_mode}")
     print("PII aliasing:      " + (
         f"on ({settings.pii_model}, threshold {settings.pii_threshold})"

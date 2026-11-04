@@ -18,7 +18,10 @@
        "reset_context":  false,                    // true right after Reset
        "action":         null,                     // set when a chip was clicked:
                                                    //   {type, field, operator, value}
-       "debug":          false                     // see below
+       "debug":          false,                    // see below
+       "save_chat":      false                     // this console's chats are not
+                                                   //   saved; honoured on this
+                                                   //   machine only
      }
 
    DEBUG is off unless the console asks for it, and it is enforced server-side

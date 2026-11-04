@@ -341,8 +341,10 @@ class FakeStore:
     fail_load = False
     fail_record = False
 
-    def __init__(self, settings, uid) -> None:
+    def __init__(self, settings, uid, save=True) -> None:
         self.uid = uid
+        if not save:
+            self.enabled = False
 
     enabled = True
 
@@ -367,7 +369,7 @@ class FakeStore:
         return 1
 
     def record_turn(self, chat_id, turn_index, question, r, full, state=None) -> bool:
-        if FakeStore.fail_record:
+        if FakeStore.fail_record or not self.enabled:
             return False
         FakeStore.rows.append({"question": question, "generated_sql": r.generated_sql,
                                "status": cs.turn_status(r), "sequence_number": turn_index + 1,
@@ -472,6 +474,16 @@ def test_with_saving_paused_the_chat_keeps_its_aliases_and_its_thread(world, ser
     assert "now PERSON_002's" in world.prompts[1]
     assert "tasks of PERSON_001" in world.prompts[1]          # the thread was not reset
     assert world.executed[1].endswith("= 'Amit Rao'")
+
+
+def test_save_chat_false_is_not_saved_and_the_default_is(world, server):
+    world.replies.append(reply(BY_RAHUL))
+    server.runtime.ask({"question": "tasks of Rahul Sharma", "session_id": "console",
+                        "debug": True, "save_chat": False}, 5)
+    assert FakeStore.rows == []
+
+    server("tasks of Rahul Sharma", reply(BY_RAHUL))
+    assert len(FakeStore.rows) == 1
 
 
 def test_a_turn_saved_before_aliasing_was_on_is_anonymized_on_the_way_in(world, server):

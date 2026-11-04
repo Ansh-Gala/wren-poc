@@ -110,6 +110,16 @@ def test_another_machine_gets_neither_debug_nor_the_debug_log(server, monkeypatc
     assert runtime.payloads[-1]["debug"] is False
 
 
+def test_only_this_machine_may_skip_saving_the_chat(server, monkeypatch):
+    client, runtime = server
+    _post(client, "/ask", {**ME, "question": "anything", "save_chat": False})
+    assert runtime.payloads[-1]["save_chat"] is False
+
+    monkeypatch.setattr(api, "_local_client", lambda address: False)
+    _post(client, "/ask", {**ME, "question": "anything", "save_chat": False})
+    assert "save_chat" not in runtime.payloads[-1]
+
+
 @pytest.mark.parametrize("address,local", [
     ("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
     ("192.168.1.20", False), ("10.0.0.5", False),

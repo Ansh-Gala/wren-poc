@@ -77,9 +77,9 @@ messages:
 welcome:
   text: Ask about your projects, tasks, subtasks or issues.
   starters:
-    - {question: Show my delayed tasks, hint: Running behind plan, icon: delayed}
-    - {question: 'Which running projects are red?', hint: In trouble on the fever chart, icon: pending}
-    - {question: Show me all open issues, hint: Raised against any task, icon: issues}
+    - {question: Show me my delayed tasks, hint: Running behind plan, icon: delayed}
+    - {question: Show me all issues, hint: Raised against any task, icon: issues}
+    - {question: Show me delayed projects, hint: Running behind schedule, icon: pending}
 
 prompt:
   database: VectorPro

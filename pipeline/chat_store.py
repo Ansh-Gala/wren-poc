@@ -129,9 +129,11 @@ def state_array(state: ConversationState | None) -> dict | None:
 class ChatStore:
     """One user's chats."""
 
-    def __init__(self, settings, uid: int | None):
+    def __init__(self, settings, uid: int | None, save: bool = True):
         self.settings = settings
         self.uid = int(uid or 0)
+        # False for a request that asked not to be saved (save_chat: false).
+        self.saving = save
         prefix = settings.chat_table_prefix
         self.chats = pgsql.Identifier(f"{prefix}sql_chat")
         self.turns = pgsql.Identifier(f"{prefix}sql_chat_turn")
@@ -139,10 +141,10 @@ class ChatStore:
     @property
     def enabled(self) -> bool:
         """A database and login of its own, somebody to own the chats, and
-        saving not paused (SAVE_CHATS)."""
+        saving not paused, for everyone (SAVE_CHATS) or for this request."""
         s = self.settings
         return (bool(s.history_db_name and s.history_db_user) and self.uid > 0
-                and s.save_chats)
+                and s.save_chats and self.saving)
 
     def _connect(self) -> psycopg.Connection:
         s = self.settings

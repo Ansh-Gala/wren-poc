@@ -1,0 +1,729 @@
+# Generated from products/vector_pro/metadata/question_sql_pairs.yaml.
+# Placeholders made real: {'101': '196', '102': '341', '5003': '21245', '9001': '1044'} {"'Design'": "'Task #4'", "'Prototype Build'": "'Task #3'", "'Design Squad load'": "'d2'"}; user 42 -> 2048 in 'my' SQL.
+# Skipped: ['my_department_open_tasks', 'my_without_user_block']
+version: 1
+questions:
+- id: project_by_id
+  category: projects
+  question: Show me project 196
+  expected_sql: "SELECT p.project_id, p.project_code, p.project_name, p.project_status,\n       pf.portfolio_name,\n\
+    \       REPLACE(pm.username, '_deleted_user_' || pm.id, '') AS project_manager_name,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_actual_start_date))::date AS project_actual_start_date,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_due_date))::date AS project_due_date,\n       timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date\
+    \ AS project_etc,\n       p.project_completion, p.status_color\nFROM vpp_planning_projects p\nJOIN\
+    \ vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id\nJOIN vpp_users pm ON pm.id = p.project_manager_id\n\
+    WHERE p.project_id = 196\n  AND p.project_is_deleted = false\n"
+- id: count_running_projects
+  category: projects
+  question: How many projects are running?
+  expected_sql: "SELECT COUNT(*) AS running_projects\nFROM vpp_planning_projects p\nWHERE p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\n"
+- id: projects_by_status
+  category: projects
+  question: How many projects are there in each status?
+  expected_sql: 'SELECT p.project_status, COUNT(*) AS projects
+
+    FROM vpp_planning_projects p
+
+    WHERE p.project_is_deleted = false
+
+    GROUP BY p.project_status
+
+    ORDER BY projects DESC
+
+    '
+- id: active_projects_ambiguous
+  category: projects
+  question: List the active projects
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_status\nFROM vpp_planning_projects p\n\
+    WHERE p.project_status IN ('in_execution', 'in_planning', 'ready_to_schedule', 'scheduled')\n  AND\
+    \ p.project_is_deleted = false\nORDER BY p.project_priority ASC\n"
+- id: yellow_projects
+  category: projects
+  question: Which projects are in yellow?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_completion, p.project_planned_completion,\n\
+    \       timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc, timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_due_date))::date AS project_due_date\nFROM vpp_planning_projects p\nWHERE\
+    \ p.status_color = '#FFCB00'\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted\
+    \ = false\nORDER BY p.project_priority ASC\n"
+- id: projects_by_health_colour
+  category: projects
+  question: Give me the count of running projects by health colour
+  expected_sql: "SELECT CASE p.status_color WHEN '#FFCB00' THEN 'yellow' ELSE p.status_color END AS status_color,\n\
+    \       COUNT(*) AS projects\nFROM vpp_planning_projects p\nWHERE p.project_status = 'in_execution'\n\
+    \  AND p.project_is_deleted = false\nGROUP BY 1\nORDER BY 1\n"
+- id: overdue_projects
+  category: projects
+  question: Which projects are overdue?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_status,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_due_date))::date AS project_due_date,\n       (now() AT TIME ZONE 'Asia/Kolkata')::date\
+    \ - timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS calendar_days_overdue\nFROM\
+    \ vpp_planning_projects p\nWHERE p.project_status <> 'closed'\n  AND p.project_is_deleted = false\n\
+    \  AND p.project_due_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata')\
+    \ AT TIME ZONE 'Asia/Kolkata')::bigint\nORDER BY p.project_due_date\n"
+- id: forecast_late_projects
+  category: projects
+  question: Which running projects will finish late, and by how many days?
+  expected_sql: "SELECT p.project_id, p.project_name,\n       timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date\
+    \ AS project_due_date,\n       timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc,\n\
+    \       p.project_predicted_delay AS project_predicted_delay\nFROM vpp_planning_projects p\nWHERE\
+    \ p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\n  AND p.project_predicted_delay\
+    \ > 0\nORDER BY p.project_predicted_delay DESC\n"
+- id: projects_due_next_30_days
+  category: projects
+  question: Which projects are due in the next 30 days?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_status, timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date\
+    \ AS project_due_date\nFROM vpp_planning_projects p\nWHERE p.project_status = 'in_execution'\n  AND\
+    \ p.project_is_deleted = false\n  AND p.project_due_date >= EXTRACT(EPOCH FROM date_trunc('day', now()\
+    \ AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n  AND p.project_due_date < EXTRACT(EPOCH\
+    \ FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint +\
+    \ 31 * 86400\nORDER BY p.project_due_date\n"
+- id: top_priority_projects
+  category: projects
+  question: What are our top 5 priority projects?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_priority, p.project_status\nFROM vpp_planning_projects\
+    \ p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY p.project_priority\
+    \ ASC\nLIMIT 5\n"
+- id: closed_projects_late
+  category: projects
+  question: Which projects closed this year finished late, and by how many days?
+  expected_sql: "WITH closure AS (\n  SELECT r.host_id AS project_id,\n         EXTRACT(EPOCH FROM date_trunc('day',\
+    \ timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on))))\n                 AT TIME ZONE\
+    \ 'Asia/Kolkata')::bigint AS closed_day\n  FROM vpp_planning_remark r\n  WHERE r.host_type = 'project'\n\
+    \    AND r.host_status = 'closed'\n  GROUP BY r.host_id\n)\nSELECT p.project_id, p.project_name,\n\
+    \       timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,\n  \
+    \     timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date AS project_closed_on,\n       (c.closed_day\
+    \ - p.project_due_date) / 86400 AS calendar_days_late,\n       CASE WHEN c.closed_day > p.project_due_date\
+    \ THEN 'Delayed'\n            WHEN c.closed_day < p.project_due_date THEN 'Before Time'\n        \
+    \    ELSE 'On Time' END AS outcome\nFROM vpp_planning_projects p\nJOIN closure c ON c.project_id =\
+    \ p.project_id\nWHERE p.project_status = 'closed'\n  AND p.project_is_deleted = false\n  AND c.closed_day\
+    \ > p.project_due_date\n  AND timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date >= date_trunc('year',\
+    \ now() AT TIME ZONE 'Asia/Kolkata')::date\nORDER BY calendar_days_late DESC\n"
+- id: project_progress_pace
+  category: projects
+  question: Which running projects are behind on recent progress?
+  expected_sql: "SELECT p.project_id, p.project_name,\n       p.project_completed_progress AS project_completed_progress,\n\
+    \       p.project_expected_progress AS project_expected_progress,\n       CASE WHEN p.project_completed_progress\
+    \ = 0 THEN 'No progress'\n            WHEN p.project_completed_progress >= p.project_expected_progress\
+    \ THEN 'On track'\n            ELSE 'Behind' END AS pace\nFROM vpp_planning_projects p\nWHERE p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\n  AND p.project_completed_progress < p.project_expected_progress\n\
+    ORDER BY p.project_expected_progress - p.project_completed_progress DESC\n"
+- id: plan_vs_actual_completion
+  category: projects
+  question: For each running project, compare planned and actual completion
+  expected_sql: "SELECT p.project_id, p.project_name,\n       ROUND(p.project_completion::numeric, 1)\
+    \ AS project_completion,\n       ROUND(p.project_planned_completion::numeric, 1) AS project_planned_completion,\n\
+    \       ROUND((p.project_completion - p.project_planned_completion)::numeric, 1) AS gap_pct_points,\n\
+    \       ROUND(p.project_penetration::numeric, 1) AS project_penetration\nFROM vpp_planning_projects\
+    \ p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY gap_pct_points\n"
+- id: buffer_overrun
+  category: projects
+  question: Which projects have consumed more than their whole buffer?
+  expected_sql: "SELECT p.project_id, p.project_name, ROUND(p.project_penetration::numeric, 1) AS project_penetration\n\
+    FROM vpp_planning_projects p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted\
+    \ = false\n  AND p.project_penetration > 100\nORDER BY p.project_penetration DESC\n"
+- id: project_trend_last_days
+  category: projects
+  question: How has project 196's completion and colour changed over the last 7 days?
+  expected_sql: "SELECT DISTINCT ON (history_created_on)\n       timezone('Asia/Kolkata', to_timestamp(h.history_created_on))::date\
+    \ AS history_created_on,\n       h.project_completion,\n       CASE h.status_color WHEN '#FFCB00'\
+    \ THEN 'yellow' ELSE h.status_color END AS status_color,\n       timezone('Asia/Kolkata', to_timestamp(h.project_etc))::date\
+    \ AS project_etc\nFROM vpp_planning_projectshistory h\nWHERE h.project_id = 196\n  AND h.history_created_on\
+    \ >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\
+    \ - 6 * 86400\nORDER BY history_created_on, h.history_created_on DESC\n"
+- id: rebaseline_count
+  category: projects
+  question: How many times has project 196 been rebaselined and when was the last one?
+  expected_sql: "SELECT (SELECT COUNT(DISTINCT l.version) FROM vpp_planning_rebaselinelog l\n        WHERE\
+    \ l.project_id = p.project_id AND l.name LIKE 'Rebaseline %') AS logged_rebaselines,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_last_rebaselined_on))::date AS project_last_rebaselined_on,\n       CASE\
+    \ p.project_rebaseline_type WHEN 0 THEN 'Never rebaselined' WHEN 1 THEN 'Type 1: due date kept'\n\
+    \            WHEN 2 THEN 'Type 2: due date from total duration' WHEN 3 THEN 'Type 3: due date from\
+    \ remaining duration'\n       END AS rebaseline_type_label\nFROM vpp_planning_projects p\nWHERE p.project_id\
+    \ = 196\n  AND p.project_is_deleted = false\n"
+- id: project_team_members
+  category: projects
+  question: Who are the manager and coordinators of project 341?
+  expected_sql: 'SELECT ''Project Manager'' AS role_in_project, REPLACE(u.username, ''_deleted_user_''
+    || u.id, '''') AS user_name
+
+    FROM vpp_planning_projects p
+
+    JOIN vpp_users u ON u.id = p.project_manager_id
+
+    WHERE p.project_id = 341 AND p.project_is_deleted = false
+
+    UNION ALL
+
+    SELECT ''Coordinator'', REPLACE(u.username, ''_deleted_user_'' || u.id, '''')
+
+    FROM vpp_planning_projectcoordinatormapping c
+
+    JOIN vpp_planning_projects p ON p.project_id = c.project_id_id AND p.project_is_deleted = false
+
+    JOIN vpp_users u ON u.id = c.coordinator_id_id
+
+    WHERE c.project_id_id = 341
+
+    '
+- id: overdue_project_actions
+  category: projects
+  question: Which project actions are overdue?
+  expected_sql: "SELECT a.action_id, p.project_name, a.action_description, a.action_status,\n       REPLACE(u.username,\
+    \ '_deleted_user_' || u.id, '') AS action_owner_name,\n       timezone('Asia/Kolkata', to_timestamp(a.action_planned_completion_date))::date\
+    \ AS action_planned_completion_date\nFROM vpp_planning_projectactions a\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = a.project_id_id\nLEFT JOIN vpp_users u ON u.id = a.action_owner_id\nWHERE LOWER(a.action_status)\
+    \ <> 'closed'\n  AND a.action_is_deleted = false\n  AND p.project_is_deleted = false\n  AND a.action_planned_completion_date\
+    \ < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n\
+    ORDER BY a.action_planned_completion_date\n"
+- id: task_by_uid
+  category: tasks
+  question: Show task 21245
+  expected_sql: "SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,\n       p.project_id,\
+    \ p.project_name,\n       REPLACE(tm.username, '_deleted_user_' || tm.id, '') AS task_manager_name,\n\
+    \       ROUND(t.task_completion::numeric, 1) AS task_completion,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(t.task_baseline_finish_date))::date AS task_baseline_finish_date,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date\nFROM vpp_planning_tasks\
+    \ t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\nLEFT JOIN vpp_planning_taskstatus\
+    \ ts ON ts.task_status_id = t.task_status_id\nLEFT JOIN vpp_users tm ON tm.id = t.task_manager_id\n\
+    WHERE t.task_uid = 21245\n  AND t.task_is_deleted = false\n"
+- id: task_by_wbs
+  category: tasks
+  question: What is the status of task 1.2 in project 196?
+  expected_sql: "SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status\nFROM vpp_planning_tasks\
+    \ t\nJOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id\nWHERE t.project_id_id\
+    \ = 196\n  AND t.task_id = '1.2'\n  AND t.task_is_deleted = false\n"
+- id: open_tasks_in_project_by_status
+  category: tasks
+  question: How many open tasks does project 196 have, by status?
+  expected_sql: "SELECT ts.task_status AS task_status, COUNT(*) AS tasks\nFROM vpp_planning_tasks t\n\
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id\nWHERE t.project_id_id = 196\n\
+    \  AND t.task_is_deleted = false\n  AND t.task_status_id IN (1, 2, 3)\n  AND t.workflow_id IS NOT\
+    \ NULL\nGROUP BY ts.task_status_id, ts.task_status\nORDER BY ts.task_status_id\n"
+- id: project_task_completion_share
+  category: tasks
+  question: What percentage of tasks in project 196 are completed?
+  expected_sql: "SELECT COUNT(*) FILTER (WHERE t.task_status_id = 4) AS completed_tasks,\n       COUNT(*)\
+    \ AS total_tasks,\n       ROUND(100.0 * COUNT(*) FILTER (WHERE t.task_status_id = 4) / NULLIF(COUNT(*),\
+    \ 0), 1) AS completed_tasks_pct,\n       (SELECT ROUND(p.project_completion::numeric, 1) FROM vpp_planning_projects\
+    \ p WHERE p.project_id = 196)\n         AS project_completion\nFROM vpp_planning_tasks t\nWHERE t.project_id_id\
+    \ = 196\n  AND t.task_is_deleted = false\n  AND t.workflow_id IS NOT NULL\n"
+- id: delayed_tasks_running_projects
+  category: tasks
+  question: Which tasks are delayed?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_id, t.task_name,\n       (t.task_delay_indicator->>'delay_on_task_progress')::numeric\
+    \ AS delay_days,\n       ROUND(t.task_completion::numeric, 1) AS task_completion,\n       REPLACE(tm.username,\
+    \ '_deleted_user_' || tm.id, '') AS task_manager_name\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id\nLEFT JOIN vpp_users tm ON tm.id = t.task_manager_id\nWHERE\
+    \ COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false) = true\n  AND t.task_status_id\
+    \ IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted\
+    \ = false\nORDER BY (t.task_delay_indicator->>'delay_on_task_progress')::numeric DESC NULLS LAST\n"
+- id: tasks_with_most_delay_days
+  category: tasks
+  question: Which open tasks have the most days of delay?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name,\n       (t.task_delay_indicator->>'delay_on_task_progress')::numeric\
+    \ AS delay_days,\n       (t.task_delay_indicator->>'roll_up_delay_on_subtask_progress')::numeric AS\
+    \ rollup_delay_days\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    WHERE t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND p.project_status = 'in_execution'\n\
+    \  AND p.project_is_deleted = false\n  AND COALESCE((t.task_delay_indicator->>'delay_on_task_progress')::numeric,\
+    \ 0) > 0\nORDER BY delay_days DESC\nLIMIT 10\n"
+- id: tasks_late_against_baseline
+  category: tasks
+  question: Which tasks are past their planned finish date and still not done?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name,\n       timezone('Asia/Kolkata', to_timestamp(t.task_baseline_finish_date))::date\
+    \ AS task_baseline_finish_date,\n       timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date\
+    \ AS task_expected_finish_date,\n       (now() AT TIME ZONE 'Asia/Kolkata')::date - timezone('Asia/Kolkata',\
+    \ to_timestamp(t.task_baseline_finish_date))::date AS calendar_days_past_plan\nFROM vpp_planning_tasks\
+    \ t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\nWHERE t.task_actual_finish_date\
+    \ IS NULL\n  AND t.task_is_deleted = false\n  AND t.workflow_id IS NOT NULL\n  AND t.task_baseline_finish_date\
+    \ < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n\
+    \  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY t.task_baseline_finish_date\n"
+- id: critical_open_tasks
+  category: tasks
+  question: What are the open critical tasks of project 196?
+  expected_sql: "SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,\n       t.floating_time_gap,\
+    \ timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date\n\
+    FROM vpp_planning_tasks t\nJOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id\n\
+    WHERE t.project_id_id = 196\n  AND t.task_is_critical = true\n  AND t.task_status_id IN (1, 2, 3)\n\
+    \  AND t.task_is_deleted = false\nORDER BY t.task_expected_start_date\n"
+- id: near_critical_not_critical
+  category: tasks
+  question: Which tasks in project 196 are near-critical but not critical?
+  expected_sql: "SELECT t.task_uid, t.task_name, t.floating_time_gap, t.task_rem_duration\nFROM vpp_planning_tasks\
+    \ t\nWHERE t.project_id_id = 196\n  AND t.is_flowobstacle_task = true\n  AND t.task_is_critical =\
+    \ false\n  AND t.workflow_id IS NOT NULL\n  AND t.task_actual_finish_date IS NULL\n  AND t.task_rem_duration\
+    \ > 0\n  AND t.task_is_deleted = false\nORDER BY t.task_expected_start_date, t.floating_time_gap\n"
+- id: stagnant_tasks
+  category: tasks
+  question: Which started tasks have had no progress for the longest time?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name, t.task_stagnancy,\n       REPLACE(tm.username,\
+    \ '_deleted_user_' || tm.id, '') AS task_manager_name\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id\nLEFT JOIN vpp_users tm ON tm.id = t.task_manager_id\nWHERE\
+    \ t.task_status_id = 3\n  AND t.task_is_deleted = false\n  AND p.project_status = 'in_execution'\n\
+    \  AND p.project_is_deleted = false\nORDER BY t.task_stagnancy DESC\nLIMIT 10\n"
+- id: tasks_finishing_this_week
+  category: tasks
+  question: Which tasks are expected to finish in the next 7 days?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name, timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date\
+    \ AS task_expected_finish_date\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id\
+    \ = t.project_id_id\nWHERE t.task_actual_finish_date IS NULL\n  AND t.task_is_deleted = false\n  AND\
+    \ t.workflow_id IS NOT NULL\n  AND t.task_expected_finish_date >= EXTRACT(EPOCH FROM date_trunc('day',\
+    \ now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n  AND t.task_expected_finish_date\
+    \ < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\
+    \ + 7 * 86400\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER\
+    \ BY t.task_expected_finish_date\n"
+- id: tasks_completed_last_30_days
+  category: tasks
+  question: How many tasks were completed in the last 30 days, per project?
+  expected_sql: "SELECT p.project_name, COUNT(*) AS completed_tasks\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id\nWHERE t.task_actual_finish_date >= EXTRACT(EPOCH FROM date_trunc('day',\
+    \ now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint - 29 * 86400\n  AND t.task_actual_finish_date\
+    \ < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\
+    \ + 86400\n  AND t.task_is_deleted = false\n  AND t.workflow_id IS NOT NULL\n  AND p.project_is_deleted\
+    \ = false\nGROUP BY p.project_name\nORDER BY completed_tasks DESC\n"
+- id: tasks_marked_na
+  category: tasks
+  question: Which tasks were marked NA in project 196?
+  expected_sql: "SELECT t.task_uid, t.task_name\nFROM vpp_planning_tasks t\nWHERE t.project_id_id = 196\n\
+    \  AND t.task_is_deleted = false\n  AND EXISTS (SELECT 1\n              FROM vpp_planning_remark r\n\
+    \              WHERE r.host_type = 'task'\n                AND r.host_id = t.task_uid\n          \
+    \      AND r.remark ILIKE '%Marked as NA%')\n"
+- id: milestone_status
+  category: tasks
+  question: Show the milestones of project 196 with their target date and status
+  expected_sql: "SELECT t.task_uid, t.task_name,\n       timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc,\
+    \ t.task_baseline_start_date)))::date AS milestone_target_date,\n       timezone('Asia/Kolkata', to_timestamp(COALESCE(t.task_actual_finish_date,\
+    \ t.task_expected_finish_date)))::date AS forecast_or_actual,\n       CASE\n         WHEN t.task_actual_finish_date\
+    \ IS NOT NULL AND t.task_completion >= 100 THEN 'Completed'\n         WHEN t.task_actual_finish_date\
+    \ IS NOT NULL THEN 'Completed below 100%'\n         WHEN t.task_expected_finish_date <= COALESCE(t.milestone_baseline_etc,\
+    \ t.task_baseline_start_date) THEN 'On track'\n         ELSE 'At risk of missing target'\n       END\
+    \ AS milestone_status\nFROM vpp_planning_tasks t\nWHERE t.project_id_id = 196\n  AND t.task_is_milestone\
+    \ = true\n  AND t.task_is_deleted = false\nORDER BY milestone_target_date\n"
+- id: missed_milestones
+  category: tasks
+  question: Which upcoming milestones across running projects are forecast to miss their target?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name,\n       timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc,\
+    \ t.task_baseline_start_date)))::date AS milestone_target_date,\n       timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date\
+    \ AS task_expected_finish_date,\n       timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date\
+    \ - timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)))::date\
+    \ AS calendar_days_gap\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id =\
+    \ t.project_id_id\nWHERE t.task_is_milestone = true\n  AND t.task_is_deleted = false\n  AND t.task_actual_finish_date\
+    \ IS NULL\n  AND t.task_expected_finish_date > COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)\n\
+    \  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY calendar_days_gap\
+    \ DESC\n"
+- id: descendants_of_parent_task
+  category: tasks
+  question: 'List all tasks under ''Task #4'' in project 196, and how many open subtasks they have'
+  expected_sql: "WITH parent AS (\n  SELECT t.gantt_id\n  FROM vpp_planning_tasks t\n  WHERE t.project_id_id\
+    \ = 196 AND t.task_name = 'Task #4' AND t.task_is_deleted = false\n)\nSELECT c.task_uid, c.task_id,\
+    \ c.task_name, h.depth,\n       COUNT(s.subtask_id) FILTER (WHERE s.subtask_status_id IS DISTINCT\
+    \ FROM 6) AS open_subtasks\nFROM vpp_planning_taskshierarchy h\nJOIN parent ON h.gantt_parent_task_id\
+    \ = parent.gantt_id\nJOIN vpp_planning_tasks c ON c.gantt_id = h.gantt_id\nLEFT JOIN vpp_planning_subtasks\
+    \ s ON s.task_id = c.task_uid AND s.subtask_is_deleted = false\nWHERE h.depth > 0\n  AND c.task_is_deleted\
+    \ = false\nGROUP BY c.task_uid, c.task_id, c.task_name, h.depth\nORDER BY c.task_id\n"
+- id: task_predecessors
+  category: tasks
+  question: 'What are the predecessors of ''Task #3'' in project 196 and what type of dependency is each?'
+  expected_sql: "SELECT pred.task_uid, pred.task_id, pred.task_name AS predecessor,\n       CASE l.link_type\
+    \ WHEN '0' THEN 'Finish-to-Start' WHEN '1' THEN 'Start-to-Start'\n                        WHEN '2'\
+    \ THEN 'Finish-to-Finish' WHEN '3' THEN 'Start-to-Finish' END AS dependency_type,\n       l.lag, l.new_lag\n\
+    FROM vpp_planning_tasks succ\nJOIN vpp_planning_links l ON l.gantt_target_id = succ.gantt_id\nJOIN\
+    \ vpp_planning_tasks pred ON pred.gantt_id = l.gantt_source_id\nWHERE succ.project_id_id = 196\n \
+    \ AND succ.task_name = 'Task #3'\n  AND succ.task_is_deleted = false\n  AND pred.task_is_deleted =\
+    \ false\n"
+- id: count_dependencies
+  category: tasks
+  question: How many dependencies are there in project 196?
+  expected_sql: 'SELECT COUNT(*) AS dependencies
+
+    FROM vpp_planning_links l
+
+    JOIN vpp_planning_tasks s ON s.gantt_id = l.gantt_source_id AND s.task_is_deleted = false
+
+    JOIN vpp_planning_tasks t ON t.gantt_id = l.gantt_target_id AND t.task_is_deleted = false
+
+    WHERE l.project_id = 196
+
+    '
+- id: delay_reasons_breakdown
+  category: tasks
+  question: What are the most common reasons recorded for task delays?
+  expected_sql: 'SELECT mr.major_reason_name, mn.minor_reason_name, COUNT(DISTINCT d.task_uid) AS delayed_tasks
+
+    FROM vpp_planning_taskdelaydetail d
+
+    JOIN vpp_planning_tasks t ON t.task_uid = d.task_uid AND t.task_is_deleted = false
+
+    LEFT JOIN vpp_masterdata_majorreasons mr ON mr.major_reason_id = d.major_reason_id
+
+    LEFT JOIN vpp_masterdata_minorreasons mn ON mn.minor_reason_id = d.minor_reason_id
+
+    GROUP BY mr.major_reason_name, mn.minor_reason_name
+
+    ORDER BY delayed_tasks DESC
+
+    '
+- id: open_tasks_by_department
+  category: tasks
+  question: How many open tasks does each department have in running projects?
+  expected_sql: "SELECT COALESCE(dep.department_name, 'No department') AS department_name, COUNT(*) AS\
+    \ open_tasks\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    LEFT JOIN vpp_masterdata_departments dep ON dep.department_id = t.department_id_id\nWHERE t.task_status_id\
+    \ IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND t.workflow_id IS NOT NULL\n  AND p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\nGROUP BY 1\nORDER BY open_tasks DESC\n"
+- id: tasks_with_open_issues
+  category: tasks
+  question: Which open tasks have unresolved issues on them or on their subtasks?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name,\n       COUNT(DISTINCT i.issue_id) AS\
+    \ open_issues\nFROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    JOIN vpp_issue_issuehostmappings m\n  ON (m.issue_type = 'task' AND m.host_id = t.task_uid)\n  OR\
+    \ (m.issue_type = 'subtask' AND m.host_id IN (SELECT s.subtask_id FROM vpp_planning_subtasks s\n \
+    \                                                WHERE s.task_id = t.task_uid AND s.subtask_is_deleted\
+    \ = false))\nJOIN vpp_issue_issues i ON i.issue_id = m.issue_id AND i.issue_status IN (1, 2) AND i.issue_is_deleted\
+    \ = false\nWHERE t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\nGROUP BY p.project_name, t.task_uid, t.task_name\n\
+    ORDER BY open_issues DESC\n"
+- id: open_subtasks_of_task
+  category: subtasks
+  question: Show the open subtasks of task 21245 with their status and manager
+  expected_sql: "SELECT s.subtask_id, s.subtask_name, ss.subtask_status AS subtask_status,\n       REPLACE(sm.username,\
+    \ '_deleted_user_' || sm.id, '') AS subtask_manager_name,\n       ROUND(s.subtask_actual_completion_weightage::numeric,\
+    \ 1) AS subtask_actual_completion_weightage,\n       s.stage_under_progress\nFROM vpp_planning_subtasks\
+    \ s\nLEFT JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id\nLEFT JOIN\
+    \ vpp_users sm ON sm.id = s.subtask_manager_id\nWHERE s.task_id = 21245\n  AND s.subtask_is_deleted\
+    \ = false\n  AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)\nORDER BY s.subtask_priority,\
+    \ s.subtask_id\n"
+- id: subtasks_on_hold
+  category: subtasks
+  question: How many subtasks are on hold in each running project?
+  expected_sql: "SELECT p.project_name, COUNT(*) AS subtasks_on_hold\nFROM vpp_planning_subtasks s\nJOIN\
+    \ vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id\nWHERE s.subtask_status_id = 5\n  AND s.subtask_is_deleted =\
+    \ false\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nGROUP BY p.project_name\n\
+    ORDER BY subtasks_on_hold DESC\n"
+- id: delayed_subtasks
+  category: subtasks
+  question: Which subtasks are delayed?
+  expected_sql: "SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name,\n       (s.subtask_delay_indicator->>'delay_on_subtask_progress')::numeric\
+    \ AS subtask_delay_days\nFROM vpp_planning_subtasks s\nJOIN vpp_planning_tasks t ON t.task_uid = s.task_id\
+    \ AND t.task_is_deleted = false\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    WHERE (s.subtask_delay_indicator->>'subtask_is_delayed')::boolean = true\n  AND (s.subtask_status_id\
+    \ IS NULL OR s.subtask_status_id <> 6)\n  AND s.subtask_is_deleted = false\n  AND p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY subtask_delay_days DESC\n"
+- id: subtask_phase_progress
+  category: subtasks
+  question: Show the phase-wise progress of subtask 1044
+  expected_sql: "SELECT ph.phase_sequence_index, ph.phase_name, ph.phase_type,\n       j.value->>'status'\
+    \ AS phase_status,\n       j.value->>'completed' AS completed_value,\n       j.value->>'target' AS\
+    \ target_value,\n       j.value->>'is_applicable' AS is_applicable\nFROM vpp_planning_subtasks s\n\
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id\nCROSS JOIN LATERAL jsonb_each(s.subtask_phase_json)\
+    \ j\nJOIN vpp_masterdata_phases ph\n  ON ph.phase_code = j.key::uuid\n AND ph.workflow_id = t.workflow_id\n\
+    \ AND ph.phase_is_deleted = false\nWHERE s.subtask_id = 1044\n  AND s.subtask_is_deleted = false\n\
+    ORDER BY ph.phase_sequence_index\n"
+- id: open_issues_of_project
+  category: issues
+  question: List all open issues of project 196
+  expected_sql: "SELECT i.issue_id, i.issue_description,\n       string_agg(DISTINCT CASE m.issue_type\
+    \ WHEN 'common' THEN 'Project' WHEN 'task' THEN 'Task' ELSE 'Subtask' END, ', ')\n         AS raised_on_level,\n\
+    \       CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting closure' END AS issue_status_label,\n\
+    \       REPLACE(o.username, '_deleted_user_' || o.id, '') AS issue_owner_name,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(i.issue_raised_on))::date AS issue_raised_on\nFROM vpp_issue_issuehostmappings m\n\
+    JOIN vpp_issue_issues i ON i.issue_id = m.issue_id\nLEFT JOIN vpp_users o ON o.id = i.issue_owner_id\n\
+    WHERE i.issue_status IN (1, 2)\n  AND i.issue_is_deleted = false\n  AND ( (m.issue_type = 'common'\
+    \ AND m.host_id = 196)\n     OR (m.issue_type = 'task' AND m.host_id IN\n          (SELECT t.task_uid\
+    \ FROM vpp_planning_tasks t WHERE t.project_id_id = 196 AND t.task_is_deleted = false))\n     OR (m.issue_type\
+    \ = 'subtask' AND m.host_id IN\n          (SELECT s.subtask_id FROM vpp_planning_subtasks s\n    \
+    \       JOIN vpp_planning_tasks t ON t.task_uid = s.task_id\n           WHERE t.project_id_id = 196\
+    \ AND s.subtask_is_deleted = false AND t.task_is_deleted = false)) )\nGROUP BY i.issue_id, i.issue_description,\
+    \ i.issue_status, o.username, o.id, i.issue_raised_on\nORDER BY issue_raised_on DESC\n"
+- id: projects_with_most_open_issues
+  category: issues
+  question: Which running projects have the most open issues?
+  expected_sql: "WITH issue_project AS (\n  SELECT m.issue_id, m.host_id AS project_id\n  FROM vpp_issue_issuehostmappings\
+    \ m WHERE m.issue_type = 'common'\n  UNION\n  SELECT m.issue_id, t.project_id_id\n  FROM vpp_issue_issuehostmappings\
+    \ m\n  JOIN vpp_planning_tasks t ON t.task_uid = m.host_id AND t.task_is_deleted = false\n  WHERE\
+    \ m.issue_type = 'task'\n  UNION\n  SELECT m.issue_id, t.project_id_id\n  FROM vpp_issue_issuehostmappings\
+    \ m\n  JOIN vpp_planning_subtasks s ON s.subtask_id = m.host_id AND s.subtask_is_deleted = false\n\
+    \  JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false\n  WHERE m.issue_type\
+    \ = 'subtask'\n)\nSELECT p.project_id, p.project_name, COUNT(DISTINCT ip.issue_id) AS open_issues\n\
+    FROM issue_project ip\nJOIN vpp_issue_issues i ON i.issue_id = ip.issue_id AND i.issue_status IN (1,\
+    \ 2) AND i.issue_is_deleted = false\nJOIN vpp_planning_projects p ON p.project_id = ip.project_id\n\
+    WHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nGROUP BY p.project_id,\
+    \ p.project_name\nORDER BY open_issues DESC\n"
+- id: issues_awaiting_closure
+  category: issues
+  question: Which issues are resolved but not yet closed, oldest first?
+  expected_sql: "SELECT i.issue_id, i.issue_description, REPLACE(r.username, '_deleted_user_' || r.id,\
+    \ '') AS raised_by_name, REPLACE(o.username, '_deleted_user_' || o.id, '') AS issue_owner_name,\n\
+    \       i.issue_elapsed_days AS issue_elapsed_days\nFROM vpp_issue_issues i\nLEFT JOIN vpp_users r\
+    \ ON r.id = i.issue_raised_by_id\nLEFT JOIN vpp_users o ON o.id = i.issue_owner_id\nWHERE i.issue_status\
+    \ = 2\n  AND i.issue_is_deleted = false\nORDER BY i.issue_raised_on\n"
+- id: rejected_issues
+  category: issues
+  question: Which issues had their resolution rejected?
+  expected_sql: "SELECT i.issue_id, i.issue_description, rj.resolution AS rejection_comment\nFROM vpp_issue_issues\
+    \ i\nJOIN LATERAL (\n  SELECT rm.resolution, rm.resolution_type\n  FROM vpp_issue_issueresolutionmappings\
+    \ rm\n  WHERE rm.issue_id = i.issue_id\n  ORDER BY rm.added_on DESC\n  LIMIT 1\n) rj ON rj.resolution_type\
+    \ = 'resolution_rejection'\nWHERE i.issue_status = 1\n  AND i.issue_is_deleted = false\n"
+- id: open_issues_by_reason
+  category: issues
+  question: Break down open issues by reason category
+  expected_sql: "SELECT COALESCE(mr.major_reason_name, 'No reason') AS major_reason_name, COUNT(*) AS\
+    \ open_issues\nFROM vpp_issue_issues i\nLEFT JOIN vpp_masterdata_majorreasons mr ON mr.major_reason_id\
+    \ = i.major_reason_id\nWHERE i.issue_status IN (1, 2)\n  AND i.issue_is_deleted = false\nGROUP BY\
+    \ 1\nORDER BY open_issues DESC\n"
+- id: average_issue_resolution_time
+  category: issues
+  question: On average, how long did issues closed this year take to close?
+  expected_sql: "SELECT COUNT(*) AS closed_issues,\n       ROUND(AVG(i.issue_elapsed_days), 1) AS avg_working_days,\n\
+    \       ROUND(AVG((i.issue_closed_on - i.issue_raised_on) / 86400.0), 1) AS avg_calendar_days\nFROM\
+    \ vpp_issue_issues i\nWHERE i.issue_status = 3\n  AND i.issue_is_deleted = false\n  AND i.issue_closed_on\
+    \ >= EXTRACT(EPOCH FROM date_trunc('year', now() AT TIME ZONE 'Asia/Kolkata')\n                  \
+    \                 AT TIME ZONE 'Asia/Kolkata')::bigint\n"
+- id: my_open_tasks
+  category: my
+  question: What are my tasks?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,\n\
+    \       CASE WHEN t.task_manager_id = 2048 THEN 'Task Manager' ELSE 'Participant' END AS my_role,\n\
+    \       timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date\n\
+    FROM vpp_planning_tasks t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\nJOIN vpp_planning_taskstatus\
+    \ ts ON ts.task_status_id = t.task_status_id\nWHERE (t.task_manager_id = 2048\n       OR EXISTS (SELECT\
+    \ 1 FROM vpp_planning_taskparticipants tp\n                  WHERE tp.task_id_id = t.task_uid AND\
+    \ tp.task_participant_id = 2048))\n  AND t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted =\
+    \ false\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY t.task_expected_finish_date\n"
+- id: my_delayed_tasks
+  category: my
+  question: Which of my tasks are delayed?
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name,\n       (t.task_delay_indicator->>'delay_on_task_progress')::numeric\
+    \ AS delay_days,\n       ROUND(t.task_completion::numeric, 1) AS task_completion\nFROM vpp_planning_tasks\
+    \ t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\nWHERE (t.task_manager_id = 2048\n\
+    \       OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp\n                  WHERE tp.task_id_id\
+    \ = t.task_uid AND tp.task_participant_id = 2048))\n  AND COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean,\
+    \ false) = true\n  AND t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND p.project_status\
+    \ = 'in_execution'\n  AND p.project_is_deleted = false\n"
+- id: my_task_status_breakdown
+  category: my
+  question: Give me a breakdown of my tasks by status
+  expected_sql: "SELECT ts.task_status AS task_status, COUNT(*) AS tasks\nFROM vpp_planning_tasks t\n\
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id AND p.project_is_deleted = false\nWHERE (t.task_manager_id =\
+    \ 2048\n       OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp\n                  WHERE\
+    \ tp.task_id_id = t.task_uid AND tp.task_participant_id = 2048))\n  AND t.task_is_deleted = false\n\
+    GROUP BY ts.task_status_id, ts.task_status\nORDER BY ts.task_status_id\n"
+- id: my_open_subtasks
+  category: my
+  question: What subtasks am I working on?
+  expected_sql: "SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name, ss.subtask_status AS\
+    \ subtask_status\nFROM vpp_planning_subtasks s\nJOIN vpp_planning_tasks t ON t.task_uid = s.task_id\
+    \ AND t.task_is_deleted = false\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    \                             AND p.project_is_deleted = false AND p.project_status = 'in_execution'\n\
+    LEFT JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id\nWHERE (s.subtask_manager_id\
+    \ = 2048\n       OR EXISTS (SELECT 1 FROM vpp_planning_subtaskparticipants sp\n                  WHERE\
+    \ sp.subtask_id_id = s.subtask_id AND sp.subtask_participants_id = 2048))\n  AND (s.subtask_status_id\
+    \ IS NULL OR s.subtask_status_id <> 6)\n  AND s.subtask_is_deleted = false\n"
+- id: my_open_issues
+  category: my
+  question: Show my pending issues
+  expected_sql: "SELECT i.issue_id, i.issue_description,\n       CASE i.issue_status WHEN 1 THEN 'Open'\
+    \ WHEN 2 THEN 'Resolved, awaiting closure' END AS issue_status_label,\n       REPLACE(r.username,\
+    \ '_deleted_user_' || r.id, '') AS raised_by_name, timezone('Asia/Kolkata', to_timestamp(i.issue_raised_on))::date\
+    \ AS issue_raised_on, i.issue_elapsed_days AS issue_elapsed_days\nFROM vpp_issue_issues i\nLEFT JOIN\
+    \ vpp_users r ON r.id = i.issue_raised_by_id\nWHERE i.issue_owner_id = 2048\n  AND i.issue_status\
+    \ IN (1, 2)\n  AND i.issue_is_deleted = false\nORDER BY i.issue_raised_on DESC\n"
+- id: issues_i_raised
+  category: my
+  question: Which issues that I raised are still open?
+  expected_sql: "SELECT i.issue_id, i.issue_description, REPLACE(o.username, '_deleted_user_' || o.id,\
+    \ '') AS issue_owner_name,\n       CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting\
+    \ closure' END AS issue_status_label\nFROM vpp_issue_issues i\nLEFT JOIN vpp_users o ON o.id = i.issue_owner_id\n\
+    WHERE i.issue_raised_by_id = 2048\n  AND i.issue_status IN (1, 2)\n  AND i.issue_is_deleted = false\n"
+- id: my_projects
+  category: my
+  question: Which projects am I managing?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_status,\n       CASE WHEN p.project_manager_id\
+    \ = 2048 THEN 'Project Manager' ELSE 'Coordinator' END AS my_role\nFROM vpp_planning_projects p\n\
+    WHERE p.project_is_deleted = false\n  AND p.project_status = 'in_execution'\n  AND (p.project_manager_id\
+    \ = 2048\n       OR EXISTS (SELECT 1 FROM vpp_planning_projectcoordinatormapping c\n             \
+    \     WHERE c.project_id_id = p.project_id AND c.coordinator_id_id = 2048))\nORDER BY p.project_priority\n"
+- id: projects_in_my_portfolios
+  category: my
+  question: Show the running projects in the portfolios I manage
+  expected_sql: "SELECT pf.portfolio_name, p.project_id, p.project_name,\n       CASE p.status_color WHEN\
+    \ '#FFCB00' THEN 'yellow' ELSE p.status_color END AS status_color\nFROM vpp_masterdata_portfolios\
+    \ pf\nJOIN vpp_planning_projects p ON p.portfolio_id = pf.portfolio_id\nWHERE pf.portfolio_is_deleted\
+    \ = false\n  AND p.project_is_deleted = false\n  AND p.project_status = 'in_execution'\n  AND EXISTS\
+    \ (SELECT 1 FROM vpp_masterdata_mappings m\n              WHERE (m.e1type_e2type = 'user_portfolio'\
+    \ AND m.entity1_id = 2048 AND m.entity2_id = pf.portfolio_id)\n                 OR (m.e1type_e2type\
+    \ = 'portfolio_user' AND m.entity2_id = 2048 AND m.entity1_id = pf.portfolio_id))\nORDER BY pf.portfolio_name,\
+    \ p.project_priority\n"
+- id: my_resources_tasks
+  category: my
+  question: What are the people I manage working on?
+  expected_sql: "WITH managed AS (\n  SELECT rm.user_id\n  FROM vpp_masterdata_resourcemanagersmapping\
+    \ rm\n  WHERE rm.resourcemanager_id = 2048\n    AND rm.resourcemanager_is_deleted = false\n),\ninvolvement\
+    \ AS (\n  SELECT t.task_uid, t.task_manager_id AS user_id, 'Task Manager' AS involvement\n  FROM vpp_planning_tasks\
+    \ t WHERE t.task_manager_id IN (SELECT user_id FROM managed)\n  UNION\n  SELECT tp.task_id_id, tp.task_participant_id,\
+    \ 'Task Participant'\n  FROM vpp_planning_taskparticipants tp WHERE tp.task_participant_id IN (SELECT\
+    \ user_id FROM managed)\n  UNION\n  SELECT s.task_id, s.subtask_manager_id, 'Subtask Manager'\n  FROM\
+    \ vpp_planning_subtasks s\n  WHERE s.subtask_manager_id IN (SELECT user_id FROM managed)\n    AND\
+    \ s.subtask_is_deleted = false AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)\n  UNION\n\
+    \  SELECT s.task_id, sp.subtask_participants_id, 'Subtask Participant'\n  FROM vpp_planning_subtaskparticipants\
+    \ sp\n  JOIN vpp_planning_subtasks s ON s.subtask_id = sp.subtask_id_id\n  WHERE sp.subtask_participants_id\
+    \ IN (SELECT user_id FROM managed)\n    AND s.subtask_is_deleted = false AND (s.subtask_status_id\
+    \ IS NULL OR s.subtask_status_id <> 6)\n)\nSELECT REPLACE(u.username, '_deleted_user_' || u.id, '')\
+    \ AS user_name, p.project_name, t.task_uid, t.task_name, ts.task_status AS task_status,\n       string_agg(DISTINCT\
+    \ i.involvement, ', ') AS involvement\nFROM involvement i\nJOIN vpp_users u ON u.id = i.user_id\n\
+    JOIN vpp_planning_tasks t ON t.task_uid = i.task_uid\nJOIN vpp_planning_projects p ON p.project_id\
+    \ = t.project_id_id\nLEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id\n\
+    WHERE t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted = false\n  AND p.project_status = 'in_execution'\n\
+    \  AND p.project_is_deleted = false\nGROUP BY u.username, u.id, p.project_name, t.task_uid, t.task_name,\
+    \ ts.task_status\nORDER BY user_name, p.project_name, t.task_uid\n"
+- id: team_load_vs_thresholds
+  category: heatmap
+  question: Which heatmap teams are overloaded right now?
+  expected_sql: "SELECT h.team_name, h.team_type, ROUND(h.team_load::numeric, 1) AS team_load,\n     \
+    \  h.threshold_green_end, h.threshold_yellow_end,\n       CASE WHEN h.team_load <= h.threshold_green_end\
+    \ THEN 'within green limit'\n            WHEN h.team_load <= h.threshold_yellow_end THEN 'within yellow\
+    \ limit'\n            ELSE 'above yellow limit' END AS load_band\nFROM vpp_masterdata_heatmapteams\
+    \ h\nWHERE h.heatmap_enabled = true\nORDER BY h.team_load - h.threshold_yellow_end DESC\n"
+- id: queue_by_project_latest
+  category: heatmap
+  question: Which projects put the most queue on the 'd2' team today?
+  expected_sql: "SELECT p.project_name, q.queue_duration, q.queue_total_subtasks\nFROM vpp_planning_projectwisequeuedetails\
+    \ q\nJOIN vpp_masterdata_heatmapteams h ON h.team_id = q.team_id_id\nJOIN vpp_planning_projects p\
+    \ ON p.project_id = q.project_id\nWHERE h.team_name = 'd2'\n  AND p.project_is_deleted = false\n \
+    \ AND q.entry_date = (SELECT MAX(entry_date) FROM vpp_planning_projectwisequeuedetails)\nORDER BY\
+    \ q.queue_duration DESC\n"
+- id: users_with_role
+  category: people
+  question: Which active users are Task Managers?
+  expected_sql: "SELECT REPLACE(u.username, '_deleted_user_' || u.id, '') AS user_name, u.email\nFROM\
+    \ vpp_users u\nJOIN vpp_user_groups ug ON ug.user_id = u.id\nJOIN vpp_groups g ON g.group_id = ug.group_id\n\
+    WHERE g.group_name = 'VP_TaskManager'\n  AND u.status = 1\n  AND u.is_active\n  AND u.id <> 1\nORDER\
+    \ BY user_name\n"
+- id: working_days_left
+  category: calendar
+  question: How many working days are left until each running project's due date?
+  expected_sql: "SELECT p.project_id, p.project_name, timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date\
+    \ AS project_due_date,\n       (SELECT COUNT(*) FROM working_days_view w\n        WHERE w.calendar_date_unix\
+    \ > EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n\
+    \          AND w.calendar_date_unix <= p.project_due_date) AS working_days_left\nFROM vpp_planning_projects\
+    \ p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\n  AND p.project_due_date\
+    \ >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint\n\
+    ORDER BY working_days_left\n"
+- id: at_risk_projects
+  category: ambiguity
+  question: Which projects are at risk?
+  expected_sql: "SELECT p.project_id, p.project_name,\n       CASE p.status_color WHEN '#FFCB00' THEN\
+    \ 'yellow' ELSE p.status_color END AS status_color,\n       p.project_predicted_delay AS project_predicted_delay\n\
+    FROM vpp_planning_projects p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted\
+    \ = false\n  AND (p.status_color IN ('red', '#FFCB00') OR p.project_predicted_delay > 0)\nORDER BY\
+    \ p.project_predicted_delay DESC NULLS LAST\n"
+- id: all_my_tasks_still_defaults_open
+  category: ambiguity
+  question: Show me all my tasks
+  expected_sql: "SELECT p.project_name, t.task_uid, t.task_name, ts.task_status AS task_status\nFROM vpp_planning_tasks\
+    \ t\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\nLEFT JOIN vpp_planning_taskstatus\
+    \ ts ON ts.task_status_id = t.task_status_id\nWHERE (t.task_manager_id = 2048\n       OR EXISTS (SELECT\
+    \ 1 FROM vpp_planning_taskparticipants tp\n                  WHERE tp.task_id_id = t.task_uid AND\
+    \ tp.task_participant_id = 2048))\n  AND t.task_status_id IN (1, 2, 3)\n  AND t.task_is_deleted =\
+    \ false\n  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\n"
+- id: delayed_ambiguous_word
+  category: ambiguity
+  question: How delayed is project 196?
+  expected_sql: "SELECT p.project_name, p.project_status,\n       p.project_predicted_delay AS project_predicted_delay,\n\
+    \       timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,\n  \
+    \     timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc,\n       (SELECT\
+    \ COUNT(*) FROM vpp_planning_tasks t\n        WHERE t.project_id_id = p.project_id AND COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean,\
+    \ false)\n          AND t.task_status_id IN (1, 2, 3) AND t.task_is_deleted = false) AS delayed_open_tasks\n\
+    FROM vpp_planning_projects p\nWHERE p.project_id = 196\n  AND p.project_is_deleted = false\n"
+- id: what_to_work_on_next
+  category: my
+  question: What should I work on next?
+  expected_sql: "WITH my_work AS (\n  SELECT t.task_uid, NULL::integer AS subtask_id\n  FROM vpp_planning_tasks\
+    \ t\n  WHERE (t.task_manager_id = 2048\n         OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants\
+    \ tp\n                    WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 2048))\n \
+    \   AND t.task_status_id IN (2, 3)\n    AND t.workflow_id IS NOT NULL\n  UNION\n  SELECT s.task_id,\
+    \ s.subtask_id\n  FROM vpp_planning_subtasks s\n  WHERE (s.subtask_manager_id = 2048\n         OR\
+    \ EXISTS (SELECT 1 FROM vpp_planning_subtaskparticipants sp\n                    WHERE sp.subtask_id_id\
+    \ = s.subtask_id AND sp.subtask_participants_id = 2048))\n    AND (s.subtask_status_id IS NULL OR\
+    \ s.subtask_status_id <> 6)\n    AND s.subtask_is_deleted = false\n)\nSELECT p.project_name, p.project_priority,\
+    \ t.task_uid, t.task_id, t.task_name,\n       s.subtask_id, s.subtask_name,\n       COALESCE(ss.subtask_status,\
+    \ ts.task_status) AS work_status,\n       timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date\
+    \ AS task_expected_finish_date\nFROM my_work w\nJOIN vpp_planning_tasks t ON t.task_uid = w.task_uid\
+    \ AND t.task_is_deleted = false\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    LEFT JOIN vpp_planning_subtasks s ON s.subtask_id = w.subtask_id\nLEFT JOIN vpp_planning_subtaskstatus\
+    \ ss ON ss.subtask_status_id = s.subtask_status_id\nLEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id\
+    \ = t.task_status_id\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\n\
+    ORDER BY p.project_priority ASC, t.task_tpr_sorting_index ASC NULLS LAST, s.subtask_tpr_sorting_index\
+    \ ASC NULLS FIRST\nLIMIT 10\n"
+- id: buffer_remaining
+  category: projects
+  question: How much buffer is left on each running project?
+  expected_sql: "SELECT p.project_id, p.project_name,\n       ROUND(p.project_buffer_duration::numeric,\
+    \ 1) AS project_buffer_duration,\n       ROUND(p.project_penetration::numeric, 1) AS project_penetration,\n\
+    \       ROUND((p.project_buffer_duration * (1 - p.project_penetration / 100.0))::numeric, 1) AS buffer_left_working_days\n\
+    FROM vpp_planning_projects p\nWHERE p.project_status = 'in_execution'\n  AND p.project_is_deleted\
+    \ = false\nORDER BY buffer_left_working_days ASC NULLS LAST\n"
+- id: closed_projects_on_time_rate
+  category: projects
+  question: What share of projects closed in each month of this year were on time?
+  expected_sql: "WITH closure AS (\n  SELECT r.host_id AS project_id,\n         EXTRACT(EPOCH FROM date_trunc('day',\
+    \ timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on))))\n                 AT TIME ZONE\
+    \ 'Asia/Kolkata')::bigint AS closed_day\n  FROM vpp_planning_remark r\n  WHERE r.host_type = 'project'\
+    \ AND r.host_status = 'closed'\n  GROUP BY r.host_id\n)\nSELECT date_trunc('month', timezone('Asia/Kolkata',\
+    \ to_timestamp(c.closed_day))::date)::date AS month,\n       COUNT(*) AS closed_projects,\n      \
+    \ COUNT(*) FILTER (WHERE c.closed_day <= p.project_due_date) AS on_time_or_early,\n       ROUND(100.0\
+    \ * COUNT(*) FILTER (WHERE c.closed_day <= p.project_due_date) / COUNT(*), 1) AS on_time_pct,\n  \
+    \     ROUND(AVG((timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date - timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_actual_start_date))::date))::numeric, 1) AS avg_calendar_days_start_to_close\n\
+    FROM vpp_planning_projects p\nJOIN closure c ON c.project_id = p.project_id\nWHERE p.project_status\
+    \ = 'closed'\n  AND p.project_is_deleted = false\n  AND timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date\
+    \ >= date_trunc('year', now() AT TIME ZONE 'Asia/Kolkata')::date\nGROUP BY 1\nORDER BY 1\n"
+- id: project_pipeline
+  category: projects
+  question: What projects are in the pipeline and when do they start?
+  expected_sql: "SELECT p.project_id, p.project_name, p.project_status,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.project_start_date))::date AS project_start_date,\n       timezone('Asia/Kolkata',\
+    \ to_timestamp(p.first_rfs_date))::date AS first_rfs_date,\n       timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date\
+    \ AS project_due_date\nFROM vpp_planning_projects p\nWHERE p.project_status IN ('in_planning', 'ready_to_schedule',\
+    \ 'scheduled')\n  AND p.project_is_deleted = false\nORDER BY p.project_start_date\n"
+- id: subtask_manager_workload
+  category: subtasks
+  question: How much open work does each subtask manager have in running projects?
+  expected_sql: "SELECT COALESCE(REPLACE(u.username, '_deleted_user_' || u.id, ''), 'Unassigned') AS subtask_manager_name,\n\
+    \       COUNT(*) AS open_subtasks,\n       ROUND(SUM(s.subtask_rem_weightage)::numeric, 1) AS remaining_days,\n\
+    \       COUNT(*) FILTER (WHERE s.subtask_status_id = 2) AS active_subtasks\nFROM vpp_planning_subtasks\
+    \ s\nJOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false\nJOIN vpp_planning_projects\
+    \ p ON p.project_id = t.project_id_id\nLEFT JOIN vpp_users u ON u.id = s.subtask_manager_id\nWHERE\
+    \ (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)\n  AND s.subtask_is_deleted = false\n\
+    \  AND p.project_status = 'in_execution'\n  AND p.project_is_deleted = false\nGROUP BY u.username,\
+    \ u.id\nORDER BY remaining_days DESC\n"
+- id: subtasks_waiting
+  category: subtasks
+  question: Which subtasks are waiting, and on what?
+  expected_sql: "SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name, ss.subtask_status AS\
+    \ subtask_status,\n       s.subtask_stagnancy\nFROM vpp_planning_subtasks s\nJOIN vpp_planning_subtaskstatus\
+    \ ss ON ss.subtask_status_id = s.subtask_status_id\nJOIN vpp_planning_tasks t ON t.task_uid = s.task_id\
+    \ AND t.task_is_deleted = false\nJOIN vpp_planning_projects p ON p.project_id = t.project_id_id\n\
+    WHERE s.subtask_status_id IN (3, 4)\n  AND s.subtask_is_deleted = false\n  AND p.project_status =\
+    \ 'in_execution'\n  AND p.project_is_deleted = false\nORDER BY s.subtask_stagnancy DESC\n"
+- id: open_issue_aging
+  category: issues
+  question: How old are our open issues? Give an aging breakdown
+  expected_sql: "SELECT CASE WHEN i.issue_elapsed_days <= 5 THEN '0-5 working days'\n            WHEN\
+    \ i.issue_elapsed_days <= 15 THEN '6-15 working days'\n            WHEN i.issue_elapsed_days <= 30\
+    \ THEN '16-30 working days'\n            ELSE 'over 30 working days' END AS age_bucket,\n       COUNT(*)\
+    \ AS open_issues,\n       COUNT(*) FILTER (WHERE COALESCE(i.issue_escalated_level, 0) > 0) AS escalated\n\
+    FROM vpp_issue_issues i\nWHERE i.issue_status IN (1, 2)\n  AND i.issue_is_deleted = false\nGROUP BY\
+    \ 1\nORDER BY MIN(i.issue_elapsed_days)\n"
+- id: portfolio_health_summary
+  category: projects
+  question: Give me a health summary per portfolio
+  expected_sql: "SELECT pf.portfolio_name,\n       COUNT(*) AS running_projects,\n       COUNT(*) FILTER\
+    \ (WHERE p.status_color = 'green') AS green,\n       COUNT(*) FILTER (WHERE p.status_color = '#FFCB00')\
+    \ AS yellow,\n       COUNT(*) FILTER (WHERE p.status_color = 'red') AS red,\n       COUNT(*) FILTER\
+    \ (WHERE p.status_color = 'black') AS black,\n       COUNT(*) FILTER (WHERE p.project_predicted_delay\
+    \ > 0) AS forecast_late\nFROM vpp_planning_projects p\nJOIN vpp_masterdata_portfolios pf ON pf.portfolio_id\
+    \ = p.portfolio_id AND pf.portfolio_is_deleted = false\nWHERE p.project_status = 'in_execution'\n\
+    \  AND p.project_is_deleted = false\nGROUP BY pf.portfolio_name\nORDER BY pf.portfolio_name\n"

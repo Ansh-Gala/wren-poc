@@ -131,7 +131,7 @@ def runtime(monkeypatch):
     class Store:
         enabled = False
 
-        def __init__(self, settings, uid):
+        def __init__(self, settings, uid, save=True):
             stores.append(uid)
 
         def load(self, session_id):
@@ -234,10 +234,9 @@ def test_anything_else_may_not(monkeypatch, known, roles, error):
         access.check_run(TWO, 5)
 
 
-def test_no_run_roles_means_nobody_and_asks_nothing(monkeypatch):
+def test_no_run_roles_means_everyone_and_asks_nothing(monkeypatch):
     asked = _roles_db(monkeypatch)
-    with pytest.raises(access.RunNotAllowed):
-        access.check_run(dataclasses.replace(TWO, run_roles=()), 5)
+    access.check_run(dataclasses.replace(TWO, run_roles=()), 5)
     assert asked == []
 
 

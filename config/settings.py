@@ -69,8 +69,8 @@ class Settings:
     # Command authorization: the TMS (Drupal) roles whose users may ask a
     # question, which runs read-only SQL. Read from vf_user__roles in the
     # business database for the user_id the request names. "authenticated"
-    # is Drupal's implicit role: any user the database knows. Empty means
-    # nobody may ask.
+    # is Drupal's implicit role: any user the database knows. Empty means no
+    # check: every request may ask.
     run_roles: tuple[str, ...] = ()
 
     # The "not live" note. A query that reads one of these tables carries the
