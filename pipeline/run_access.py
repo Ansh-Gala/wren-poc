@@ -8,6 +8,8 @@ Running a question (POST /ask, /ask/stream, and the full CSV, which runs the
 stored SQL again) needs one of the roles in CHATBOT_RUN_ROLES. Roles are
 Drupal's, read from vf_user__roles in the business database -- the same
 roles the TMS site gives its users -- so this adds no second user list.
+A product with its own user list names its role tables in product.yaml's
+users block instead (`roles`, `active`).
 
 What a run may do is fixed elsewhere and not by role: one read-only SELECT
 (pipeline/safety.py), on a view the registry lists (pipeline/sql_semantics.py),
@@ -71,14 +73,13 @@ def user_roles(settings, user_id: int) -> frozenset[str] | None:
     table, id_column = _plain(users, "table"), _plain(users, "id")
     if not table or not id_column:
         return None
+    queries = _role_queries(users, table, id_column, int(user_id))
+    if queries is None:
+        return None
     known = run_readonly(
         settings, f"SELECT 1 FROM {table} WHERE {id_column} = {int(user_id)} LIMIT 1")
-    granted = run_readonly(
-        settings, "SELECT roles_target_id FROM vf_user__roles"
-        f" WHERE entity_id = {int(user_id)} AND bundle = 'user' AND deleted = 0")
-    # A blocked Drupal account cannot sign in, so on Drupal it never asks.
-    active = run_readonly(
-        settings, f"SELECT 1 FROM vf_users_field_data WHERE uid = {int(user_id)} AND status = 1 LIMIT 1")
+    granted = run_readonly(settings, queries[0])
+    active = run_readonly(settings, queries[1])
     if known.error or granted.error or active.error:
         return None             # not cached: the next request tries again
     roles = None
@@ -86,6 +87,44 @@ def user_roles(settings, user_id: int) -> frozenset[str] | None:
         roles = frozenset({AUTHENTICATED} | {str(r[0]) for r in granted.rows if r[0]})
     _roles[user_id] = (time.monotonic(), roles)
     return roles
+
+
+def _role_queries(users: dict, table: str, id_column: str,
+                  user_id: int) -> tuple[str, str] | None:
+    """(the user's role names, a row when the user is active), as SQL.
+
+    Drupal's tables unless product.yaml's users block names `roles`, as a
+    product with its own user list does. None when a name there is not
+    plain or an `active` value is not a whole number or true/false.
+    """
+    from pipeline.identity_provider import _PLAIN_NAME, _plain
+
+    roles = users.get("roles")
+    if roles is None:
+        # A blocked Drupal account cannot sign in, so on Drupal it never asks.
+        return ("SELECT roles_target_id FROM vf_user__roles"
+                f" WHERE entity_id = {user_id} AND bundle = 'user' AND deleted = 0",
+                f"SELECT 1 FROM vf_users_field_data WHERE uid = {user_id} AND status = 1 LIMIT 1")
+
+    names = roles.get("names") or {}
+    parts = ([_plain(roles, k) for k in ("table", "user_id", "role_id")]
+             + [_plain(names, k) for k in ("table", "id", "name")])
+    if not all(parts):
+        return None
+    role_table, role_user, role_id, name_table, name_id, name = parts
+    conditions = [f"{id_column} = {user_id}"]
+    for column, value in (users.get("active") or {}).items():
+        if not _PLAIN_NAME.match(str(column)):
+            return None
+        if isinstance(value, bool):
+            conditions.append(f"{column} = {'TRUE' if value else 'FALSE'}")
+        elif isinstance(value, int):
+            conditions.append(f"{column} = {value}")
+        else:
+            return None
+    return (f"SELECT n.{name} FROM {role_table} r JOIN {name_table} n"
+            f" ON n.{name_id} = r.{role_id} WHERE r.{role_user} = {user_id}",
+            f"SELECT 1 FROM {table} WHERE {' AND '.join(conditions)} LIMIT 1")
 
 
 def check_run(settings, user_id: int) -> None:

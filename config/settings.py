@@ -94,6 +94,11 @@ class Settings:
     # All users together, per calendar month, in effective tokens. 0 is none.
     monthly_token_limit: int = 0
 
+    # The folder of metadata/*.yaml and product.yaml the chatbot answers
+    # from. Change it together with DATABASE_NAME: the two describe one
+    # product.
+    metadata_dir: Path = ROOT / "metadata"
+
     wren_project_root: Path = ROOT / "wren_projects"
     wren_home: Path = ROOT / "wren_projects" / ".wren_home"
     wren_memory_backend: str = "lancedb"
@@ -247,6 +252,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         "GROQ_API_KEY", "GEMINI_API_KEY", "CLI_POOL_SIZE", "CLI_POOL_WARMUP_SECONDS",
         "BENCHMARK_USER_ID", "BENCHMARK_USER_NAME", "STREAM_ANSWERS",
         "PII_ALIASING", "PII_MODEL", "PII_THRESHOLD", "PII_CONCURRENCY",
+        "METADATA_DIR",
     ]:
         if os.environ.get(key):
             values[key] = os.environ[key]
@@ -289,6 +295,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         monthly_token_limit=max(0, _as_int(g("MONTHLY_TOKEN_LIMIT"), 0)),
         anthropic_api_key=(g("ANTHROPIC_API_KEY") or "").strip(),
         anthropic_model=(g("ANTHROPIC_MODEL") or "claude-opus-5-5").strip(),
+        metadata_dir=_as_path(g("METADATA_DIR"), ROOT / "metadata"),
         wren_project_root=project_root,
         wren_home=_as_path(g("WREN_HOME"), project_root / ".wren_home"),
         wren_memory_backend=(g("WREN_MEMORY_BACKEND") or "lancedb").strip(),

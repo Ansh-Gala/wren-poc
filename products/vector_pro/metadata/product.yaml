@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=./product.schema.json
+#
+# VectorPro (database vector_pro), in business terms. A test profile for
+# the VectorPro metadata beside it; see metadata/product.yaml for what each
+# key means.
+#
+# Left out on purpose:
+#   - links (`open`): no VectorPro page URLs are known yet;
+#   - colours: status_color holds words and a hex code, not colour codes;
+#   - users.departments: a user's departments are in vpp_masterdata_mappings,
+#     which schema_description.yaml does not describe.
+version: 2
+
+entities:
+  project:
+    table: vpp_planning_projects
+    words: [project, projects]
+    id: project_id
+    title: project_name
+    reference: project_code
+    default_rule: running_project
+  task:
+    table: vpp_planning_tasks
+    words: [task, tasks]
+    # A bare number after "task" is task_uid (business rule task_identifier).
+    id: task_uid
+    title: task_name
+  subtask:
+    table: vpp_planning_subtasks
+    words: [subtask, subtasks, sub-task, sub-tasks]
+    id: subtask_id
+    title: subtask_name
+  issue:
+    table: vpp_issue_issues
+    words: [issue, issues]
+    id: issue_id
+  attachment:
+    table: vpp_utility_fileupload
+    words: [attachment, attachments, file, files]
+    title: file_name
+  user:
+    table: vpp_users
+    words: [user, users, person, people]
+    id: id
+  department:
+    table: vpp_masterdata_departments
+    words: [department, departments]
+  portfolio:
+    table: vpp_masterdata_portfolios
+    words: [portfolio, portfolios]
+  workflow:
+    table: vpp_masterdata_workflows
+    words: [workflow, workflows]
+  team:
+    table: vpp_masterdata_heatmapteams
+    words: [team, teams, heatmap]
+
+id_column_endings: [_id, _uid]
+
+users:
+  table: vpp_users
+  id: id
+  name: username
+  # Who may ask (CHATBOT_RUN_ROLES): an active user (business rule
+  # active_users_and_names) holding one of those VectorPro roles.
+  active: {status: 1, is_active: true}
+  roles:
+    table: vpp_user_groups
+    user_id: user_id
+    role_id: group_id
+    names: {table: vpp_groups, id: group_id, name: group_name}
+
+messages:
+  narrow_hint: a single portfolio, or a shorter date range
+  subjects: projects, tasks, subtasks, issues or users
+
+welcome:
+  text: Ask about your projects, tasks, subtasks or issues.
+  starters:
+    - {question: Show my delayed tasks, hint: Running behind plan, icon: delayed}
+    - {question: 'Which running projects are red?', hint: In trouble on the fever chart, icon: pending}
+    - {question: Show me all open issues, hint: Raised against any task, icon: issues}
+
+prompt:
+  database: VectorPro
+  rule_terms: '"running", "delayed", "overdue" and "my tasks"'
+  two_level_example: '"each portfolio with its project count, and for each project the task count"'
+  chart_scope: person, department, project, portfolio, status, date range
+  explanation_example: 'Write "the delayed tasks of running projects in the Design department, with the status of each", not "task_isdelayed = true AND department_id_id = 20".'
+  clarify_example: 'Write "which project did you mean?", not "project_name is ambiguous"; write "I could not find a project with that number", not "project_id does not match".'
+  other_subject: subtasks

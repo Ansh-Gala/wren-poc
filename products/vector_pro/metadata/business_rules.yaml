@@ -1,0 +1,807 @@
+# VectorPro business rules for the AI chatbot.
+#
+# Companion to schema_description.yaml (scripts/schema_description). Table and column names below are
+# the ones in that file. Each rule has:
+#   name          stable identifier
+#   definition    what the term means / how the product behaves (always applies)
+#   sql_fragment  canonical predicate or join, where one exists (optional)
+#   scope         when the rule does and does not apply, and related traps (optional)
+#
+# Rules are derived from the VectorPro backend code (Django models, processors, buffer run, datatable
+# SQL) and the project CLAUDE.md; where the two disagree the code is followed and the disagreement is
+# listed under open_questions. Placeholders: <the id in the SIGNED-IN USER block> is the signed-in
+# user's vpp_users.id written as a literal. Contains no business records and no configuration secrets.
+rules:
+
+# ==========================================================================================
+# CONVENTIONS THAT APPLY TO EVERY QUESTION
+# ==========================================================================================
+- name: dates_are_epoch_seconds
+  definition: Almost every date column in VectorPro (*_date, *_on, *_etc, entry_date, history_created_on)
+    is a BIGINT holding Unix epoch SECONDS, not a TIMESTAMP and not milliseconds. Planning dates (*_date,
+    *_etc) are stored as midnight Asia/Kolkata; audit columns (*_on such as remark_created_on, last_modified_on,
+    issue_raised_on, history_created_on) are exact instants, so compare them by day range, never with
+    = against a day. Convert before showing or comparing with calendar dates. The only real timestamps
+    among the exported tables are vpp_users.date_joined and vpp_utility_fileupload.file_uploaded.
+  sql_fragment: timezone('Asia/Kolkata', to_timestamp(vpp_planning_projects.project_due_date))::date
+  scope: Never compare an epoch column with now(), CURRENT_DATE or a date literal directly. Never divide
+    by 1000.
+- name: today_as_epoch
+  definition: 'Today, for comparisons against epoch-second date columns, is the epoch of midnight today
+    in Asia/Kolkata: EXTRACT(EPOCH FROM date_trunc(''day'', now() AT TIME ZONE ''Asia/Kolkata'') AT TIME
+    ZONE ''Asia/Kolkata'')::bigint. "Overdue", "past", "due this week" and similar are written against
+    this value.'
+  sql_fragment: vpp_planning_projects.project_due_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT
+    TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+- name: working_days_vs_calendar_days
+  definition: Durations, remaining durations, lags, elapsed days, stagnancy, project_predicted_delay and
+    issue_elapsed_days are WORKING days (holidays and weekly offs excluded), and elapsed days and stagnancy
+    count from the day AFTER the start. A difference of two date columns is CALENDAR days. When an answer
+    subtracts dates, say it is calendar days; for working days count rows of working_days_view.
+  sql_fragment: SELECT COUNT(*) FROM working_days_view w WHERE w.calendar_date_unix > :start_epoch AND
+    w.calendar_date_unix <= :end_epoch
+  scope: Never present a calendar-day difference as a delay in working days, or the reverse. Compare calendar_date_unix
+    with epoch values directly; casting it with to_timestamp(...)::date follows the session timezone (often
+    UTC) and shifts dates by one day. For today's date use (now() AT TIME ZONE 'Asia/Kolkata')::date,
+    not CURRENT_DATE.
+- name: percentages_are_0_to_100
+  definition: Completion and progress columns (project_completion, project_penetration, project_planned_completion,
+    task_completion, planned_task_completion, subtask_actual_completion_weightage, subtask_planned_completion_weightage)
+    are percentages on a 0-100 scale, never 0-1. project_penetration can exceed 100 when the buffer is
+    overrun. last_x_days_completion is a change in percentage points over the window and can be negative.
+- name: soft_delete_everywhere
+  definition: Projects, tasks, subtasks, issues, project actions, files and most master data are soft-deleted.
+    Every query adds the deleted flag of every table it reads, unless the question is explicitly about
+    deleted records.
+  sql_fragment: vpp_planning_projects.project_is_deleted = false AND vpp_planning_tasks.task_is_deleted
+    = false AND vpp_planning_subtasks.subtask_is_deleted = false AND vpp_issue_issues.issue_is_deleted
+    = false
+  scope: 'Flags: project_is_deleted, task_is_deleted, subtask_is_deleted, issue_is_deleted, action_is_deleted,
+    file_isdeleted, portfolio_is_deleted, department_is_deleted, workflow_is_deleted, phase_is_deleted,
+    holiday_is_deleted, major_reason_is_deleted, minor_reason_is_deleted, team_is_deleted, resourcemanager_is_deleted,
+    reportingmanager_is_deleted. Deleted rows keep their status values, so a status filter alone does
+    not remove them.'
+- name: codes_are_stored_as_given
+  definition: Many coded columns are text, are case-sensitive, or mix spellings. link_type is TEXT ('0'..'3');
+    status_color stores yellow as '#FFCB00' and the other colours in lowercase; phase_type mixes 'Binary',
+    'PERCENTAGE' and 'Quantitative'; role names are case-sensitive ('VP_SubTaskManager', capital T). Use
+    the exact stored value, or UPPER()/LOWER() where spellings vary.
+- name: signed_in_user
+  definition: 'Questions with "my", "me", "mine", "I", "assigned to me" or "our" refer to the signed-in
+    user named in the SIGNED-IN USER block above the question (vpp_users.id, and when given, roles and
+    departments). Write that id into the query as a literal, never as a bind placeholder. If there is
+    no such block, do not guess a user and do not pick a default one: reply with a clarification saying
+    you cannot tell who is asking.'
+- name: never_widen_access
+  definition: VectorPro restricts what each user may see by role AND by the data they own or take part
+    in (rules under ROLES AND ACCESS). Answer only within the scope the question and the SIGNED-IN USER
+    block give. Never answer a question about another person's private workload or about projects the
+    block marks as not accessible.
+- name: answer_with_names_not_ids
+  definition: 'When a question asks to SEE records (show, list, which, give me), show the identifying
+    and descriptive columns a person can read: project_name and project_code with project_id; task_name
+    and the WBS task_id with task_uid; subtask_name; user names via vpp_users; status names via the status
+    lookup tables; dates converted from epoch seconds. A list of bare ids answers nothing.'
+  scope: Listings only. A count, total or average answers with the number.
+- name: tasks_carry_their_project
+  definition: Whenever a query lists tasks or subtasks, also select the project they belong to (vpp_planning_projects.project_id
+    and project_name), even when the question does not ask for it. Task names repeat within and across
+    projects, so a task without its project is ambiguous.
+  sql_fragment: JOIN vpp_planning_projects p ON p.project_id = vpp_planning_tasks.project_id_id
+  scope: Listings of tasks or subtasks only.
+
+# ==========================================================================================
+# PROJECTS
+# ==========================================================================================
+- name: project_identifier
+  definition: A bare number after "project" ("project 101", "show 101") means project_id, an INTEGER written
+    unquoted. A code such as 'NPD-2026-04' is project_code (text, unique among non-deleted projects, may
+    be NULL). project_name is also unique among non-deleted projects.
+  sql_fragment: vpp_planning_projects.project_id = 101
+- name: project_status_values
+  definition: 'project_status is lowercase text with exactly these values: in_planning, ready_to_schedule,
+    scheduled, in_execution, on_hold, closed. "Running", "live", "ongoing" and "in progress" projects
+    mean in_execution. "Planning" means in_planning. "Ready to schedule" or "RFS" means ready_to_schedule.
+    "On hold", "paused" and "suspended" mean on_hold. "Completed", "finished" and "closed" projects mean
+    closed. There is no ''deleted'' status: deletion is project_is_deleted.'
+  sql_fragment: vpp_planning_projects.project_status = 'in_execution'
+- name: running_project
+  definition: A running project ("running", "live", "ongoing", "in execution") is one whose project_status
+    is in_execution. This is the single-condition default the chatbot applies to project questions that
+    name no status (see default_project_scope for the exceptions). Add project_is_deleted = false as soft_delete_everywhere
+    requires.
+  sql_fragment: vpp_planning_projects.project_status = 'in_execution'
+- name: project_lifecycle
+  definition: 'Lifecycle: a project is created in_planning; saving its plan moves it to ready_to_schedule
+    (first_rfs_date records the first time); scheduling moves it to scheduled; the daily buffer run moves
+    scheduled projects to in_execution once project_start_date is reached; on_hold and closed are set
+    through a project status remark. A project that has ever been in_execution cannot return to ready_to_schedule
+    through the integration path. Reopening a closed project sets it to in_execution and gives it the
+    lowest priority (current maximum project_priority + 1).'
+  scope: Who triggers scheduling and the ordinary close or hold action is configured in the database,
+    not in code; see open_questions.
+- name: default_project_scope
+  definition: When a question asks for projects, or a count of projects, and names no status of its own,
+    answer about in_execution projects only. This is the application's default project scope (configuration
+    project_status_config.default_status, in_execution by default). State the assumption in the answer.
+  sql_fragment: vpp_planning_projects.project_status = 'in_execution' AND vpp_planning_projects.project_is_deleted
+    = false
+  scope: 'The default does not apply when the question names a status ("closed projects", "projects on
+    hold"), asks for every status ("all statuses", "including closed", "whatever the status"), asks for
+    a breakdown by status, counts distinct values, or asks about missing or malformed data. The word "all"
+    on its own ("all my projects") does not switch the default off. "Active projects" is ambiguous: the
+    application''s active-projects list uses a configurable status list that defaults to in_execution,
+    in_planning, ready_to_schedule and scheduled. When a question says "active", use those four statuses
+    and say so. When the conversation already carries a status filter, that filter decides.'
+- name: project_metrics_only_current_for_in_execution
+  definition: The daily buffer run recalculates status_color, project_etc, project_completion, project_penetration,
+    project_predicted_delay, project_planned_completion and the progress columns only for in_execution
+    projects (and scheduled projects starting today). For every other status these values are frozen at
+    the last run. Do not rank, colour-count or judge lateness of closed, on_hold or planning projects
+    from them.
+  sql_fragment: vpp_planning_projects.project_status = 'in_execution'
+  scope: Applies to health, forecast and progress questions. Identity, dates set by planning and ownership
+    columns are valid for every status.
+- name: project_health_color
+  definition: 'status_color is the project''s health colour from the fever chart. ''black'' means the
+    due date has already passed, whatever the progress. Otherwise the colour compares time elapsed (project_planned_completion)
+    with work done (project_completion) against the configured fever chart lines: ''green'' on track,
+    ''#FFCB00'' at risk (YELLOW is stored as this hex code), ''red'' in trouble.'
+  sql_fragment: vpp_planning_projects.status_color = '#FFCB00'
+  scope: '"Yellow projects" are status_color = ''#FFCB00'', never ''yellow''. "Red projects" are ''red'';
+    "black projects" are ''black''. Combine with project_status = ''in_execution'' (see project_metrics_only_current_for_in_execution).
+    "At-risk projects" has no single definition in the product; see open_questions.'
+- name: overdue_project
+  definition: An overdue project is an unfinished project whose committed due date is before today. It
+    is the same condition that makes status_color 'black'.
+  sql_fragment: vpp_planning_projects.project_status <> 'closed' AND vpp_planning_projects.project_due_date
+    < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+- name: forecast_late_project
+  definition: A project forecast to finish late is one whose expected completion (project_etc) is after
+    its due date. project_predicted_delay holds the gap in working days and is 0 otherwise. "Delayed projects",
+    "late projects" and "projects that will miss their date" asked about running projects mean this.
+  sql_fragment: vpp_planning_projects.project_predicted_delay > 0 AND vpp_planning_projects.project_status
+    = 'in_execution'
+  scope: 'Use status_color for health-colour questions and project_predicted_delay for lateness. They
+    are different signals: a project can be yellow without a predicted delay, and black only means the
+    date has passed.'
+- name: closed_project_lateness
+  definition: 'For a closed project, lateness compares its closure date with project_due_date. The closure
+    date is not a column: it is the day of the project remark recording the closure (truncated to the
+    day, because remark_created_on is an exact instant). Delay in calendar days = (closure day - due date)
+    / 86400, shown as 0 when negative. The application labels a positive difference ''Delayed'', a negative
+    one ''Before Time'', and zero ''On Time''.'
+  sql_fragment: (SELECT EXTRACT(EPOCH FROM date_trunc('day', timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on))))
+    AT TIME ZONE 'Asia/Kolkata')::bigint FROM vpp_planning_remark r WHERE r.host_type = 'project' AND
+    r.host_status = 'closed' AND r.host_id = vpp_planning_projects.project_id)
+  scope: If a project was closed more than once, this uses the latest closure; the application's closed-projects
+    screen may pick a different closure remark.
+- name: project_completion_is_duration_based
+  definition: 'project_completion is work done on the schedule: (total duration - remaining duration)
+    / total duration x 100, excluding the buffer. It is not the share of finished tasks. project_planned_completion
+    is TIME elapsed between start and due date in working days, not planned work. To compare plan with
+    actual, compare these two columns; to count finished tasks, count tasks.'
+  sql_fragment: vpp_planning_projects.project_completion
+- name: buffer_penetration
+  definition: project_penetration is buffer consumed / project buffer x 100. It can exceed 100. It is
+    not the fever-chart Y-axis in the default planned mode, and it is not a measure of completion. project_buffer
+    is the buffer as a percentage of duration (0-100) and project_buffer_duration is the buffer in working
+    days.
+  sql_fragment: vpp_planning_projects.project_penetration
+- name: recent_progress_window
+  definition: 'project_completed_progress is progress made over the last N working days (N = project_report_config.project_completion_before,
+    15 by default), and project_expected_progress is the progress needed over the next N working days.
+    Both are window values, not cumulative. The application''s progress buckets are: no progress when
+    project_completed_progress = 0; on track when project_completed_progress >= project_expected_progress;
+    behind when it is lower and above 0.'
+  sql_fragment: vpp_planning_projects.project_completed_progress >= vpp_planning_projects.project_expected_progress
+- name: project_priority_direction
+  definition: 'project_priority ranks projects: a LOWER number is a HIGHER priority. "Top priority", "highest
+    priority" or "most important" means the smallest values, so sort ascending. Priorities are unique
+    among open projects, may have decimals, and closed projects can share numbers.'
+  sql_fragment: ORDER BY vpp_planning_projects.project_priority ASC
+- name: due_dates_explained
+  definition: 'project_due_date is the committed due date (critical chain plus project buffer). project_internal_due_date
+    is the end of the critical chain without the buffer and is earlier. project_planned_due_date is the
+    due date from the last plan save before execution (set while the project is in_planning or scheduled;
+    a rebaseline does not change it). project_etc is the current forecast finish. original_etc, despite
+    its name, is overwritten with project_etc on every buffer run: never use it as an original forecast;
+    use vpp_planning_projectshistory for past forecasts.'
+- name: project_start_date_meaning
+  definition: For "when did the project start" use project_actual_start_date, which the application shows
+    as the start date. project_start_date is the planned start and, after a Type 3 rebaseline, holds a
+    virtual date (today minus completed duration including buffer).
+- name: project_team
+  definition: 'Each project has exactly one Project Manager (project_manager_id, mandatory) and optional
+    Coordinators (vpp_planning_projectcoordinatormapping), and belongs to exactly one portfolio (portfolio_id,
+    mandatory). The Portfolio Manager is not a project column: it is any user mapped to the portfolio
+    in vpp_masterdata_mappings (rule portfolio_manager).'
+  sql_fragment: JOIN vpp_planning_projectcoordinatormapping c ON c.project_id_id = vpp_planning_projects.project_id
+- name: rebaseline_types
+  definition: 'Rebaselining replans an in_execution project. project_rebaseline_type records the last
+    type: 0 = never rebaselined; 1 = scope changed, due date kept; 2 = due date recalculated from project
+    start plus total duration and buffer; 3 = due date set to the new forecast (today plus remaining duration
+    and buffer). Type 1 leaves task baseline dates unchanged; Type 3 leaves the baselines of finished
+    tasks unchanged. Rebaselined projects are project_rebaseline_type IN (1, 2, 3); the last rebaseline
+    date is project_last_rebaselined_on. By default only VP_Admin and VP_MasterScheduler may choose types
+    2 and 3; others may use type 1 only.'
+  sql_fragment: vpp_planning_projects.project_rebaseline_type IN (1, 2, 3)
+  scope: A rebaseline that overwrites task baseline dates writes one row per task to vpp_planning_rebaselinelog
+    (rebaselines that keep task baselines, normally Type 1, are not logged) with an increasing version
+    per project and name 'Rebaseline <version>'. Editing a milestone's baseline also writes rows, named
+    'Milestone', and they share the version sequence, so versions have gaps. Only the latest type is kept
+    on the project, so "how many times was this project rebaselined" is COUNT(DISTINCT version) over rows
+    WHERE name LIKE 'Rebaseline %'.
+- name: scheduling_mode
+  definition: scheduling_logic is 'ALAP' (as late as possible), 'ASAP' (as soon as possible) or 'MIX'.
+    In MIX, a chain uses ASAP dates once its top-level task has started and ALAP dates otherwise. Task
+    expected dates follow the project's mode.
+- name: project_history_for_trends
+  definition: Questions about how a project's values changed over time (colour last week, completion a
+    month ago, how the ETC moved) are answered from vpp_planning_projectshistory, never from the current
+    row. A snapshot is written at the start of each buffer run, before recalculation, so it holds the
+    values of the previous run; there can be several per day. Take one row per project per day, the latest
+    of that day.
+  sql_fragment: SELECT DISTINCT ON (h.project_id, timezone('Asia/Kolkata', to_timestamp(h.history_created_on))::date)
+    h.* FROM vpp_planning_projectshistory h ORDER BY h.project_id, timezone('Asia/Kolkata', to_timestamp(h.history_created_on))::date,
+    h.history_created_on DESC
+- name: project_actions
+  definition: Project actions are follow-up items on a project. action_status is 'active' (saved, not
+    published), 'published', 'request_to_close' or 'closed'. Open actions are every non-closed one; "pending
+    closure" means 'request_to_close'. "My actions" are those where action_owner_id is the signed-in user.
+  sql_fragment: LOWER(vpp_planning_projectactions.action_status) <> 'closed' AND vpp_planning_projectactions.action_is_deleted
+    = false
+
+# ==========================================================================================
+# TASKS
+# ==========================================================================================
+- name: task_identifier
+  definition: A task has three identifiers. task_uid is the primary key and the join key for subtasks,
+    participants, attachments, issues and delay reasons. gantt_id (UUID) is used by links and the hierarchy.
+    task_id is the WBS id text such as '1.2.3' and is unique only within one project. A bare number after
+    "task" means task_uid. A dotted value such as '1.2' is task_id and needs the project too. Task names
+    are not unique, even within a project.
+  sql_fragment: vpp_planning_tasks.task_uid = 5021
+- name: task_status_values
+  definition: 'task_status_id: 1 = NS (Not Started), 2 = RTS (Ready To Start), 3 = Started (in progress),
+    4 = Completed. "Pending", "open" or "not done" tasks are 1, 2 and 3. "Ready" means 2. "In progress",
+    "ongoing" and "started" mean 3. "Done", "closed", "finished" and "completed" mean 4. Status names
+    come from vpp_planning_taskstatus.'
+  sql_fragment: vpp_planning_tasks.task_status_id IN (1, 2, 3)
+- name: default_task_scope
+  definition: When a question asks for tasks or subtasks, or a count of them, and names no status of its
+    own, answer about open, non-deleted items in in_execution projects only. Add those predicates even
+    though the question did not ask for them, and state the assumption.
+  sql_fragment: vpp_planning_tasks.task_status_id IN (1, 2, 3) AND vpp_planning_tasks.task_is_deleted
+    = false AND vpp_planning_projects.project_status = 'in_execution'
+  scope: 'Same exceptions as default_project_scope: an explicit status, an explicit request for every
+    status or for history, a breakdown by status, distinct-value counts, and data-quality questions. "All"
+    alone does not switch it off. When the question names a project, the project filter replaces the in_execution
+    condition but the task status default still applies.'
+- name: leaf_and_parent_tasks
+  definition: A plan is a tree up to 5 levels deep. A LEAF task is one with a workflow (workflow_id IS
+    NOT NULL); only leaf tasks have subtasks. Parent tasks summarise their children. gant_task_type =
+    'project' marks a summary or parent TASK, not a project. Counting "tasks" or work items normally means
+    leaf tasks; say so when you restrict to them.
+  sql_fragment: vpp_planning_tasks.workflow_id IS NOT NULL
+  scope: Use workflow_id IS NOT NULL, not gant_task_type = 'task', to find leaf tasks.
+- name: task_hierarchy
+  definition: 'Parent and child: parent_task_id_id joins to the parent''s task_uid. For all ancestors
+    or descendants use vpp_planning_taskshierarchy: one row per (task, ancestor) with depth 1 = parent,
+    2 = grandparent, and so on, plus a depth 0 row for the task itself. Exclude depth 0 when counting
+    ancestors or descendants.'
+  sql_fragment: SELECT h.gantt_task_uid FROM vpp_planning_taskshierarchy h WHERE h.gantt_parent_task_id
+    = :ancestor_gantt_id AND h.depth > 0
+- name: milestones
+  definition: 'A milestone is a 0-day task: task_is_milestone = true (equivalently gant_task_type = ''milestone'').
+    It starts when its first direct predecessor starts and completes only when all its direct predecessors
+    are completed. Its target date is COALESCE(milestone_baseline_etc, task_baseline_start_date). Its
+    forecast is task_actual_finish_date when finished, otherwise task_expected_finish_date. Milestone
+    task_completion is a schedule-position percentage (how far the forecast start has come from project
+    start towards the baseline start), not work done; it drops when the forecast slips.'
+  sql_fragment: vpp_planning_tasks.task_is_milestone = true
+  scope: 'The application''s milestone report colours: green when finished at 100% completion; yellow
+    when finished below 100%; blue when unfinished and the forecast is on or before the target; red otherwise.
+    A missed milestone is unfinished with its forecast after its target.'
+- name: critical_task
+  definition: 'Critical tasks lie on the critical chain: task_is_critical = true, normally with floating_time_gap
+    = 0. If the schedule marks none, the buffer run marks the minimum-float tasks critical, so a critical
+    task can have non-zero float. Use task_is_critical, not a float test.'
+  sql_fragment: vpp_planning_tasks.task_is_critical = true
+- name: near_critical_and_flow_obstacle
+  definition: 'The product''s near-critical flag is is_flowobstacle_task: true when floating_time_gap
+    <= project_rem_duration x (100 - near_cc) / 100. It includes critical tasks (float 0). The Flow Obstacle
+    report lists open leaf tasks with this flag and remaining duration, ordered by expected start then
+    float, and shows only a configured number of tasks.'
+  sql_fragment: vpp_planning_tasks.is_flowobstacle_task = true AND vpp_planning_tasks.workflow_id IS NOT
+    NULL AND vpp_planning_tasks.task_actual_finish_date IS NULL AND vpp_planning_tasks.task_rem_duration
+    > 0
+  scope: '"Near-critical but not critical" adds task_is_critical = false. The Flow Obstacle report also
+    shows the flag as false for critical tasks, so to match that screen add task_is_critical = false.
+    The flag is also computed on deleted tasks, so keep task_is_deleted = false.'
+- name: delayed_task
+  definition: 'A delayed task, by default, is what the application''s task screens show as delayed: the
+    task_is_delayed key of task_delay_indicator is true (time elapsed since the first subtask start exceeds
+    the completed duration). "Delayed tasks" means open tasks with this flag. The separate column task_isdelayed
+    means "actual completion below planned completion" and is filled only when configuration compute_isdelayed_value.compute_task_isdelayed
+    is on (off unless set); use it only for "behind planned completion" questions.'
+  sql_fragment: COALESCE((vpp_planning_tasks.task_delay_indicator->>'task_is_delayed')::boolean, false)
+    = true AND vpp_planning_tasks.task_status_id IN (1, 2, 3)
+  scope: VectorPro has other delay measures; use them only when the question asks for them. "How many
+    days delayed" or "delay on progress" is (task_delay_indicator->>'delay_on_task_progress')::numeric,
+    days by which elapsed time since the first subtask start exceeds completed duration. "Roll-up delay"
+    or "delay from subtasks" is (task_delay_indicator->>'roll_up_delay_on_subtask_progress')::numeric
+    > 0. "Behind planned completion" is task_isdelayed = true (or task_completion < planned_task_completion).
+    Delay is not a lifecycle status, so the open-task default still applies on top of it.
+- name: late_against_baseline
+  definition: A task late against its baseline is an unfinished task whose baseline finish date has passed,
+    or a finished task whose actual finish is after its baseline finish. This is a date comparison, different
+    from delayed_task.
+  sql_fragment: (vpp_planning_tasks.task_actual_finish_date IS NULL AND vpp_planning_tasks.task_baseline_finish_date
+    < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint)
+    OR vpp_planning_tasks.task_actual_finish_date > vpp_planning_tasks.task_baseline_finish_date
+  scope: Use when the question says behind schedule, past its planned date, overdue, or missed its baseline.
+- name: task_completion_and_plan
+  definition: 'task_completion is actual completion in percent: (task_duration - task_rem_duration) /
+    task_duration x 100. For a leaf task, remaining duration rolls up from its subtasks as a share of
+    task_duration: for series execution (task_roll_up_type = 1) sum of subtask remaining / sum of subtask
+    totals x task_duration; for parallel (2) the same with the largest subtask. planned_task_completion
+    is the completion expected today: 0 before the baseline start, 100 after the baseline finish, otherwise
+    working days since baseline start / task_duration x 100. A configuration switch can make started tasks
+    measure from their actual start instead of the baseline start.'
+- name: elapsed_days_and_stagnancy
+  definition: 'Elapsed days are working days since the start, minus 1. For a task read them from the task_elapsed
+    JSON: elapsed_with_actual_start, and elapsed_with_min_subtask_start (since the earliest subtask start,
+    used for delay). Stagnancy (task_stagnancy, subtask_stagnancy) is working days since last_modified_on,
+    i.e. days without progress. Both freeze when the item closes, and the application shows task stagnancy
+    only for Started tasks.'
+  sql_fragment: (vpp_planning_tasks.task_elapsed->>'elapsed_with_actual_start')::numeric
+  scope: '"Stagnant tasks" are Started tasks (task_status_id = 3) ordered by task_stagnancy descending;
+    the product sets no fixed threshold, so give the ranking or ask for a threshold. vpp_planning_tasks.task_elapsed_days
+    is never maintained; never use it.'
+- name: work_priority_order
+  definition: 'The application orders work by project priority, then the Task Priority Report index: ORDER
+    BY project_priority ASC, task_tpr_sorting_index ASC (subtasks then by subtask_tpr_sorting_index).
+    The index is recalculated by the daily run from SQL stored in the database. "What should I work on
+    next", "priority order" and "which task first" use this order over workable leaf tasks (status 2 or
+    3).'
+  sql_fragment: ORDER BY vpp_planning_projects.project_priority ASC, vpp_planning_tasks.task_tpr_sorting_index
+    ASC NULLS LAST
+  scope: Do not invent another ranking from float, dates or buffer. The index formula itself is not in
+    code, so explain the order as the application's priority order.
+- name: what_counts_as_progress
+  definition: last_modified_on (the basis of stagnancy) moves when a subtask's phase progress or status
+    changes, when the task is closed or marked NA, and when a closed child is reopened. Adding a remark
+    counts as progress only when configuration remark_config.update_last_modified_on is true; it is off
+    by default.
+- name: ready_to_start_rules
+  definition: 'Only Not Started tasks become RTS. The project''s project_task_rts_config decides when
+    a successor becomes RTS: 1 = when any direct predecessor has left Not Started; 2 = when no direct
+    predecessor is still Not Started; 3 = when the link condition of any predecessor is met (Finish-to-Start
+    and Finish-to-Finish need the predecessor finished, Start-to-Start and Start-to-Finish need it started)
+    and lag allows; 4 = the same for all predecessors. A task with no predecessor becomes RTS only if
+    it has no parent or its parent is RTS. Under 3 and 4, a future RTS date waits in task_rts_start_date
+    until the buffer run flips it.'
+  scope: Explain RTS with this rule; do not compute RTS yourself in SQL. Read task_status_id = 2.
+- name: task_closing_rules
+  definition: A leaf task can be closed (actual finish date entered) only when every non-deleted subtask
+    has an actual finish date, and its finish date cannot be earlier than the latest subtask finish date.
+    The application's update screens also limit a task's start to on or after the project's actual start,
+    within configured back-dating limits. A parent task closes automatically when all its children are
+    completed. When delay-reason gating is on and the task took longer than its duration, a major reason,
+    minor reason and description are required; they are stored in vpp_planning_taskdelaydetail.
+  scope: For explaining why a task cannot be closed. Whether an open issue on the task itself also blocks
+    closure is unconfirmed; see open_questions.
+- name: reopened_task
+  definition: 'A closed leaf task can be reopened: its actual finish date is removed and status returns
+    to Started (3), without changing completion or duration. Every ancestor with a finish date is reopened
+    too. The system also reopens completed subtasks (6 to 2) when their workflow structure or a phase
+    target changes.'
+- name: na_tasks
+  definition: 'A task "marked NA" (not applicable) is force-completed with its subtasks: status 4, completion
+    100, remaining 0, subtasks status 6. It looks like a normal completion. The only marker is the remark
+    ''This task is Marked as NA by ...'' on the task. Eligibility (leaf tasks of in_execution projects
+    with no started subtask and no open issue) is checked by a database function, so treat it as the application''s
+    usual rule rather than a guarantee.'
+  sql_fragment: EXISTS (SELECT 1 FROM vpp_planning_remark r WHERE r.host_type = 'task' AND r.host_id =
+    vpp_planning_tasks.task_uid AND r.remark ILIKE '%Marked as NA%')
+  scope: When counting genuinely completed work, mention that NA tasks are included unless excluded with
+    this test.
+- name: my_tasks
+  definition: My tasks means tasks where the signed-in user is the Task Manager or a Task Participant,
+    still open, not deleted, in an in_execution project.
+  sql_fragment: (vpp_planning_tasks.task_manager_id = <the id in the SIGNED-IN USER block> OR EXISTS (SELECT
+    1 FROM vpp_planning_taskparticipants tp WHERE tp.task_id_id = vpp_planning_tasks.task_uid AND tp.task_participant_id
+    = <the id in the SIGNED-IN USER block>)) AND vpp_planning_tasks.task_status_id IN (1, 2, 3) AND vpp_planning_tasks.task_is_deleted
+    = false AND EXISTS (SELECT 1 FROM vpp_planning_projects p WHERE p.project_id = vpp_planning_tasks.project_id_id
+    AND p.project_status = 'in_execution' AND p.project_is_deleted = false)
+  scope: The open-status and in_execution conditions apply only to the bare concept; a project or status
+    named in the question replaces them. "My completed tasks" uses task_status_id = 4; "my delayed tasks"
+    adds the delayed_task flag on top of the open condition; "my task status breakdown" groups by task_status_id.
+    "Tasks I manage" uses task_manager_id only; "tasks I participate in" uses vpp_planning_taskparticipants
+    only. Holding the VP_TaskManager role is not the same as managing a task.
+- name: task_dates_explained
+  definition: Each task has baseline dates (task_baseline_start_date / task_baseline_finish_date, changed
+    only by a rebaseline), expected dates (task_expected_start_date / task_expected_finish_date, the daily
+    forecast from remaining duration) and actual dates (task_actual_start_date / task_actual_finish_date,
+    entered by users). Planned means baseline. Forecast or expected means expected. *_alap_* and *_asap_*
+    are mode-specific variants; use the plain columns.
+
+# ==========================================================================================
+# SUBTASKS AND WORKFLOWS
+# ==========================================================================================
+- name: subtask_status_values
+  definition: 'subtask_status_id: 1 = Not Started, 2 = Active, 5 = On Hold, 6 = Completed; 3 and 4 are
+    waiting states shown as W and R. Open subtasks are everything except 6. Read status names from vpp_planning_subtaskstatus
+    rather than assuming 3 and 4.'
+  sql_fragment: (vpp_planning_subtasks.subtask_status_id IS NULL OR vpp_planning_subtasks.subtask_status_id
+    <> 6) AND vpp_planning_subtasks.subtask_is_deleted = false
+  scope: '"Completed subtasks" is subtask_status_id = 6. "On hold" is 5. A started subtask cannot return
+    to Not Started.'
+- name: subtask_belongs_to_leaf_task
+  definition: A subtask belongs to one leaf task (vpp_planning_subtasks.task_id = vpp_planning_tasks.task_uid)
+    and moves through that task's workflow phases. Subtasks reach their project only through the task.
+  sql_fragment: JOIN vpp_planning_tasks t ON t.task_uid = vpp_planning_subtasks.task_id
+- name: subtask_weightage_is_duration
+  definition: Despite the name, subtask_total_weightage is the subtask's duration in days and subtask_rem_weightage
+    its remaining duration. subtask_actual_completion_weightage and subtask_planned_completion_weightage
+    are percentages (0-100). Subtask planned completion uses calendar days since the subtask's actual
+    start.
+- name: delayed_subtask
+  definition: 'A delayed subtask is one whose subtask_delay_indicator says so: elapsed working days exceed
+    the share of its computed duration matching its completion. subtask_isdelayed is never updated by
+    the application; never use it.'
+  sql_fragment: (vpp_planning_subtasks.subtask_delay_indicator->>'subtask_is_delayed')::boolean = true
+  scope: Delay is not a lifecycle status, so the open-subtask default still applies.
+- name: my_subtasks
+  definition: My subtasks means subtasks where the signed-in user is the Subtask Manager or a Subtask
+    Participant, still open, not deleted, in an in_execution project.
+  sql_fragment: (vpp_planning_subtasks.subtask_manager_id = <the id in the SIGNED-IN USER block> OR EXISTS
+    (SELECT 1 FROM vpp_planning_subtaskparticipants sp WHERE sp.subtask_id_id = vpp_planning_subtasks.subtask_id
+    AND sp.subtask_participants_id = <the id in the SIGNED-IN USER block>)) AND (vpp_planning_subtasks.subtask_status_id
+    IS NULL OR vpp_planning_subtasks.subtask_status_id <> 6) AND vpp_planning_subtasks.subtask_is_deleted
+    = false AND EXISTS (SELECT 1 FROM vpp_planning_tasks t JOIN vpp_planning_projects p ON p.project_id
+    = t.project_id_id WHERE t.task_uid = vpp_planning_subtasks.task_id AND p.project_status = 'in_execution'
+    AND p.project_is_deleted = false)
+  scope: As for my_tasks, the open and in_execution conditions apply only to the bare concept.
+- name: subtask_closing_rules
+  definition: A subtask cannot be closed while it has an open issue (issue_status 1 or 2). The application's
+    update screens limit a subtask's start to on or after its task's actual start and its finish to between
+    its own start and today, within configured back-dating limits. No issue can be raised on a completed
+    subtask.
+- name: workflow_phases
+  definition: A workflow is an ordered set of phases (vpp_masterdata_phases, ordered by phase_sequence_index)
+    attached to a leaf task. Each subtask records progress per phase in subtask_phase_json, keyed by phases.phase_code.
+    A phase counts as done when its JSON status is 'closed'; phases with is_applicable 'NA' are ignored.
+    Phase types are Binary, Percentage, Quantitative and Date; spelling and case vary, so compare with
+    UPPER().
+  sql_fragment: jsonb_each(vpp_planning_subtasks.subtask_phase_json) j JOIN vpp_masterdata_phases ph ON
+    ph.phase_code = j.key::uuid AND ph.workflow_id = vpp_planning_tasks.workflow_id AND ph.phase_is_deleted
+    = false
+  scope: Join phases on workflow_id as well as phase_code; phase_code alone is not guaranteed unique.
+
+# ==========================================================================================
+# LINKS (DEPENDENCIES)
+# ==========================================================================================
+- name: link_types
+  definition: 'vpp_planning_links.link_type is TEXT: ''0'' = Finish-to-Start (FS), ''1'' = Start-to-Start
+    (SS), ''2'' = Finish-to-Finish (FF), ''3'' = Start-to-Finish (SF). Compare as quoted text.'
+  sql_fragment: vpp_planning_links.link_type = '0'
+- name: links_join_by_gantt_id
+  definition: 'Links name tasks by Gantt UUID: gantt_source_id is the predecessor and gantt_target_id
+    the successor, both matching vpp_planning_tasks.gantt_id, never task_uid. Predecessors of a task are
+    links whose gantt_target_id is its gantt_id.'
+  sql_fragment: JOIN vpp_planning_tasks pred ON pred.gantt_id = vpp_planning_links.gantt_source_id JOIN
+    vpp_planning_tasks succ ON succ.gantt_id = vpp_planning_links.gantt_target_id
+- name: buffer_link_is_not_a_dependency
+  definition: Each project has one extra link from its end task to the project buffer node, which has
+    no task row. Counting dependencies with an INNER JOIN of both ends to vpp_planning_tasks drops it;
+    a count of raw link rows does not.
+- name: lag_values
+  definition: lag is the planned lag in days; negative is a lead. new_lag is the current lag recalculated
+    during execution from the progress of both tasks (rules differ by link type, and a lag usually shrinks
+    as the predecessor progresses); for in_execution projects use new_lag. introduced_lag is lag added
+    by the FOL (resource-load) calculation; when FOL scheduling is on, lag already includes it, and the
+    planner's own lag is lag - introduced_lag.
+
+# ==========================================================================================
+# ISSUES
+# ==========================================================================================
+- name: issue_status_values
+  definition: 'issue_status: 1 = Open, 2 = Resolved (a resolution was given and awaits review), 3 = Review
+    and Closed. Open issues are 1 and 2: an issue stays open until it is closed. "Resolved" or "awaiting
+    closure" is 2. "Closed" is 3. "Rejected" issues are status 1 with a resolution_rejection row.'
+  sql_fragment: vpp_issue_issues.issue_status IN (1, 2) AND vpp_issue_issues.issue_is_deleted = false
+  scope: Issue and task statuses are different vocabularies; never answer an issue question from task
+    columns or the reverse.
+- name: default_issue_scope
+  definition: When a question asks for issues, or a count of issues, and names no status, answer about
+    open issues (status 1 or 2) that are not deleted, and state the assumption.
+  sql_fragment: vpp_issue_issues.issue_status IN (1, 2) AND vpp_issue_issues.issue_is_deleted = false
+  scope: Same exceptions as default_project_scope.
+- name: issue_host_mapping
+  definition: Where an issue was raised is in vpp_issue_issuehostmappings. issue_type 'task' means host_id
+    is a task_uid; 'subtask' means a subtask_id; 'common' means a project_id. PROJECT-level issues are
+    stored as 'common'; there is no 'project' value. Always filter issue_type together with host_id, because
+    the same number can be a task, a subtask or a project.
+  sql_fragment: vpp_issue_issuehostmappings.issue_type = 'task' AND vpp_issue_issuehostmappings.host_id
+    = vpp_planning_tasks.task_uid
+- name: issues_of_a_project
+  definition: All issues of a project are its common (project-level) issues plus the issues of its tasks
+    and of their subtasks. Reach tasks and subtasks through their own tables, never by matching host_id
+    to project_id for task or subtask issues. A common issue can be mapped to several projects, so count
+    with COUNT(DISTINCT issue_id).
+  sql_fragment: (ihm.issue_type = 'common' AND ihm.host_id = p.project_id) OR (ihm.issue_type = 'task'
+    AND ihm.host_id IN (SELECT t.task_uid FROM vpp_planning_tasks t WHERE t.project_id_id = p.project_id))
+    OR (ihm.issue_type = 'subtask' AND ihm.host_id IN (SELECT s.subtask_id FROM vpp_planning_subtasks
+    s JOIN vpp_planning_tasks t ON t.task_uid = s.task_id WHERE t.project_id_id = p.project_id))
+- name: count_issues_from_source
+  definition: 'The pre-aggregated issue_count columns (projects: integer; tasks: JSON, use (issue_count->>''total_task_issue_count'')::int;
+    subtasks: integer) count open issues but can drift: the refresh matches host_id without issue_type,
+    so a task or subtask issue whose id equals the project_id is counted on the project; it also sums
+    deleted tasks and can miscount shared common issues. For any count a person will rely on, count from
+    vpp_issue_issues joined to vpp_issue_issuehostmappings, with COUNT(DISTINCT issue_id).'
+  sql_fragment: COUNT(DISTINCT vpp_issue_issues.issue_id)
+- name: my_issues
+  definition: My issues means open issues whose current owner (issue_owner_id) is the signed-in user.
+    Pending issues are the open ones too.
+  sql_fragment: vpp_issue_issues.issue_owner_id = <the id in the SIGNED-IN USER block> AND vpp_issue_issues.issue_status
+    IN (1, 2) AND vpp_issue_issues.issue_is_deleted = false
+  scope: Issues the person raised are a different question, answered from issue_raised_by_id, and only
+    when the question says raised, created or reported by me. When the question supplies its own status,
+    that status decides.
+- name: issue_owner_vs_raiser
+  definition: issue_owner_id is the person responsible for resolving the issue and can be reassigned.
+    issue_raised_by_id is fixed when the issue is raised. issue_closed_by_id and issue_closed_on are filled
+    only when the issue reaches status 3.
+- name: issue_lifecycle
+  definition: Adding a resolution moves an issue to 2; rejecting it moves it back to 1; closing (only
+    after an accepted resolution) moves it to 3. No issue can be raised on a completed task (status 4),
+    a completed subtask (status 6) or a closed project. An open issue blocks closing its subtask. Deleting
+    a task or subtask soft-deletes its issues and removes their host rows.
+- name: issue_aging
+  definition: 'issue_elapsed_days is the issue''s age in working days: from the day after it was raised
+    to today, or to issue_closed_on once closed. It is refreshed by the daily buffer run. Some screens
+    show age in calendar days instead; say which one the answer uses.'
+  sql_fragment: vpp_issue_issues.issue_elapsed_days
+- name: issue_reasons
+  definition: Issues and task delays are classified by a major reason (vpp_masterdata_majorreasons) and
+    a minor reason under it (vpp_masterdata_minorreasons). Both are optional on issues. "Issues by category"
+    or "by reason" groups by major_reason_name, and then minor_reason_name if asked.
+
+# ==========================================================================================
+# RESOURCE CONGESTION (HEATMAP)
+# ==========================================================================================
+- name: heatmap_team_source
+  definition: 'vpp_masterdata_heatmapteams describes a load group. team_type decides what source_id points
+    to: ''user'' and ''rm'' are vpp_users.id, ''team'' is vpp_masterdata_teams.team_id, ''department''
+    is vpp_masterdata_departments.department_id. team_id is the heatmap row''s own id, not a vpp_masterdata_teams
+    id.'
+  sql_fragment: JOIN vpp_masterdata_teams t ON t.team_id = vpp_masterdata_heatmapteams.source_id AND vpp_masterdata_heatmapteams.team_type
+    = 'team'
+- name: team_load_meaning
+  definition: 'team_load is queued work in DAYS: remaining duration of the team''s queued subtasks divided
+    by the team''s flow rate, for projects in the configured heatmap statuses (in_execution by default).
+    team_load_30_days, _60_days and _90_days cover tasks started or starting within 29, 59 and 89 days;
+    team_load_all covers all unfinished work. In the windowed loads, an Active subtask counts only once
+    it has been stagnant for the configured pendency days; team_load_all counts every unfinished subtask.
+    threshold_green_end and threshold_yellow_end are the team''s colour limits; how the screen colour
+    is computed is not in code (see open_questions).'
+  scope: 'Never add team loads across teams: one subtask counts for every team, department and resource
+    manager its Subtask Manager belongs to. team_load is not a count of subtasks.'
+- name: queue_snapshots
+  definition: vpp_planning_projectwisequeuedetails holds dated snapshots per project and team. For the
+    current state filter the latest entry_date; summing across dates multiplies the answer. cum_* columns
+    are running totals across projects (the calculation is stored in the database, not in code; ordering
+    by priority is inferred from how they are used).
+  sql_fragment: vpp_planning_projectwisequeuedetails.entry_date = (SELECT MAX(entry_date) FROM vpp_planning_projectwisequeuedetails)
+
+# ==========================================================================================
+# ROLES, ACCESS AND PEOPLE
+# ==========================================================================================
+- name: role_is_not_ownership
+  definition: 'Roles (vpp_groups via vpp_user_groups) say what a user may do; ownership says which records
+    are theirs. "My projects / tasks / subtasks / issues" is answered from manager, participant, owner
+    and mapping columns, never from role membership alone. Role names are case-sensitive: VP_Admin, VP_MasterScheduler,
+    VP_TopManagement, VP_ProjectManager, VP_ProjectCoordinator, VP_ResourceManager, VP_TaskManager, VP_TaskParticipant,
+    VP_SubTaskManager, VP_SubTaskParticipant, VP_IssueOwner, VP_CostManager, VP_HFM. A user can hold several
+    roles.'
+- name: full_access_roles
+  definition: VP_Admin and VP_MasterScheduler see and can act on all projects, tasks, subtasks and issues.
+    VP_TopManagement sees everything on reporting lists and all issues, but not on the task and subtask
+    update and review screens, and it cannot edit, resolve or close issues it is not part of. VP_CostManager
+    and VP_HFM apply only when the cost or HFM module is enabled and do not modify project data. Everyone
+    else sees only the data they own or take part in.
+- name: my_projects
+  definition: My projects means non-deleted projects where the signed-in user is the Project Manager or
+    a Project Coordinator.
+  sql_fragment: vpp_planning_projects.project_is_deleted = false AND (vpp_planning_projects.project_manager_id
+    = <the id in the SIGNED-IN USER block> OR EXISTS (SELECT 1 FROM vpp_planning_projectcoordinatormapping
+    c WHERE c.project_id_id = vpp_planning_projects.project_id AND c.coordinator_id_id = <the id in the
+    SIGNED-IN USER block>))
+  scope: 'The default_project_scope (in_execution) applies on top when no status is named. "Projects I
+    am involved in" or "projects I can see" is broader: also projects in portfolios the user manages and
+    projects where the user manages or takes part in any task or subtask. Use the broader form only when
+    the question asks for it.'
+- name: portfolio_manager
+  definition: A Portfolio Manager is any user mapped to the portfolio in vpp_masterdata_mappings; there
+    is no manager column on vpp_masterdata_portfolios. Both spellings of the mapping exist. "My portfolios"
+    are portfolios mapped to the signed-in user.
+  sql_fragment: EXISTS (SELECT 1 FROM vpp_masterdata_mappings m WHERE ((m.e1type_e2type = 'user_portfolio'
+    AND m.entity1_id = <user id> AND m.entity2_id = vpp_masterdata_portfolios.portfolio_id) OR (m.e1type_e2type
+    = 'portfolio_user' AND m.entity2_id = <user id> AND m.entity1_id = vpp_masterdata_portfolios.portfolio_id)))
+- name: user_departments_and_teams
+  definition: A user's departments and teams are in vpp_masterdata_mappings ('user_department' / 'department_user',
+    'user_team' / 'team_user'); a user can belong to several. Tasks carry a responsible department in
+    department_id_id. "My department's tasks" filters department_id_id on the departments listed in the
+    SIGNED-IN USER block (use IN with every one of them). "Tasks of the Design department" uses the department
+    named in the question.
+  sql_fragment: vpp_planning_tasks.department_id_id IN (<department ids from the SIGNED-IN USER block>)
+  scope: When the block lists no department, do not guess and do not fall back to the person's own tasks;
+    ask for clarification.
+- name: resource_and_reporting_managers
+  definition: A resource manager (vpp_masterdata_resourcemanagersmapping.resourcemanager_id) manages the
+    users mapped to them (user_id) and sees their work. A reporting manager (vpp_masterdata_reportingmanagersmapping)
+    is the line manager of the mapped users. "My team's work" for a resource manager, as in the application's
+    task lists, is every open task the managed users manage or take part in, plus every task holding an
+    open subtask they manage or take part in.
+  sql_fragment: SELECT rm.user_id FROM vpp_masterdata_resourcemanagersmapping rm WHERE rm.resourcemanager_id
+    = <the id in the SIGNED-IN USER block> AND rm.resourcemanager_is_deleted = false
+  scope: Match the managed users against task_manager_id, vpp_planning_taskparticipants, subtask_manager_id
+    and vpp_planning_subtaskparticipants; task_manager_id alone misses most of their work.
+- name: active_users_and_names
+  definition: 'Active users are status = 1 AND is_active. Status 2 is set when a user is deleted or deactivated.
+    User id 1 is the system administrator and is hidden in the application. Show users the way the application
+    does: REPLACE(username, ''_deleted_user_'' || id, '''').'
+  sql_fragment: vpp_users.status = 1 AND vpp_users.is_active AND vpp_users.id <> 1
+
+# ==========================================================================================
+# OTHER RECORDS
+# ==========================================================================================
+- name: attachments
+  definition: Attachments of a project, task or subtask are rows in the matching *attachmentsmappings
+    table. Each row is either a file (file_id to vpp_utility_fileupload, whose file_name is the real name)
+    or a URL link (url). The *_attachment_count columns include links. Removed attachments are deleted
+    rows, so the mapping tables hold only current attachments.
+- name: remarks
+  definition: Remarks on projects, tasks and subtasks are in vpp_planning_remark (host_type 'project',
+    'task', 'subtask' or 'hfm'; host_id is that entity's id). The newest task or subtask remark is copied
+    to task_latest_remark / subtask_latest_remark; projects have no such column. Issue comments are a
+    separate table, vpp_issue_issueremarksmappings. Remark text may contain HTML tags.
+  sql_fragment: vpp_planning_remark.host_type = 'task' AND vpp_planning_remark.host_id = vpp_planning_tasks.task_uid
+- name: holidays_and_working_days
+  definition: Holidays and weekly offs (vpp_masterdata_holidays) define which days are not working days.
+    working_days_view lists working dates and is the basis of every working-day count.
+- name: configuration_dependent_behaviour
+  definition: 'Several behaviours are switched by client configuration that the AI cannot see: delay-reason
+    gating, delay flag calculation, whether remarks count as progress, FOL scheduling, cost and HFM modules,
+    automatic reprioritisation, the fever-chart lines and the default project scope. When an answer depends
+    on one of these, describe the behaviour as configurable rather than asserting it is on or off.'
+
+# ==========================================================================================
+# OPEN QUESTIONS - behaviour that is unclear or where code and documentation disagree.
+# Until resolved, answer conservatively and mention the uncertainty when a question depends on one.
+# ==========================================================================================
+open_questions:
+- name: subtask_status_3_and_4
+  question: Which of subtask_status_id 3 and 4 is 'W' and which is 'R', and what do they stand for? CLAUDE.md
+    lists W, R and H. Code references 'W. for Resource', 'W. for Fullkit' and 'On Hold' (5).
+  affects: Questions about waiting or review subtasks. The rules tell the AI to read names from vpp_planning_subtaskstatus.
+- name: open_issue_blocks_task_close
+  question: CLAUDE.md says a leaf task with an open issue cannot be closed. The task-close check in code
+    (can_close_task) checks only subtask finish dates; open issues block subtask closure and NA marking
+    only.
+  affects: Explaining why a task cannot be closed. The rule task_closing_rules leaves this unconfirmed.
+- name: milestone_completion
+  question: CLAUDE.md says milestone completion comes from completed duration of the whole predecessor
+    network. Code computes a time-elapsed percentage.
+  affects: Milestone progress answers. The rules follow the code.
+- name: near_critical_definition
+  question: CLAUDE.md describes near-critical tasks as small non-zero float. Code flags is_flowobstacle_task
+    for float <= remaining duration x (100 - near_cc)%, which includes critical tasks.
+  affects: Near-critical counts. The rules follow the code and explain how to exclude critical tasks.
+- name: active_project_meaning
+  question: Is an 'active project' only in_execution (project_status_config.default_status) or in_execution,
+    in_planning, ready_to_schedule and scheduled (active-projects list fallback)?
+  affects: Default project scope. The rules use in_execution as the default and the four statuses when
+    the user says 'active'.
+- name: at_risk_definition
+  question: 'No product definition of ''at-risk project'' was found. Candidates: status_color IN (''red'',
+    ''#FFCB00''), project_predicted_delay > 0, or project_penetration above a threshold.'
+  affects: At-risk questions. The rules point to status_color and forecast_late_project and do not define
+    at-risk.
+- name: rebaseline_type_semantics
+  question: CLAUDE.md says Type 3 changes the due date by remaining duration. Code sets the due date to
+    the new ETC and moves project_start_date to a virtual date. Type 1 leaving task baselines unchanged
+    happens through an exception path rather than an explicit check.
+  affects: Rebaseline explanations and project_start_date after rebaseline.
+- name: rebaseline_log_type_column
+  question: vpp_planning_rebaselinelog has a new column named 'type' on some databases and 'rebaseline_type'
+    on others (values 'Milestone' or 'Type N'). Which name is final?
+  affects: Rebaseline history by type.
+- name: portfolio_manager_uniqueness
+  question: CLAUDE.md says a portfolio has exactly one Portfolio Manager. Code allows several users mapped
+    to a portfolio, and the VP_PortfolioManager role is not referenced by code.
+  affects: Questions about who manages a portfolio. The rules return every mapped user.
+- name: top_management_rights
+  question: CLAUDE.md says VP_TopManagement can modify all data except a few cases. Code treats it as
+    full visibility but excludes it from global edit rights and from issue actions. Which cases are intended?
+  affects: Questions about what Top Management can do.
+- name: user_status_values
+  question: 'vpp_users.status: code treats 2 as deleted (UserStatus.DELETED) while the model labels it
+    inactive; 3 (terminated) is never used. Confirm meanings.'
+  affects: User counts by status.
+- name: access_functions_not_in_code
+  question: The functions that decide row-level access (get_accessible_projects_for_user, get_accessible_tasks_for_user
+    and related views) exist only in the database. The rules derive ownership from the inline SQL of the
+    application lists.
+  affects: The chatbot should enforce access outside the model (for example by restricting the SQL to
+    accessible project ids), not rely on these rules.
+- name: signed_in_user_block
+  question: The rules assume the chatbot passes a SIGNED-IN USER block with the user id, roles and departments.
+    Confirm the format the chatbot will provide.
+  affects: Every 'my ...' question.
+- name: max_issue_count_scope
+  question: Configuration max_issue_count limits issues per project, task and subtask, but its enforcement
+    is configured in the database. Does it count open issues only, or all issues?
+  affects: Questions about why an issue could not be raised.
+- name: issue_escalation_levels
+  question: The formula that turns issue age into issue_escalated_level is not in code, and whether 0
+    or NULL means 'not escalated' is undefined.
+  affects: Escalation questions.
+- name: issue_count_drift
+  question: 'Pre-aggregated issue_count columns can be wrong: the refresh filters host_id without issue_type
+    (so ids of different kinds collide), sums deleted tasks, and refreshes only the first host of a shared
+    common issue. Is this a known bug?'
+  affects: The rules tell the AI to recount from source tables.
+- name: common_issues_in_open_list
+  question: The open-issue list shows every common issue regardless of its project's status, because of
+    how a condition is grouped. Is that intended?
+  affects: Matching chatbot counts with the application's open-issue screen.
+- name: plan_structure_limits
+  question: '''Max 5 levels'' and ''one end task per project'' are not enforced in backend code (gantt_config.max_length
+    is never read; the end task is taken as the first match). Are they enforced in the frontend only?'
+  affects: Answers about plan structure limits.
+- name: holiday_recurring_values
+  question: Values of vpp_masterdata_holidays.holiday_recurring and the numbering of day_of_week are not
+    defined in code.
+  affects: Holiday questions.
+- name: delay_flag_default_off
+  question: task_isdelayed is computed only when configuration compute_isdelayed_value.compute_task_isdelayed
+    is true; the code default is false. Is it on for every client?
+  affects: '''Behind planned completion'' answers. The default delayed-task definition uses task_delay_indicator,
+    as the task screens do.'
+- name: closure_date_limits
+  question: Start and finish date limits for tasks and subtasks (not before project or task start, not
+    in the future, back-dating limits) were found only in the screens' date-picker SQL, not in backend
+    validation. Are they also enforced on save and in imports?
+  affects: Explaining why a date could not be entered.
+- name: unused_columns
+  question: vpp_planning_tasks.task_elapsed_days and vpp_planning_subtasks.subtask_isdelayed are never
+    written by code (the config flag compute_subtask_isdelayed is read nowhere). Should they be maintained
+    or dropped?
+  affects: The rules tell the AI not to use them.
+- name: original_etc_overwritten
+  question: original_etc is overwritten with project_etc on every buffer run. Intended, or should it keep
+    the first ETC?
+  affects: Original vs current forecast questions. The rules point to vpp_planning_projectshistory.
+- name: heatmap_thresholds_and_colour
+  question: The SQL that sets heat_color and queue figures lives in the database. Do per-team thresholds
+    (threshold_green_end / threshold_yellow_end) or the global heatmap_config values decide the colour?
+  affects: Heatmap colour questions.
+- name: planned_completion_formula
+  question: Two formulas for project_planned_completion exist (working days in buffer_run.py, calendar
+    days in project_calculations.py). Which one is current?
+  affects: Fever chart explanations. The rules describe the working-day version.
+- name: status_color_in_buffered_mode
+  question: If the fever-chart mode were 'buffered', status_color is never assigned and keeps a stale
+    value. Is buffered mode supported?
+  affects: Health colour reliability for clients using buffered mode.
+- name: rts_child_rule
+  question: Code makes a child without predecessors RTS only when its parent is exactly RTS (status 2),
+    not Started (3). CLAUDE.md describes evaluation from the top level. Confirm the intended rule.
+  affects: RTS explanations.
+- name: unused_rts_configs
+  question: Configuration GenerateReadyToStartSignal is not referenced by code, and mark_all_task_as_rts
+    is read from integration_config rather than its own row. Confirm which settings are live.
+  affects: RTS explanations.

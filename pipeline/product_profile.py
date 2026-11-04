@@ -154,15 +154,23 @@ class ProductProfile:
 
         users = self.users()
         if users:
-            for at, block in (("users", users), ("users.departments", users.get("departments"))):
+            roles = users.get("roles")
+            for at, block in (("users", users), ("users.departments", users.get("departments")),
+                              ("users.roles", roles),
+                              ("users.roles.names", roles["names"] if roles else None)):
                 if block is None:
                     continue
                 if block["table"] not in tables:
                     problems.append(f'{at}.table "{block["table"]}" is not in schema_description.yaml.')
                     continue
-                for key in ("id", "user_id", "name"):
+                for key in ("id", "user_id", "role_id", "name"):
                     if key in block and block[key] not in columns_of(block["table"]):
                         problems.append(f'{at}.{key} "{block[key]}" is not a column of {block["table"]}.')
+            for column, value in (users.get("active") or {}).items():
+                if column not in columns_of(users["table"]):
+                    problems.append(f'users.active.{column} is not a column of {users["table"]}.')
+                elif not isinstance(value, (bool, int)):
+                    problems.append(f"users.active.{column} must be a whole number or true/false.")
 
     # -------------------------------------------------------------- views --
 

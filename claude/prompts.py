@@ -327,6 +327,9 @@ def _render_rules(doc: dict) -> str:
 def _render_examples(doc: dict) -> str:
     out = ["EXAMPLES"]
     for pair in (doc.get("pairs") or []):
+        # A pair whose right answer is a clarification has no SQL to show.
+        if not pair.get("sql"):
+            continue
         out.append(f"  Q: {pair['nl']}")
         out.append(f"  A: {' '.join(pair['sql'].split())}")
     out.append("")

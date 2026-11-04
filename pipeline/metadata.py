@@ -25,7 +25,15 @@ from pathlib import Path
 
 import yaml
 
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
+
+def _metadata_dir() -> Path:
+    """METADATA_DIR from .env or the environment; metadata/ when unset."""
+    from config.settings import load_settings
+
+    return load_settings().metadata_dir
+
+
+META_DIR = _metadata_dir()
 SITE_DIR = META_DIR / "site"
 
 _site_dir: Path | None = None
@@ -37,8 +45,12 @@ def enable_site_metadata(directory: Path = SITE_DIR) -> None:
     Call it at startup, before the first question. Every reader caches what
     it derives from these documents, so a reader that has already run would
     keep answering from the common files alone.
+
+    A product with no site folder has no site metadata: nothing to merge.
     """
     global _site_dir
+    if not Path(directory).is_dir():
+        return
     _site_dir = Path(directory)
     _parsed.cache_clear()
     profile.cache_clear()

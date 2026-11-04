@@ -1,0 +1,112 @@
+# VectorPro smoke suite: 10 turns against vector_pro.
+#
+# Run as user 2048 (vectorsupport), who manages 22 running projects:
+#
+#   DATABASE_NAME=vector_pro METADATA_DIR=products/vector_pro/metadata \
+#   BENCHMARK_USER_ID=2048 BENCHMARK_USER_NAME=vectorsupport \
+#   python scripts/run_lean_suite.py --suite benchmark/vector_pro_questions.yaml \
+#       --out results/2026-11-04/vector_pro
+#
+# Counts, so a correct answer has one shape. Expected SQL follows
+# products/vector_pro/metadata/business_rules.yaml; every query was run
+# against vector_pro before it was written here.
+
+version: 1
+
+questions:
+
+- id: V01
+  category: Default Scope
+  question: How many running projects are there?
+  expected_sql: |
+    SELECT COUNT(*) FROM vpp_planning_projects
+    WHERE project_status = 'in_execution' AND project_is_deleted = false
+
+- id: V02
+  category: Group By
+  question: How many projects are there in each status?
+  expected_sql: |
+    SELECT project_status, COUNT(*) FROM vpp_planning_projects
+    WHERE project_is_deleted = false
+    GROUP BY project_status
+
+- id: V03
+  category: Colour
+  question: How many running projects are red?
+  expected_sql: |
+    SELECT COUNT(*) FROM vpp_planning_projects
+    WHERE project_status = 'in_execution' AND project_is_deleted = false
+      AND status_color = 'red'
+
+- id: V04
+  category: Default Scope
+  question: How many open issues are there?
+  expected_sql: |
+    SELECT COUNT(DISTINCT issue_id) FROM vpp_issue_issues
+    WHERE issue_status IN (1, 2) AND issue_is_deleted = false
+
+- id: V05
+  category: Default Scope
+  question: How many tasks are there?
+  note: >-
+    No status named: default_task_scope means open, non-deleted tasks of
+    in_execution projects; leaf_and_parent_tasks means leaf tasks only.
+  expected_sql: |
+    SELECT COUNT(*) FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_status_id IN (1, 2, 3) AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND p.project_status = 'in_execution' AND p.project_is_deleted = false
+
+- id: V06
+  category: My
+  question: How many delayed tasks do I have?
+  expected_sql: |
+    SELECT COUNT(*) FROM vpp_planning_tasks t
+    WHERE (t.task_manager_id = 2048 OR EXISTS (
+             SELECT 1 FROM vpp_planning_taskparticipants tp
+             WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 2048))
+      AND t.task_status_id IN (1, 2, 3) AND t.task_is_deleted = false
+      AND COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false) = true
+      AND EXISTS (SELECT 1 FROM vpp_planning_projects p
+                  WHERE p.project_id = t.project_id_id
+                    AND p.project_status = 'in_execution' AND p.project_is_deleted = false)
+
+- id: V07
+  category: My
+  question: How many of my projects are running?
+  expected_sql: |
+    SELECT COUNT(*) FROM vpp_planning_projects p
+    WHERE p.project_is_deleted = false AND p.project_status = 'in_execution'
+      AND (p.project_manager_id = 2048 OR EXISTS (
+             SELECT 1 FROM vpp_planning_projectcoordinatormapping c
+             WHERE c.project_id_id = p.project_id AND c.coordinator_id_id = 2048))
+
+- id: V08
+  category: Group By
+  question: How many running projects does each portfolio have?
+  expected_sql: |
+    SELECT pf.portfolio_name, COUNT(*) FROM vpp_planning_projects p
+    JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id
+    WHERE p.project_status = 'in_execution' AND p.project_is_deleted = false
+    GROUP BY pf.portfolio_name
+
+- id: VC01
+  category: Conversation - Add Filter
+  turns:
+    - id: VC01.1
+      question: How many running projects are in the assessment portfolio?
+      expect_decision: new_block
+      expected_sql: |
+        SELECT COUNT(*) FROM vpp_planning_projects p
+        JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id
+        WHERE p.project_status = 'in_execution' AND p.project_is_deleted = false
+          AND pf.portfolio_name = 'assessment'
+    - id: VC01.2
+      question: And how many of them are red?
+      expect_decision: follow_up
+      expected_sql: |
+        SELECT COUNT(*) FROM vpp_planning_projects p
+        JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id
+        WHERE p.project_status = 'in_execution' AND p.project_is_deleted = false
+          AND pf.portfolio_name = 'assessment' AND p.status_color = 'red'

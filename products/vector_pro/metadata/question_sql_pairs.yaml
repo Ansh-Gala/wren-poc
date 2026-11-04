@@ -1,0 +1,2149 @@
+# VectorPro question -> SQL reference pairs for the AI chatbot.
+#
+# Companion to schema_description.yaml and business_rules.yaml (scripts/schema_description); table,
+# column and rule names below are the ones in those files. Database: PostgreSQL. Every query is a
+# single read-only SELECT (or WITH ... SELECT).
+#
+# Fields per pair:
+#   id               stable identifier
+#   category         projects | tasks | subtasks | issues | my | heatmap | people | calendar | ambiguity
+#   nl               example question (and the SIGNED-IN USER context, when it matters)
+#   source           where the pair comes from
+#   sql              reference query; null when the right answer is a clarification
+#   explanation      why the query is written this way
+#   steps            ordered steps for multi-step questions
+#   assumptions      assumptions to state in the answer
+#   clarification    when and what to ask the user instead of guessing
+#   mistakes         common wrong translations to avoid
+#   variations       related phrasings and how the SQL changes
+#   expected_result  shape of the correct answer (no business data is included)
+#   rules            business_rules.yaml rules the pair applies
+#
+# Ids in examples (project 101, task 5003, user 42, department 20 ...) are placeholders: substitute the
+# values from the question or the SIGNED-IN USER block, always as literals. Today's date is computed in
+# SQL as midnight Asia/Kolkata in epoch seconds. Every query was executed against a synthetic copy of the
+# VectorPro schema; no client data was used.
+
+version: 1
+pairs:
+- id: project_by_id
+  category: projects
+  nl: Show me project 101
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_code, p.project_name, p.project_status,
+           pf.portfolio_name,
+           REPLACE(pm.username, '_deleted_user_' || pm.id, '') AS project_manager_name,
+           timezone('Asia/Kolkata', to_timestamp(p.project_actual_start_date))::date AS project_actual_start_date,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc,
+           p.project_completion, p.status_color
+    FROM vpp_planning_projects p
+    JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id
+    JOIN vpp_users pm ON pm.id = p.project_manager_id
+    WHERE p.project_id = 101
+      AND p.project_is_deleted = false
+  explanation: 'A bare number after ''project'' is project_id (INTEGER, unquoted). Show readable columns: names
+    instead of ids, epoch dates converted to dates.'
+  assumptions:
+  - project_actual_start_date is the start date the application shows; project_start_date can be a virtual date
+    after a Type 3 rebaseline.
+  mistakes:
+  - Quoting the id ('101') or matching it against project_code.
+  - Returning raw epoch numbers for dates.
+  - Showing project_manager_id instead of the manager's name.
+  variations:
+  - What is the status of project 101?
+  - Who manages project 101?
+  - When is project VP-101 due? (project_code = 'VP-101')
+  expected_result: One row, or none if the project does not exist or is deleted.
+  rules:
+  - project_identifier
+  - dates_are_epoch_seconds
+  - answer_with_names_not_ids
+  - project_start_date_meaning
+- id: count_running_projects
+  category: projects
+  nl: How many projects are running?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COUNT(*) AS running_projects
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+  explanation: '''Running'' maps to project_status = ''in_execution''. Deleted projects keep their status, so the
+    deleted flag is required.'
+  mistakes:
+  - Forgetting project_is_deleted = false (deleted projects still say in_execution).
+  - Using a status value that does not exist, such as 'running' or 'active'.
+  variations:
+  - How many live / ongoing projects do we have?
+  - Count projects in execution
+  expected_result: A single number.
+  rules:
+  - project_status_values
+  - soft_delete_everywhere
+- id: projects_by_status
+  category: projects
+  nl: How many projects are there in each status?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_status, COUNT(*) AS projects
+    FROM vpp_planning_projects p
+    WHERE p.project_is_deleted = false
+    GROUP BY p.project_status
+    ORDER BY projects DESC
+  explanation: A breakdown by status must see every status, so the default in_execution scope is NOT applied.
+  mistakes:
+  - Adding project_status = 'in_execution' (the default scope) to a status breakdown, which collapses it to one
+    row.
+  expected_result: One row per status that has projects.
+  rules:
+  - default_project_scope
+  - project_status_values
+- id: active_projects_ambiguous
+  category: projects
+  nl: List the active projects
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_status
+    FROM vpp_planning_projects p
+    WHERE p.project_status IN ('in_execution', 'in_planning', 'ready_to_schedule', 'scheduled')
+      AND p.project_is_deleted = false
+    ORDER BY p.project_priority ASC
+  explanation: '''Active'' is ambiguous in VectorPro. The application''s active-projects list uses in_execution,
+    in_planning, ready_to_schedule and scheduled by default, while the default project scope elsewhere is only in_execution.
+    Use the four statuses and say so.'
+  assumptions:
+  - The four-status list is the code default; a client can configure a different list.
+  clarification: If the user means only running projects, use project_status = 'in_execution' instead.
+  variations:
+  - Show all active projects
+  - Which projects are not closed or on hold?
+  expected_result: Projects in the four statuses, highest priority first.
+  rules:
+  - default_project_scope
+  - project_priority_direction
+- id: yellow_projects
+  category: projects
+  nl: Which projects are in yellow?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_completion, p.project_planned_completion,
+           timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc, timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date
+    FROM vpp_planning_projects p
+    WHERE p.status_color = '#FFCB00'
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY p.project_priority ASC
+  explanation: Yellow is stored as the hex code '#FFCB00', never the word 'yellow'. The colour is only recalculated
+    for in_execution projects, so others are excluded.
+  mistakes:
+  - status_color = 'yellow' (returns nothing).
+  - Counting colours of closed or on-hold projects, whose colour is a stale value.
+  variations:
+  - Which projects are red? (status_color = 'red')
+  - How many projects are green, yellow, red and black?
+  expected_result: Running projects whose health colour is yellow.
+  rules:
+  - project_health_color
+  - codes_are_stored_as_given
+  - project_metrics_only_current_for_in_execution
+- id: projects_by_health_colour
+  category: projects
+  nl: Give me the count of running projects by health colour
+  source: vectorpro_codebase
+  sql: |
+    SELECT CASE p.status_color WHEN '#FFCB00' THEN 'yellow' ELSE p.status_color END AS status_color,
+           COUNT(*) AS projects
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY 1
+    ORDER BY 1
+  explanation: Translate '#FFCB00' to 'yellow' for display. 'black' means the due date has passed, whatever the
+    progress.
+  mistakes:
+  - Leaving '#FFCB00' in the output, where people will not recognise it as yellow.
+  - Including on_hold or closed projects.
+  expected_result: One row per colour present.
+  rules:
+  - project_health_color
+  - project_metrics_only_current_for_in_execution
+- id: overdue_projects
+  category: projects
+  nl: Which projects are overdue?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_status,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           (now() AT TIME ZONE 'Asia/Kolkata')::date - timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS calendar_days_overdue
+    FROM vpp_planning_projects p
+    WHERE p.project_status <> 'closed'
+      AND p.project_is_deleted = false
+      AND p.project_due_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+    ORDER BY p.project_due_date
+  explanation: Overdue = not closed and the committed due date is before today. Dates are epoch seconds, so compare
+    with today's epoch, never with CURRENT_DATE directly. The day difference shown is calendar days.
+  steps:
+  - Compute today's midnight in Asia/Kolkata as epoch seconds.
+  - Keep unfinished, non-deleted projects whose project_due_date is earlier.
+  - Convert the due date for display and compute calendar days overdue.
+  mistakes:
+  - project_due_date < now() (compares a BIGINT with a timestamp).
+  - Using project_etc instead of project_due_date (that is forecast lateness, a different question).
+  - Presenting calendar days as working days.
+  variations:
+  - Which projects have passed their due date?
+  - Show black projects (black = due date passed; same set for running projects)
+  expected_result: Unfinished projects past their due date, oldest due date first.
+  rules:
+  - overdue_project
+  - today_as_epoch
+  - working_days_vs_calendar_days
+- id: forecast_late_projects
+  category: projects
+  nl: Which running projects will finish late, and by how many days?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc,
+           p.project_predicted_delay AS project_predicted_delay
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND p.project_predicted_delay > 0
+    ORDER BY p.project_predicted_delay DESC
+  explanation: 'Forecast lateness is project_predicted_delay > 0: the working days by which the expected completion
+    (project_etc) is after the due date. It is maintained only for running projects.'
+  mistakes:
+  - Using status_color = 'red' as 'late' (colour is health, not lateness).
+  - Subtracting dates and calling the result working days (project_predicted_delay is already in working days).
+  - Using original_etc as the original forecast (it is overwritten daily).
+  variations:
+  - Which projects are delayed?
+  - Projects that will miss their due date
+  expected_result: Running projects with a positive predicted delay, worst first.
+  rules:
+  - forecast_late_project
+  - project_metrics_only_current_for_in_execution
+  - due_dates_explained
+- id: projects_due_next_30_days
+  category: projects
+  nl: Which projects are due in the next 30 days?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_status, timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND p.project_due_date >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+      AND p.project_due_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint + 31 * 86400
+    ORDER BY p.project_due_date
+  explanation: A date window on an epoch column is today's epoch plus N days x 86400 seconds; this window is today
+    plus the next 30 days. No status was named, so the default running-project scope applies.
+  mistakes:
+  - Comparing with CURRENT_DATE + 30.
+  - Including closed, planning or on-hold projects without saying so.
+  variations:
+  - Projects due this month
+  - Projects due before 31 December 2026 (compare with the epoch of that date)
+  expected_result: Running projects due in the window.
+  rules:
+  - dates_are_epoch_seconds
+  - today_as_epoch
+- id: top_priority_projects
+  category: projects
+  nl: What are our top 5 priority projects?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_priority, p.project_status
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY p.project_priority ASC
+    LIMIT 5
+  explanation: A LOWER project_priority is a HIGHER priority, so sort ascending.
+  mistakes:
+  - ORDER BY project_priority DESC (returns the least important projects).
+  expected_result: Up to five running projects, most important first.
+  rules:
+  - project_priority_direction
+  - default_project_scope
+- id: closed_projects_late
+  category: projects
+  nl: Which projects closed this year finished late, and by how many days?
+  source: vectorpro_codebase
+  sql: |
+    WITH closure AS (
+      SELECT r.host_id AS project_id,
+             EXTRACT(EPOCH FROM date_trunc('day', timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on))))
+                     AT TIME ZONE 'Asia/Kolkata')::bigint AS closed_day
+      FROM vpp_planning_remark r
+      WHERE r.host_type = 'project'
+        AND r.host_status = 'closed'
+      GROUP BY r.host_id
+    )
+    SELECT p.project_id, p.project_name,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date AS project_closed_on,
+           (c.closed_day - p.project_due_date) / 86400 AS calendar_days_late,
+           CASE WHEN c.closed_day > p.project_due_date THEN 'Delayed'
+                WHEN c.closed_day < p.project_due_date THEN 'Before Time'
+                ELSE 'On Time' END AS outcome
+    FROM vpp_planning_projects p
+    JOIN closure c ON c.project_id = p.project_id
+    WHERE p.project_status = 'closed'
+      AND p.project_is_deleted = false
+      AND c.closed_day > p.project_due_date
+      AND timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date >= date_trunc('year', now() AT TIME ZONE 'Asia/Kolkata')::date
+    ORDER BY calendar_days_late DESC
+  explanation: There is no closure-date column. The closure date is the day of the latest project remark with host_status
+    = 'closed'. It is truncated to the day because remark_created_on is an exact instant, then compared with the
+    due date.
+  steps:
+  - Find each project's latest 'closed' status remark and truncate it to the Asia/Kolkata day.
+  - Join it to closed projects.
+  - Difference / 86400 = calendar days; the application labels the result Delayed / Before Time / On Time.
+  - Keep closures in the current year (Asia/Kolkata) that are after the due date.
+  assumptions:
+  - '''Late'' compares closure with project_due_date, as the application''s closed-projects list does.'
+  mistakes:
+  - Using project_modified_on or project_etc as the closure date.
+  - Subtracting the raw remark timestamp (time of day turns an early closure into 0 days).
+  - Judging closed projects by status_color (stale).
+  variations:
+  - Which projects closed early or on time? (closed_day <= due date)
+  - On-time delivery rate (see closed_projects_on_time_rate)
+  - Average delay of closed projects
+  expected_result: Projects closed late this year, with closure date and calendar days late.
+  rules:
+  - closed_project_lateness
+  - remarks
+  - project_metrics_only_current_for_in_execution
+- id: project_progress_pace
+  category: projects
+  nl: Which running projects are behind on recent progress?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name,
+           p.project_completed_progress AS project_completed_progress,
+           p.project_expected_progress AS project_expected_progress,
+           CASE WHEN p.project_completed_progress = 0 THEN 'No progress'
+                WHEN p.project_completed_progress >= p.project_expected_progress THEN 'On track'
+                ELSE 'Behind' END AS pace
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND p.project_completed_progress < p.project_expected_progress
+    ORDER BY p.project_expected_progress - p.project_completed_progress DESC
+  explanation: project_completed_progress is the progress made over the last N working days (15 by default), and
+    project_expected_progress the progress needed over the next N. Behind means the first is below the second; 0
+    means no progress at all.
+  mistakes:
+  - Comparing project_completion (cumulative) with project_planned_completion (time elapsed) and calling it pace.
+  - Treating the progress columns as cumulative percentages.
+  variations:
+  - Which projects made no progress recently?
+  - Is project 101 keeping pace?
+  expected_result: Running projects whose recent progress is below what is needed, with a pace label.
+  rules:
+  - recent_progress_window
+  - project_completion_is_duration_based
+- id: plan_vs_actual_completion
+  category: projects
+  nl: For each running project, compare planned and actual completion
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name,
+           ROUND(p.project_completion::numeric, 1) AS project_completion,
+           ROUND(p.project_planned_completion::numeric, 1) AS project_planned_completion,
+           ROUND((p.project_completion - p.project_planned_completion)::numeric, 1) AS gap_pct_points,
+           ROUND(p.project_penetration::numeric, 1) AS project_penetration
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY gap_pct_points
+  explanation: project_completion is work done (duration based, buffer excluded); project_planned_completion is
+    TIME elapsed between start and due date. Their gap is the fever chart's comparison. Buffer penetration can exceed
+    100.
+  mistakes:
+  - Calling project_planned_completion 'planned work'.
+  - Computing completion as the share of finished tasks.
+  - Treating values as fractions (they are 0-100).
+  expected_result: One row per running project, most behind first.
+  rules:
+  - project_completion_is_duration_based
+  - buffer_penetration
+  - percentages_are_0_to_100
+- id: buffer_overrun
+  category: projects
+  nl: Which projects have consumed more than their whole buffer?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, ROUND(p.project_penetration::numeric, 1) AS project_penetration
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND p.project_penetration > 100
+    ORDER BY p.project_penetration DESC
+  explanation: project_penetration = buffer consumed / project buffer x 100 and is not capped, so > 100 means the
+    buffer is overrun.
+  mistakes:
+  - Assuming the value is capped at 100 or is a fraction.
+  expected_result: Running projects with penetration above 100%.
+  rules:
+  - buffer_penetration
+- id: project_trend_last_days
+  category: projects
+  nl: How has project 101's completion and colour changed over the last 7 days?
+  source: vectorpro_codebase
+  sql: |
+    SELECT DISTINCT ON (history_created_on)
+           timezone('Asia/Kolkata', to_timestamp(h.history_created_on))::date AS history_created_on,
+           h.project_completion,
+           CASE h.status_color WHEN '#FFCB00' THEN 'yellow' ELSE h.status_color END AS status_color,
+           timezone('Asia/Kolkata', to_timestamp(h.project_etc))::date AS project_etc
+    FROM vpp_planning_projectshistory h
+    WHERE h.project_id = 101
+      AND h.history_created_on >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint - 6 * 86400
+    ORDER BY history_created_on, h.history_created_on DESC
+  explanation: Trends come from vpp_planning_projectshistory, never from the current row. There can be several snapshots
+    per day; DISTINCT ON keeps the latest per day.
+  steps:
+  - Filter the project's snapshots to the last 7 days including today (today's midnight minus 6 days, in epoch seconds).
+  - Group by Asia/Kolkata day and keep the latest snapshot of each day.
+  - Order by day.
+  assumptions:
+  - A snapshot taken during a day's buffer run holds the values from the previous run.
+  mistakes:
+  - Reading original_etc as the earlier forecast (it is overwritten daily).
+  - Averaging or summing several snapshots of the same day.
+  variations:
+  - When did project 101 turn yellow?
+  - How did the expected completion date of project 101 move this month?
+  expected_result: One row per day, oldest first.
+  rules:
+  - project_history_for_trends
+  - due_dates_explained
+- id: rebaseline_count
+  category: projects
+  nl: How many times has project 101 been rebaselined and when was the last one?
+  source: vectorpro_codebase
+  sql: |
+    SELECT (SELECT COUNT(DISTINCT l.version) FROM vpp_planning_rebaselinelog l
+            WHERE l.project_id = p.project_id AND l.name LIKE 'Rebaseline %') AS logged_rebaselines,
+           timezone('Asia/Kolkata', to_timestamp(p.project_last_rebaselined_on))::date AS project_last_rebaselined_on,
+           CASE p.project_rebaseline_type WHEN 0 THEN 'Never rebaselined' WHEN 1 THEN 'Type 1: due date kept'
+                WHEN 2 THEN 'Type 2: due date from total duration' WHEN 3 THEN 'Type 3: due date from remaining duration'
+           END AS rebaseline_type_label
+    FROM vpp_planning_projects p
+    WHERE p.project_id = 101
+      AND p.project_is_deleted = false
+  explanation: The rebaseline log has one row per task per version. Milestone baseline edits are logged too (name
+    'Milestone') and share the version sequence, so filter name LIKE 'Rebaseline %' and count distinct versions.
+    The last type and date come from the project row, so they are returned even when nothing was logged.
+  assumptions:
+  - The log is written only when a rebaseline overwrites task baseline dates, so rebaselines that kept task baselines
+    (normally Type 1) are not counted. Say the count covers logged rebaselines.
+  mistakes:
+  - COUNT(*) (counts task rows).
+  - COUNT(DISTINCT version) without the name filter (counts milestone edits).
+  - Using MAX(version) as the count (versions have gaps).
+  variations:
+  - Which projects were rebaselined? (project_rebaseline_type IN (1, 2, 3))
+  - Which rebaseline type was used last for project 101?
+  expected_result: 'One row: number of rebaselines, last date, last type (0 never, 1 due date kept, 2 total duration,
+    3 remaining duration).'
+  rules:
+  - rebaseline_types
+- id: project_team_members
+  category: projects
+  nl: Who are the manager and coordinators of project 102?
+  source: vectorpro_codebase
+  sql: |
+    SELECT 'Project Manager' AS role_in_project, REPLACE(u.username, '_deleted_user_' || u.id, '') AS user_name
+    FROM vpp_planning_projects p
+    JOIN vpp_users u ON u.id = p.project_manager_id
+    WHERE p.project_id = 102 AND p.project_is_deleted = false
+    UNION ALL
+    SELECT 'Coordinator', REPLACE(u.username, '_deleted_user_' || u.id, '')
+    FROM vpp_planning_projectcoordinatormapping c
+    JOIN vpp_planning_projects p ON p.project_id = c.project_id_id AND p.project_is_deleted = false
+    JOIN vpp_users u ON u.id = c.coordinator_id_id
+    WHERE c.project_id_id = 102
+  explanation: The Project Manager is a column; Coordinators are rows in vpp_planning_projectcoordinatormapping.
+    Show names the way the application does.
+  mistakes:
+  - Looking for a coordinator column on projects.
+  - Answering from role membership (VP_ProjectCoordinator) instead of the mapping.
+  expected_result: One row per person with their role in the project.
+  rules:
+  - project_team
+  - role_is_not_ownership
+  - active_users_and_names
+- id: overdue_project_actions
+  category: projects
+  nl: Which project actions are overdue?
+  source: vectorpro_codebase
+  sql: |
+    SELECT a.action_id, p.project_name, a.action_description, a.action_status,
+           REPLACE(u.username, '_deleted_user_' || u.id, '') AS action_owner_name,
+           timezone('Asia/Kolkata', to_timestamp(a.action_planned_completion_date))::date AS action_planned_completion_date
+    FROM vpp_planning_projectactions a
+    JOIN vpp_planning_projects p ON p.project_id = a.project_id_id
+    LEFT JOIN vpp_users u ON u.id = a.action_owner_id
+    WHERE LOWER(a.action_status) <> 'closed'
+      AND a.action_is_deleted = false
+      AND p.project_is_deleted = false
+      AND a.action_planned_completion_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+    ORDER BY a.action_planned_completion_date
+  explanation: Open actions are every non-closed status ('active', 'published', 'request_to_close'). Compare case-insensitively
+    because spellings vary.
+  mistakes:
+  - action_status = 'open' (no such value).
+  - Case-sensitive comparison that misses 'Published'.
+  variations:
+  - Which actions are awaiting closure? (LOWER(action_status) = 'request_to_close')
+  - My open actions (action_owner_id = signed-in user)
+  expected_result: Open actions whose planned completion date has passed.
+  rules:
+  - project_actions
+  - today_as_epoch
+- id: task_by_uid
+  category: tasks
+  nl: Show task 5003
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,
+           p.project_id, p.project_name,
+           REPLACE(tm.username, '_deleted_user_' || tm.id, '') AS task_manager_name,
+           ROUND(t.task_completion::numeric, 1) AS task_completion,
+           timezone('Asia/Kolkata', to_timestamp(t.task_baseline_finish_date))::date AS task_baseline_finish_date,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    LEFT JOIN vpp_users tm ON tm.id = t.task_manager_id
+    WHERE t.task_uid = 5003
+      AND t.task_is_deleted = false
+  explanation: A bare number after 'task' is task_uid, the primary key. Always show the project, because task names
+    repeat.
+  mistakes:
+  - Matching 5003 against task_id (the WBS text, unique only within a project).
+  - Leaving out the project.
+  expected_result: One task row with its project and status name.
+  rules:
+  - task_identifier
+  - tasks_carry_their_project
+  - answer_with_names_not_ids
+- id: task_by_wbs
+  category: tasks
+  nl: What is the status of task 1.2 in project 101?
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE t.project_id_id = 101
+      AND t.task_id = '1.2'
+      AND t.task_is_deleted = false
+  explanation: 'A dotted id such as ''1.2'' is the WBS task_id: text, and unique only together with the project.'
+  clarification: If no project is named, ask which project; '1.2' exists in many projects.
+  mistakes:
+  - task_id = 1.2 unquoted.
+  - Omitting the project filter.
+  expected_result: One row.
+  rules:
+  - task_identifier
+- id: open_tasks_in_project_by_status
+  category: tasks
+  nl: How many open tasks does project 101 have, by status?
+  source: vectorpro_codebase
+  sql: |
+    SELECT ts.task_status AS task_status, COUNT(*) AS tasks
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE t.project_id_id = 101
+      AND t.task_is_deleted = false
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.workflow_id IS NOT NULL
+    GROUP BY ts.task_status_id, ts.task_status
+    ORDER BY ts.task_status_id
+  explanation: Open = task_status_id 1 (NS), 2 (RTS), 3 (Started). Count leaf tasks (workflow_id IS NOT NULL) as
+    work items; parent summary tasks and milestones would double-count.
+  assumptions:
+  - Counting leaf tasks; say so in the answer. Drop the workflow condition if the user wants every plan node.
+  mistakes:
+  - Counting parent tasks (gant_task_type 'project') as work.
+  - Including deleted tasks (they keep their status).
+  - Using a status text column; status is an id.
+  variations:
+  - How many tasks are ready to start in project 101? (task_status_id = 2)
+  - In-progress tasks (task_status_id = 3)
+  expected_result: One row per open status with counts.
+  rules:
+  - task_status_values
+  - leaf_and_parent_tasks
+  - soft_delete_everywhere
+- id: project_task_completion_share
+  category: tasks
+  nl: What percentage of tasks in project 101 are completed?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COUNT(*) FILTER (WHERE t.task_status_id = 4) AS completed_tasks,
+           COUNT(*) AS total_tasks,
+           ROUND(100.0 * COUNT(*) FILTER (WHERE t.task_status_id = 4) / NULLIF(COUNT(*), 0), 1) AS completed_tasks_pct,
+           (SELECT ROUND(p.project_completion::numeric, 1) FROM vpp_planning_projects p WHERE p.project_id = 101)
+             AS project_completion
+    FROM vpp_planning_tasks t
+    WHERE t.project_id_id = 101
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+  explanation: The share of completed tasks is NOT the project's completion. project_completion is duration-based
+    progress on the schedule. Return both and explain the difference.
+  steps:
+  - Count leaf tasks and completed leaf tasks of the project.
+  - Compute the share, guarding against division by zero.
+  - Return project_completion alongside, labelled as schedule progress.
+  mistakes:
+  - Answering 'how complete is the project' with the task share, or the reverse.
+  - Integer division (use 100.0).
+  variations:
+  - How complete is project 101? (answer with project_completion)
+  expected_result: One row with both measures.
+  rules:
+  - project_completion_is_duration_based
+  - leaf_and_parent_tasks
+- id: delayed_tasks_running_projects
+  category: tasks
+  nl: Which tasks are delayed?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_id, t.task_name,
+           (t.task_delay_indicator->>'delay_on_task_progress')::numeric AS delay_days,
+           ROUND(t.task_completion::numeric, 1) AS task_completion,
+           REPLACE(tm.username, '_deleted_user_' || tm.id, '') AS task_manager_name
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_users tm ON tm.id = t.task_manager_id
+    WHERE COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false) = true
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY (t.task_delay_indicator->>'delay_on_task_progress')::numeric DESC NULLS LAST
+  explanation: 'Default meaning of a delayed task, as on the application''s task screens: the task_is_delayed key
+    of task_delay_indicator is true. Open, not deleted, in a running project. Delay is not a lifecycle status, so
+    the open default still applies.'
+  assumptions:
+  - '''Behind planned completion'' is a different measure: task_isdelayed = true (filled only when enabled in configuration)
+    or task_completion < planned_task_completion.'
+  mistakes:
+  - WHERE task_isdelayed = true for 'delayed' (a different measure, and empty unless enabled in configuration).
+  - Including deleted tasks (they keep their delay indicator).
+  - Including closed tasks (the indicator is frozen at closure).
+  - Using a nonexistent 'Delayed' status value.
+  variations:
+  - How many tasks are delayed in project 101?
+  - Delayed tasks in the Design department
+  expected_result: Open delayed tasks in running projects, most behind first.
+  rules:
+  - delayed_task
+  - default_task_scope
+  - tasks_carry_their_project
+- id: tasks_with_most_delay_days
+  category: tasks
+  nl: Which open tasks have the most days of delay?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name,
+           (t.task_delay_indicator->>'delay_on_task_progress')::numeric AS delay_days,
+           (t.task_delay_indicator->>'roll_up_delay_on_subtask_progress')::numeric AS rollup_delay_days
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND COALESCE((t.task_delay_indicator->>'delay_on_task_progress')::numeric, 0) > 0
+    ORDER BY delay_days DESC
+    LIMIT 10
+  explanation: '''Days of delay'' comes from the task_delay_indicator JSON: delay_on_task_progress = working days
+    by which time elapsed since the first subtask start exceeds the completed duration. Roll-up delay is a separate
+    measure.'
+  mistakes:
+  - Using task_elapsed_days (never maintained).
+  - Computing delay as today minus baseline finish (that is lateness against baseline, a different question).
+  - Forgetting ->> and casting (the value is JSON text).
+  variations:
+  - Which tasks have roll-up delay from their subtasks? ((task_delay_indicator->>'roll_up_delay_on_subtask_progress')::numeric
+    > 0)
+  expected_result: Top 10 open tasks by delay days.
+  rules:
+  - delayed_task
+  - elapsed_days_and_stagnancy
+- id: tasks_late_against_baseline
+  category: tasks
+  nl: Which tasks are past their planned finish date and still not done?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name,
+           timezone('Asia/Kolkata', to_timestamp(t.task_baseline_finish_date))::date AS task_baseline_finish_date,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date,
+           (now() AT TIME ZONE 'Asia/Kolkata')::date - timezone('Asia/Kolkata', to_timestamp(t.task_baseline_finish_date))::date AS calendar_days_past_plan
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_actual_finish_date IS NULL
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND t.task_baseline_finish_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY t.task_baseline_finish_date
+  explanation: '''Planned'' means baseline. This is a date comparison and is different from the delayed flag. Unfinished
+    = no actual finish date.'
+  mistakes:
+  - Using task_expected_finish_date as the plan (that is the daily forecast).
+  - Comparing epoch with CURRENT_DATE directly (CURRENT_DATE also follows the session timezone, which may be UTC).
+  variations:
+  - Tasks that finished later than planned (task_actual_finish_date > task_baseline_finish_date)
+  expected_result: Unfinished leaf tasks whose baseline finish has passed.
+  rules:
+  - late_against_baseline
+  - task_dates_explained
+  - today_as_epoch
+- id: critical_open_tasks
+  category: tasks
+  nl: What are the open critical tasks of project 101?
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,
+           t.floating_time_gap, timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE t.project_id_id = 101
+      AND t.task_is_critical = true
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+    ORDER BY t.task_expected_start_date
+  explanation: Critical tasks are task_is_critical = true. Use the flag, not floating_time_gap = 0, because the
+    buffer run may mark minimum-float tasks critical.
+  mistakes:
+  - WHERE floating_time_gap = 0 instead of the flag.
+  expected_result: Open critical tasks in schedule order.
+  rules:
+  - critical_task
+- id: near_critical_not_critical
+  category: tasks
+  nl: Which tasks in project 101 are near-critical but not critical?
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_name, t.floating_time_gap, t.task_rem_duration
+    FROM vpp_planning_tasks t
+    WHERE t.project_id_id = 101
+      AND t.is_flowobstacle_task = true
+      AND t.task_is_critical = false
+      AND t.workflow_id IS NOT NULL
+      AND t.task_actual_finish_date IS NULL
+      AND t.task_rem_duration > 0
+      AND t.task_is_deleted = false
+    ORDER BY t.task_expected_start_date, t.floating_time_gap
+  explanation: Near-critical is the is_flowobstacle_task flag (float within (100 - near_cc)% of the project's remaining
+    duration). The flag includes critical tasks, so exclude them explicitly. The other conditions match the Flow
+    Obstacle report.
+  mistakes:
+  - Inventing a float threshold such as floating_time_gap BETWEEN 1 AND 5.
+  - Forgetting task_is_critical = false (critical tasks carry the flag too).
+  variations:
+  - Show the flow obstacle tasks of project 101 (same filter; the screen shows a configured number of rows)
+  expected_result: Unfinished leaf tasks that are near-critical only.
+  rules:
+  - near_critical_and_flow_obstacle
+- id: stagnant_tasks
+  category: tasks
+  nl: Which started tasks have had no progress for the longest time?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name, t.task_stagnancy,
+           REPLACE(tm.username, '_deleted_user_' || tm.id, '') AS task_manager_name
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_users tm ON tm.id = t.task_manager_id
+    WHERE t.task_status_id = 3
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY t.task_stagnancy DESC
+    LIMIT 10
+  explanation: Stagnancy = working days since last_modified_on (days without progress). The application shows it
+    only for Started tasks (status 3). The product has no fixed 'stagnant' threshold, so rank instead of guessing
+    one.
+  clarification: If the user says 'stagnant for more than N days', add t.task_stagnancy > N.
+  mistakes:
+  - Inventing a threshold.
+  - Computing days since task_modified_on (record edits, not progress).
+  expected_result: Top 10 started tasks by stagnancy.
+  rules:
+  - elapsed_days_and_stagnancy
+  - what_counts_as_progress
+- id: tasks_finishing_this_week
+  category: tasks
+  nl: Which tasks are expected to finish in the next 7 days?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name, timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_actual_finish_date IS NULL
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND t.task_expected_finish_date >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+      AND t.task_expected_finish_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint + 7 * 86400
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY t.task_expected_finish_date
+  explanation: '''Expected to finish'' uses the daily forecast task_expected_finish_date. The window is today plus
+    the next 6 days, built in epoch seconds from today''s midnight.'
+  mistakes:
+  - Using the baseline finish for a forecast question.
+  - date_trunc('week', ...) on an epoch column.
+  expected_result: Unfinished leaf tasks with forecast finish in the window.
+  rules:
+  - task_dates_explained
+  - today_as_epoch
+- id: tasks_completed_last_30_days
+  category: tasks
+  nl: How many tasks were completed in the last 30 days, per project?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, COUNT(*) AS completed_tasks
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_actual_finish_date >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint - 29 * 86400
+      AND t.task_actual_finish_date < EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint + 86400
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND p.project_is_deleted = false
+    GROUP BY p.project_name
+    ORDER BY completed_tasks DESC
+  explanation: Completion in a period is decided by task_actual_finish_date; the window is today and the 29 days
+    before it (30 days). The question names a status (completed), so the open-task default does not apply. NA tasks
+    are force-completed and are included unless excluded.
+  assumptions:
+  - Counts leaf tasks. Tasks marked NA count as completed; see tasks_marked_na to exclude them.
+  mistakes:
+  - Filtering task_status_id = 4 without a date (all time).
+  - Using task_modified_on as the completion date.
+  expected_result: One row per project with completions in the window.
+  rules:
+  - na_tasks
+  - default_task_scope
+- id: tasks_marked_na
+  category: tasks
+  nl: Which tasks were marked NA in project 101?
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_name
+    FROM vpp_planning_tasks t
+    WHERE t.project_id_id = 101
+      AND t.task_is_deleted = false
+      AND EXISTS (SELECT 1
+                  FROM vpp_planning_remark r
+                  WHERE r.host_type = 'task'
+                    AND r.host_id = t.task_uid
+                    AND r.remark ILIKE '%Marked as NA%')
+  explanation: 'An NA task looks like a normal completion (status 4, 100%). The only marker is the system remark
+    ''This task is Marked as NA by ...''. Search all of the task''s remarks: task_latest_remark is overwritten by
+    any later remark.'
+  mistakes:
+  - task_latest_remark ILIKE '%NA%' (misses tasks with a later remark, and matches words containing 'na').
+  - Looking for an NA status value.
+  variations:
+  - How many completed tasks were genuine completions, excluding NA?
+  expected_result: Tasks of the project marked NA.
+  rules:
+  - na_tasks
+  - remarks
+- id: milestone_status
+  category: tasks
+  nl: Show the milestones of project 101 with their target date and status
+  source: vectorpro_codebase
+  sql: |
+    SELECT t.task_uid, t.task_name,
+           timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)))::date AS milestone_target_date,
+           timezone('Asia/Kolkata', to_timestamp(COALESCE(t.task_actual_finish_date, t.task_expected_finish_date)))::date AS forecast_or_actual,
+           CASE
+             WHEN t.task_actual_finish_date IS NOT NULL AND t.task_completion >= 100 THEN 'Completed'
+             WHEN t.task_actual_finish_date IS NOT NULL THEN 'Completed below 100%'
+             WHEN t.task_expected_finish_date <= COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date) THEN 'On track'
+             ELSE 'At risk of missing target'
+           END AS milestone_status
+    FROM vpp_planning_tasks t
+    WHERE t.project_id_id = 101
+      AND t.task_is_milestone = true
+      AND t.task_is_deleted = false
+    ORDER BY milestone_target_date
+  explanation: 'Milestones are task_is_milestone = true. Target = COALESCE(milestone_baseline_etc, task_baseline_start_date).
+    Forecast = actual finish if finished, else expected finish. The status labels follow the milestone report''s
+    colours: green, yellow, blue, red.'
+  steps:
+  - Select milestone tasks of the project.
+  - Derive the target date and the forecast (or actual) date.
+  - Classify with the milestone report's rules.
+  mistakes:
+  - Using milestone_baseline_etc alone (NULL for some milestones).
+  - Reading task_completion of a milestone as work done (it is schedule position).
+  variations:
+  - Which milestones will be missed? (unfinished and forecast after target)
+  expected_result: One row per milestone with target, forecast and status.
+  rules:
+  - milestones
+- id: missed_milestones
+  category: tasks
+  nl: Which upcoming milestones across running projects are forecast to miss their target?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name,
+           timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)))::date AS milestone_target_date,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date - timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)))::date AS calendar_days_gap
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE t.task_is_milestone = true
+      AND t.task_is_deleted = false
+      AND t.task_actual_finish_date IS NULL
+      AND t.task_expected_finish_date > COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY calendar_days_gap DESC
+  explanation: An unfinished milestone whose forecast is after its target. The gap is in calendar days, as in the
+    application's milestone report.
+  mistakes:
+  - Including finished milestones.
+  - Calling the gap working days.
+  expected_result: Unfinished milestones forecast late, biggest gap first.
+  rules:
+  - milestones
+  - working_days_vs_calendar_days
+- id: descendants_of_parent_task
+  category: tasks
+  nl: List all tasks under 'Design' in project 101, and how many open subtasks they have
+  source: vectorpro_codebase
+  sql: |
+    WITH parent AS (
+      SELECT t.gantt_id
+      FROM vpp_planning_tasks t
+      WHERE t.project_id_id = 101 AND t.task_name = 'Design' AND t.task_is_deleted = false
+    )
+    SELECT c.task_uid, c.task_id, c.task_name, h.depth,
+           COUNT(s.subtask_id) FILTER (WHERE s.subtask_status_id IS DISTINCT FROM 6) AS open_subtasks
+    FROM vpp_planning_taskshierarchy h
+    JOIN parent ON h.gantt_parent_task_id = parent.gantt_id
+    JOIN vpp_planning_tasks c ON c.gantt_id = h.gantt_id
+    LEFT JOIN vpp_planning_subtasks s ON s.task_id = c.task_uid AND s.subtask_is_deleted = false
+    WHERE h.depth > 0
+      AND c.task_is_deleted = false
+    GROUP BY c.task_uid, c.task_id, c.task_name, h.depth
+    ORDER BY c.task_id
+  explanation: 'vpp_planning_taskshierarchy is a closure table: one row per (task, ancestor) with depth, plus a
+    depth-0 row for the task itself. All descendants of X are rows whose gantt_parent_task_id is X''s gantt_id with
+    depth > 0. Subtasks hang off leaf tasks by task_uid.'
+  steps:
+  - Find the parent task's gantt_id (by name within the project; ask if the name is ambiguous).
+  - Get every descendant from the hierarchy (depth > 0).
+  - Left-join non-deleted subtasks and count the open ones (status not 6, NULL counts as open).
+  clarification: Task names can repeat; if more than one 'Design' task exists, ask which one (show their WBS ids).
+  mistakes:
+  - Recursing on parent_task_id_id by hand when the closure table exists.
+  - Forgetting depth > 0 (the task itself is included).
+  - Joining subtasks on task_id = WBS id.
+  expected_result: One row per descendant task with its open-subtask count.
+  rules:
+  - task_hierarchy
+  - subtask_belongs_to_leaf_task
+  - subtask_status_values
+- id: task_predecessors
+  category: tasks
+  nl: What are the predecessors of 'Prototype Build' in project 101 and what type of dependency is each?
+  source: vectorpro_codebase
+  sql: |
+    SELECT pred.task_uid, pred.task_id, pred.task_name AS predecessor,
+           CASE l.link_type WHEN '0' THEN 'Finish-to-Start' WHEN '1' THEN 'Start-to-Start'
+                            WHEN '2' THEN 'Finish-to-Finish' WHEN '3' THEN 'Start-to-Finish' END AS dependency_type,
+           l.lag, l.new_lag
+    FROM vpp_planning_tasks succ
+    JOIN vpp_planning_links l ON l.gantt_target_id = succ.gantt_id
+    JOIN vpp_planning_tasks pred ON pred.gantt_id = l.gantt_source_id
+    WHERE succ.project_id_id = 101
+      AND succ.task_name = 'Prototype Build'
+      AND succ.task_is_deleted = false
+      AND pred.task_is_deleted = false
+  explanation: 'Links reference tasks by Gantt UUID: gantt_target_id is the successor and gantt_source_id the predecessor,
+    both matching vpp_planning_tasks.gantt_id. link_type is text.'
+  mistakes:
+  - Joining links to task_uid.
+  - Comparing link_type with integers.
+  - Swapping source and target (that lists successors).
+  variations:
+  - 'What does task 5003 block? (swap: join on l.gantt_source_id = task''s gantt_id)'
+  - How many dependencies does project 101 have? (inner join both ends so the buffer link is not counted)
+  expected_result: One row per direct predecessor with the dependency type and lag.
+  rules:
+  - links_join_by_gantt_id
+  - link_types
+  - lag_values
+- id: count_dependencies
+  category: tasks
+  nl: How many dependencies are there in project 101?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COUNT(*) AS dependencies
+    FROM vpp_planning_links l
+    JOIN vpp_planning_tasks s ON s.gantt_id = l.gantt_source_id AND s.task_is_deleted = false
+    JOIN vpp_planning_tasks t ON t.gantt_id = l.gantt_target_id AND t.task_is_deleted = false
+    WHERE l.project_id = 101
+  explanation: Every project also has one link from its end task to the project buffer, which has no task row. Joining
+    both ends to tasks removes it.
+  mistakes:
+  - COUNT(*) on vpp_planning_links alone (includes the buffer link).
+  expected_result: A single number.
+  rules:
+  - buffer_link_is_not_a_dependency
+- id: delay_reasons_breakdown
+  category: tasks
+  nl: What are the most common reasons recorded for task delays?
+  source: vectorpro_codebase
+  sql: |
+    SELECT mr.major_reason_name, mn.minor_reason_name, COUNT(DISTINCT d.task_uid) AS delayed_tasks
+    FROM vpp_planning_taskdelaydetail d
+    JOIN vpp_planning_tasks t ON t.task_uid = d.task_uid AND t.task_is_deleted = false
+    LEFT JOIN vpp_masterdata_majorreasons mr ON mr.major_reason_id = d.major_reason_id
+    LEFT JOIN vpp_masterdata_minorreasons mn ON mn.minor_reason_id = d.minor_reason_id
+    GROUP BY mr.major_reason_name, mn.minor_reason_name
+    ORDER BY delayed_tasks DESC
+  explanation: Delay reasons are recorded in vpp_planning_taskdelaydetail when a late task is closed (if delay-reason
+    gating is on). The task link is task_uid without a database foreign key.
+  mistakes:
+  - Using issue reasons to answer a task-delay question (issues have their own reasons).
+  - COUNT(*) (there is no unique key on task_uid; count distinct tasks, as the application's report does).
+  expected_result: Reason pairs with counts.
+  rules:
+  - task_closing_rules
+  - issue_reasons
+- id: open_tasks_by_department
+  category: tasks
+  nl: How many open tasks does each department have in running projects?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COALESCE(dep.department_name, 'No department') AS department_name, COUNT(*) AS open_tasks
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_masterdata_departments dep ON dep.department_id = t.department_id_id
+    WHERE t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY 1
+    ORDER BY open_tasks DESC
+  explanation: A task's responsible department is department_id_id. Left-join so tasks without a department are
+    still counted.
+  mistakes:
+  - Counting the departments of the task manager's user mappings instead of the task's own department.
+  expected_result: One row per department.
+  rules:
+  - user_departments_and_teams
+  - default_task_scope
+- id: tasks_with_open_issues
+  category: tasks
+  nl: Which open tasks have unresolved issues on them or on their subtasks?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name,
+           COUNT(DISTINCT i.issue_id) AS open_issues
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    JOIN vpp_issue_issuehostmappings m
+      ON (m.issue_type = 'task' AND m.host_id = t.task_uid)
+      OR (m.issue_type = 'subtask' AND m.host_id IN (SELECT s.subtask_id FROM vpp_planning_subtasks s
+                                                     WHERE s.task_id = t.task_uid AND s.subtask_is_deleted = false))
+    JOIN vpp_issue_issues i ON i.issue_id = m.issue_id AND i.issue_status IN (1, 2) AND i.issue_is_deleted = false
+    WHERE t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY p.project_name, t.task_uid, t.task_name
+    ORDER BY open_issues DESC
+  explanation: Issues reach a task directly (issue_type 'task', host_id = task_uid) or through its subtasks (issue_type
+    'subtask', host_id = subtask_id). Open issues are status 1 or 2. An open issue blocks closing a subtask; whether
+    it also blocks closing the task itself is unconfirmed, so do not call these tasks 'blocked'.
+  steps:
+  - Match host mappings to the task, or to any of its non-deleted subtasks, always together with issue_type.
+  - Keep open, non-deleted issues.
+  - Count distinct issues per task.
+  mistakes:
+  - Matching host_id without issue_type (task, subtask and project ids can collide).
+  - Treating status 2 (Resolved) as closed.
+  - Reading the pre-aggregated issue_count JSON (it can drift).
+  expected_result: Open tasks with at least one open issue.
+  rules:
+  - issue_host_mapping
+  - issue_status_values
+  - count_issues_from_source
+- id: open_subtasks_of_task
+  category: subtasks
+  nl: Show the open subtasks of task 5003 with their status and manager
+  source: vectorpro_codebase
+  sql: |
+    SELECT s.subtask_id, s.subtask_name, ss.subtask_status AS subtask_status,
+           REPLACE(sm.username, '_deleted_user_' || sm.id, '') AS subtask_manager_name,
+           ROUND(s.subtask_actual_completion_weightage::numeric, 1) AS subtask_actual_completion_weightage,
+           s.stage_under_progress
+    FROM vpp_planning_subtasks s
+    LEFT JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id
+    LEFT JOIN vpp_users sm ON sm.id = s.subtask_manager_id
+    WHERE s.task_id = 5003
+      AND s.subtask_is_deleted = false
+      AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+    ORDER BY s.subtask_priority, s.subtask_id
+  explanation: Subtasks join to their leaf task by task_id = task_uid. Open = every status except 6 (Completed),
+    including NULL. Status names come from the lookup, not hard-coded codes.
+  mistakes:
+  - subtask_status_id <> 6 alone (drops NULL statuses).
+  - Hard-coding 3 and 4 as 'Waiting'/'Review' instead of reading the lookup.
+  variations:
+  - Which subtasks of task 5003 are on hold? (subtask_status_id = 5)
+  - Completed subtasks of task 5003 (subtask_status_id = 6)
+  expected_result: Open subtasks with status names.
+  rules:
+  - subtask_status_values
+  - subtask_belongs_to_leaf_task
+- id: subtasks_on_hold
+  category: subtasks
+  nl: How many subtasks are on hold in each running project?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, COUNT(*) AS subtasks_on_hold
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE s.subtask_status_id = 5
+      AND s.subtask_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY p.project_name
+    ORDER BY subtasks_on_hold DESC
+  explanation: Subtasks reach their project only through their task. Status 5 is On Hold.
+  mistakes:
+  - Looking for a project column on subtasks.
+  - Using task statuses for subtasks.
+  expected_result: One row per project with on-hold subtasks.
+  rules:
+  - subtask_status_values
+  - subtask_belongs_to_leaf_task
+- id: delayed_subtasks
+  category: subtasks
+  nl: Which subtasks are delayed?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name,
+           (s.subtask_delay_indicator->>'delay_on_subtask_progress')::numeric AS subtask_delay_days
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE (s.subtask_delay_indicator->>'subtask_is_delayed')::boolean = true
+      AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+      AND s.subtask_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY subtask_delay_days DESC
+  explanation: Subtask delay comes from subtask_delay_indicator. The column subtask_isdelayed is never updated by
+    the application and is always false.
+  mistakes:
+  - WHERE subtask_isdelayed = true (always returns nothing).
+  - Including deleted subtasks (they keep their indicator).
+  expected_result: Open delayed subtasks, most delayed first.
+  rules:
+  - delayed_subtask
+  - default_task_scope
+- id: subtask_phase_progress
+  category: subtasks
+  nl: Show the phase-wise progress of subtask 9001
+  source: vectorpro_codebase
+  sql: |
+    SELECT ph.phase_sequence_index, ph.phase_name, ph.phase_type,
+           j.value->>'status' AS phase_status,
+           j.value->>'completed' AS completed_value,
+           j.value->>'target' AS target_value,
+           j.value->>'is_applicable' AS is_applicable
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id
+    CROSS JOIN LATERAL jsonb_each(s.subtask_phase_json) j
+    JOIN vpp_masterdata_phases ph
+      ON ph.phase_code = j.key::uuid
+     AND ph.workflow_id = t.workflow_id
+     AND ph.phase_is_deleted = false
+    WHERE s.subtask_id = 9001
+      AND s.subtask_is_deleted = false
+    ORDER BY ph.phase_sequence_index
+  explanation: subtask_phase_json is keyed by phases.phase_code (UUID). Expand it with jsonb_each and join phases
+    on phase_code AND the task's workflow_id. A phase is done when its JSON status is 'closed'; a phase whose is_applicable
+    is 'NA' does not apply and is ignored in progress.
+  steps:
+  - Expand the subtask's phase JSON into one row per phase.
+  - Join each key to its phase definition within the task's workflow.
+  - Order by the phase sequence.
+  mistakes:
+  - Joining phases on phase_code alone (codes are not guaranteed unique across workflows).
+  - Comparing phase_type case-sensitively.
+  variations:
+  - How many subtasks of task 5003 have finished the 'Drawing' phase?
+  expected_result: One row per phase with its status and values.
+  rules:
+  - workflow_phases
+- id: open_issues_of_project
+  category: issues
+  nl: List all open issues of project 101
+  source: vectorpro_codebase
+  sql: |
+    SELECT i.issue_id, i.issue_description,
+           string_agg(DISTINCT CASE m.issue_type WHEN 'common' THEN 'Project' WHEN 'task' THEN 'Task' ELSE 'Subtask' END, ', ')
+             AS raised_on_level,
+           CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting closure' END AS issue_status_label,
+           REPLACE(o.username, '_deleted_user_' || o.id, '') AS issue_owner_name,
+           timezone('Asia/Kolkata', to_timestamp(i.issue_raised_on))::date AS issue_raised_on
+    FROM vpp_issue_issuehostmappings m
+    JOIN vpp_issue_issues i ON i.issue_id = m.issue_id
+    LEFT JOIN vpp_users o ON o.id = i.issue_owner_id
+    WHERE i.issue_status IN (1, 2)
+      AND i.issue_is_deleted = false
+      AND ( (m.issue_type = 'common' AND m.host_id = 101)
+         OR (m.issue_type = 'task' AND m.host_id IN
+              (SELECT t.task_uid FROM vpp_planning_tasks t WHERE t.project_id_id = 101 AND t.task_is_deleted = false))
+         OR (m.issue_type = 'subtask' AND m.host_id IN
+              (SELECT s.subtask_id FROM vpp_planning_subtasks s
+               JOIN vpp_planning_tasks t ON t.task_uid = s.task_id
+               WHERE t.project_id_id = 101 AND s.subtask_is_deleted = false AND t.task_is_deleted = false)) )
+    GROUP BY i.issue_id, i.issue_description, i.issue_status, o.username, o.id, i.issue_raised_on
+    ORDER BY issue_raised_on DESC
+  explanation: A project's issues are its project-level issues (stored as issue_type = 'common' with host_id = project_id)
+    plus the issues of its tasks and their subtasks. Each host kind is matched through its own table. Open = status
+    1 or 2.
+  steps:
+  - 'Project-level: issue_type ''common'' AND host_id = project id.'
+  - 'Task-level: host_id in the project''s task_uids.'
+  - 'Subtask-level: host_id in the subtask_ids of the project''s tasks.'
+  - 'Keep open, non-deleted issues and group to one row per issue: an issue can have several host rows (for example
+    raised on two hosts), which would otherwise repeat it.'
+  mistakes:
+  - issue_type = 'project' (no such value).
+  - host_id = 101 for every issue type.
+  - Using projects.issue_count (pre-aggregated; can drift).
+  - Treating status 2 as closed.
+  variations:
+  - How many open issues does project 101 have? (COUNT(DISTINCT i.issue_id) with the same filters)
+  - Closed issues of project 101 (issue_status = 3)
+  expected_result: Open issues of the project, newest first, with where each was raised.
+  rules:
+  - issues_of_a_project
+  - issue_host_mapping
+  - issue_status_values
+  - count_issues_from_source
+- id: projects_with_most_open_issues
+  category: issues
+  nl: Which running projects have the most open issues?
+  source: vectorpro_codebase
+  sql: |
+    WITH issue_project AS (
+      SELECT m.issue_id, m.host_id AS project_id
+      FROM vpp_issue_issuehostmappings m WHERE m.issue_type = 'common'
+      UNION
+      SELECT m.issue_id, t.project_id_id
+      FROM vpp_issue_issuehostmappings m
+      JOIN vpp_planning_tasks t ON t.task_uid = m.host_id AND t.task_is_deleted = false
+      WHERE m.issue_type = 'task'
+      UNION
+      SELECT m.issue_id, t.project_id_id
+      FROM vpp_issue_issuehostmappings m
+      JOIN vpp_planning_subtasks s ON s.subtask_id = m.host_id AND s.subtask_is_deleted = false
+      JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+      WHERE m.issue_type = 'subtask'
+    )
+    SELECT p.project_id, p.project_name, COUNT(DISTINCT ip.issue_id) AS open_issues
+    FROM issue_project ip
+    JOIN vpp_issue_issues i ON i.issue_id = ip.issue_id AND i.issue_status IN (1, 2) AND i.issue_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = ip.project_id
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY p.project_id, p.project_name
+    ORDER BY open_issues DESC
+  explanation: 'Resolve every issue to its project first (common: host is the project; task: via task; subtask:
+    via subtask then task), then count distinct open issues per project. A shared common issue counts once for each
+    project it is mapped to.'
+  steps:
+  - Build issue-to-project pairs for the three host kinds, always filtering issue_type.
+  - Keep open, non-deleted issues.
+  - Count distinct issues per running project.
+  mistakes:
+  - 'SUM of projects.issue_count (can drift: it ignores issue_type and includes deleted tasks).'
+  - COUNT(*) without DISTINCT.
+  expected_result: Running projects with their open-issue count, most first.
+  rules:
+  - count_issues_from_source
+  - issues_of_a_project
+- id: issues_awaiting_closure
+  category: issues
+  nl: Which issues are resolved but not yet closed, oldest first?
+  source: vectorpro_codebase
+  sql: |
+    SELECT i.issue_id, i.issue_description, REPLACE(r.username, '_deleted_user_' || r.id, '') AS raised_by_name, REPLACE(o.username, '_deleted_user_' || o.id, '') AS issue_owner_name,
+           i.issue_elapsed_days AS issue_elapsed_days
+    FROM vpp_issue_issues i
+    LEFT JOIN vpp_users r ON r.id = i.issue_raised_by_id
+    LEFT JOIN vpp_users o ON o.id = i.issue_owner_id
+    WHERE i.issue_status = 2
+      AND i.issue_is_deleted = false
+    ORDER BY i.issue_raised_on
+  explanation: Status 2 'Resolved' means a resolution was given and the issue awaits review and closure. It still
+    counts as open.
+  mistakes:
+  - Treating 'resolved' as closed (closed is 3).
+  expected_result: Issues at status 2.
+  rules:
+  - issue_status_values
+  - issue_lifecycle
+  - issue_aging
+- id: rejected_issues
+  category: issues
+  nl: Which issues had their resolution rejected?
+  source: vectorpro_codebase
+  sql: |
+    SELECT i.issue_id, i.issue_description, rj.resolution AS rejection_comment
+    FROM vpp_issue_issues i
+    JOIN LATERAL (
+      SELECT rm.resolution, rm.resolution_type
+      FROM vpp_issue_issueresolutionmappings rm
+      WHERE rm.issue_id = i.issue_id
+      ORDER BY rm.added_on DESC
+      LIMIT 1
+    ) rj ON rj.resolution_type = 'resolution_rejection'
+    WHERE i.issue_status = 1
+      AND i.issue_is_deleted = false
+  explanation: There is no 'rejected' status. A rejected issue is back at status 1 and its latest resolution row
+    is a 'resolution_rejection'.
+  steps:
+  - Take each issue's most recent resolution row.
+  - Keep issues at status 1 whose latest row is a rejection.
+  mistakes:
+  - issue_status = 'rejected'.
+  - Any rejection row, even if a newer resolution was given afterwards.
+  expected_result: Issues whose resolution was rejected and that are open again.
+  rules:
+  - issue_lifecycle
+  - issue_status_values
+- id: open_issues_by_reason
+  category: issues
+  nl: Break down open issues by reason category
+  source: vectorpro_codebase
+  sql: |
+    SELECT COALESCE(mr.major_reason_name, 'No reason') AS major_reason_name, COUNT(*) AS open_issues
+    FROM vpp_issue_issues i
+    LEFT JOIN vpp_masterdata_majorreasons mr ON mr.major_reason_id = i.major_reason_id
+    WHERE i.issue_status IN (1, 2)
+      AND i.issue_is_deleted = false
+    GROUP BY 1
+    ORDER BY open_issues DESC
+  explanation: Issues are classified by major reason, with an optional minor reason. Reasons are optional, so left-join.
+  mistakes:
+  - Inner join to reasons (drops issues without a reason).
+  - Counting closed issues (default scope is open).
+  variations:
+  - Open issues by major and minor reason
+  - Which reason causes the most issues on project 101?
+  expected_result: One row per reason.
+  rules:
+  - issue_reasons
+  - default_issue_scope
+- id: average_issue_resolution_time
+  category: issues
+  nl: On average, how long did issues closed this year take to close?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COUNT(*) AS closed_issues,
+           ROUND(AVG(i.issue_elapsed_days), 1) AS avg_working_days,
+           ROUND(AVG((i.issue_closed_on - i.issue_raised_on) / 86400.0), 1) AS avg_calendar_days
+    FROM vpp_issue_issues i
+    WHERE i.issue_status = 3
+      AND i.issue_is_deleted = false
+      AND i.issue_closed_on >= EXTRACT(EPOCH FROM date_trunc('year', now() AT TIME ZONE 'Asia/Kolkata')
+                                       AT TIME ZONE 'Asia/Kolkata')::bigint
+  explanation: For closed issues issue_elapsed_days is the working-day age up to closure. The raw difference of
+    the two epoch columns is calendar time. Report both and label them.
+  mistakes:
+  - Reporting the calendar difference as working days.
+  - Averaging over open issues (their age is still growing).
+  expected_result: 'One row: count, average working days, average calendar days.'
+  rules:
+  - issue_aging
+  - working_days_vs_calendar_days
+- id: my_open_tasks
+  category: my
+  nl: What are my tasks?  (with a SIGNED-IN USER block giving id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_id, t.task_name, ts.task_status AS task_status,
+           CASE WHEN t.task_manager_id = 42 THEN 'Task Manager' ELSE 'Participant' END AS my_role,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE (t.task_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp
+                      WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 42))
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY t.task_expected_finish_date
+  explanation: '''My tasks'' = tasks where the signed-in user is the Task Manager or a Task Participant, open, not
+    deleted, in running projects. The id comes from the SIGNED-IN USER block and is written as a literal.'
+  assumptions:
+  - The open and in_execution conditions apply to the bare question only.
+  clarification: Without a SIGNED-IN USER block, reply that you cannot tell who is asking; do not pick a user.
+  mistakes:
+  - Using a bind placeholder instead of the literal id.
+  - Answering from role membership (VP_TaskManager) instead of task ownership.
+  - Forgetting participants.
+  - Including deleted tasks or closed projects.
+  variations:
+  - My completed tasks (task_status_id = 4, no in_execution condition)
+  - Tasks I manage (task_manager_id only)
+  - My task status breakdown (GROUP BY status, no open filter)
+  expected_result: The user's open tasks in running projects.
+  rules:
+  - my_tasks
+  - signed_in_user
+  - role_is_not_ownership
+- id: my_delayed_tasks
+  category: my
+  nl: Which of my tasks are delayed?  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name,
+           (t.task_delay_indicator->>'delay_on_task_progress')::numeric AS delay_days,
+           ROUND(t.task_completion::numeric, 1) AS task_completion
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE (t.task_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp
+                      WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 42))
+      AND COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false) = true
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+  explanation: Delayed is not a lifecycle status, so the open default stays on top of the delayed flag (the delay
+    indicator, as on the task screens).
+  mistakes:
+  - Dropping the open filter because the question said 'delayed'.
+  - Including the deleted task that still carries a delay flag.
+  - Using task_isdelayed (behind planned completion; empty unless enabled).
+  expected_result: The user's open delayed tasks.
+  rules:
+  - my_tasks
+  - delayed_task
+- id: my_task_status_breakdown
+  category: my
+  nl: Give me a breakdown of my tasks by status  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT ts.task_status AS task_status, COUNT(*) AS tasks
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id AND p.project_is_deleted = false
+    WHERE (t.task_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp
+                      WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 42))
+      AND t.task_is_deleted = false
+    GROUP BY ts.task_status_id, ts.task_status
+    ORDER BY ts.task_status_id
+  explanation: A breakdown across statuses must not carry the open-status or in_execution defaults; the only invariant
+    is the ownership condition.
+  mistakes:
+  - Adding task_status_id IN (1, 2, 3) (removes the Completed row).
+  expected_result: One row per status.
+  rules:
+  - my_tasks
+  - default_task_scope
+- id: my_open_subtasks
+  category: my
+  nl: What subtasks am I working on?  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name, ss.subtask_status AS subtask_status
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+                                 AND p.project_is_deleted = false AND p.project_status = 'in_execution'
+    LEFT JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id
+    WHERE (s.subtask_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_subtaskparticipants sp
+                      WHERE sp.subtask_id_id = s.subtask_id AND sp.subtask_participants_id = 42))
+      AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+      AND s.subtask_is_deleted = false
+  explanation: '''My subtasks'' = Subtask Manager or Subtask Participant, open (not status 6, NULL counts as open),
+    not deleted, in running projects (the default scope; a named project or status replaces it).'
+  mistakes:
+  - Including the deleted subtask still assigned to the user.
+  - Checking VP_SubTaskManager role membership.
+  expected_result: The user's open subtasks with task and project.
+  rules:
+  - my_subtasks
+- id: my_open_issues
+  category: my
+  nl: Show my pending issues  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT i.issue_id, i.issue_description,
+           CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting closure' END AS issue_status_label,
+           REPLACE(r.username, '_deleted_user_' || r.id, '') AS raised_by_name, timezone('Asia/Kolkata', to_timestamp(i.issue_raised_on))::date AS issue_raised_on, i.issue_elapsed_days AS issue_elapsed_days
+    FROM vpp_issue_issues i
+    LEFT JOIN vpp_users r ON r.id = i.issue_raised_by_id
+    WHERE i.issue_owner_id = 42
+      AND i.issue_status IN (1, 2)
+      AND i.issue_is_deleted = false
+    ORDER BY i.issue_raised_on DESC
+  explanation: '''My issues'' and ''my pending issues'' = open issues whose current owner is the signed-in user.
+    Issues the user raised are a different question.'
+  mistakes:
+  - Using issue_raised_by_id for 'my issues'.
+  - Including the deleted issue owned by the user.
+  variations:
+  - Issues I raised that are still open (issue_raised_by_id = 42)
+  - My resolved issues (issue_status = 2)
+  expected_result: Open issues owned by the user, newest first.
+  rules:
+  - my_issues
+  - issue_owner_vs_raiser
+- id: issues_i_raised
+  category: my
+  nl: Which issues that I raised are still open?  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT i.issue_id, i.issue_description, REPLACE(o.username, '_deleted_user_' || o.id, '') AS issue_owner_name,
+           CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting closure' END AS issue_status_label
+    FROM vpp_issue_issues i
+    LEFT JOIN vpp_users o ON o.id = i.issue_owner_id
+    WHERE i.issue_raised_by_id = 42
+      AND i.issue_status IN (1, 2)
+      AND i.issue_is_deleted = false
+  explanation: Raised-by is fixed at creation; the owner can change. Use issue_raised_by_id only when the question
+    says raised, created or reported by me.
+  expected_result: Open issues raised by the user.
+  rules:
+  - issue_owner_vs_raiser
+  - my_issues
+- id: my_projects
+  category: my
+  nl: Which projects am I managing?  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_status,
+           CASE WHEN p.project_manager_id = 42 THEN 'Project Manager' ELSE 'Coordinator' END AS my_role
+    FROM vpp_planning_projects p
+    WHERE p.project_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND (p.project_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_projectcoordinatormapping c
+                      WHERE c.project_id_id = p.project_id AND c.coordinator_id_id = 42))
+    ORDER BY p.project_priority
+  explanation: '''My projects'' = Project Manager or Coordinator. The default in_execution scope applies because
+    no status was named; deleted projects are excluded even if the user manages them.'
+  assumptions:
+  - Running projects only; drop the status condition when the user asks for all statuses.
+  mistakes:
+  - Including the deleted project the user manages.
+  - Using VP_ProjectManager role membership.
+  variations:
+  - 'Projects I am involved in (broader: also portfolio-managed projects and projects with my tasks or subtasks)'
+  - My closed projects
+  expected_result: Running projects the user manages or coordinates.
+  rules:
+  - my_projects
+  - default_project_scope
+  - soft_delete_everywhere
+- id: projects_in_my_portfolios
+  category: my
+  nl: Show the running projects in the portfolios I manage  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT pf.portfolio_name, p.project_id, p.project_name,
+           CASE p.status_color WHEN '#FFCB00' THEN 'yellow' ELSE p.status_color END AS status_color
+    FROM vpp_masterdata_portfolios pf
+    JOIN vpp_planning_projects p ON p.portfolio_id = pf.portfolio_id
+    WHERE pf.portfolio_is_deleted = false
+      AND p.project_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND EXISTS (SELECT 1 FROM vpp_masterdata_mappings m
+                  WHERE (m.e1type_e2type = 'user_portfolio' AND m.entity1_id = 42 AND m.entity2_id = pf.portfolio_id)
+                     OR (m.e1type_e2type = 'portfolio_user' AND m.entity2_id = 42 AND m.entity1_id = pf.portfolio_id))
+    ORDER BY pf.portfolio_name, p.project_priority
+  explanation: Portfolio managers are mappings in vpp_masterdata_mappings, in either direction ('user_portfolio'
+    or 'portfolio_user'). There is no manager column on portfolios.
+  mistakes:
+  - Looking for portfolios.portfolio_manager_id.
+  - Checking only one mapping direction.
+  - Using the VP_PortfolioManager role.
+  variations:
+  - Who manages the Implements portfolio?
+  expected_result: Running projects in the user's portfolios.
+  rules:
+  - portfolio_manager
+  - default_project_scope
+- id: my_department_open_tasks
+  category: my
+  nl: 'How many open tasks does my department have?  (SIGNED-IN USER id 42, departments: Design = 20)'
+  source: vectorpro_codebase
+  sql: |
+    SELECT dep.department_name, COUNT(*) AS open_tasks
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    JOIN vpp_masterdata_departments dep ON dep.department_id = t.department_id_id
+    WHERE t.department_id_id IN (20)
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND t.workflow_id IS NOT NULL
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY dep.department_name
+  explanation: '''My department'' means the departments listed in the SIGNED-IN USER block (use IN with every one).
+    Tasks carry their responsible department in department_id_id.'
+  clarification: If the block lists no department, ask which department is meant; do not fall back to the person's
+    own tasks.
+  mistakes:
+  - Using only the first department when several are listed.
+  - Filtering on the task manager's department.
+  expected_result: One row per department of the user.
+  rules:
+  - user_departments_and_teams
+  - signed_in_user
+- id: my_resources_tasks
+  category: my
+  nl: What are the people I manage working on?  (SIGNED-IN USER id 42, a resource manager)
+  source: vectorpro_codebase
+  sql: |
+    WITH managed AS (
+      SELECT rm.user_id
+      FROM vpp_masterdata_resourcemanagersmapping rm
+      WHERE rm.resourcemanager_id = 42
+        AND rm.resourcemanager_is_deleted = false
+    ),
+    involvement AS (
+      SELECT t.task_uid, t.task_manager_id AS user_id, 'Task Manager' AS involvement
+      FROM vpp_planning_tasks t WHERE t.task_manager_id IN (SELECT user_id FROM managed)
+      UNION
+      SELECT tp.task_id_id, tp.task_participant_id, 'Task Participant'
+      FROM vpp_planning_taskparticipants tp WHERE tp.task_participant_id IN (SELECT user_id FROM managed)
+      UNION
+      SELECT s.task_id, s.subtask_manager_id, 'Subtask Manager'
+      FROM vpp_planning_subtasks s
+      WHERE s.subtask_manager_id IN (SELECT user_id FROM managed)
+        AND s.subtask_is_deleted = false AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+      UNION
+      SELECT s.task_id, sp.subtask_participants_id, 'Subtask Participant'
+      FROM vpp_planning_subtaskparticipants sp
+      JOIN vpp_planning_subtasks s ON s.subtask_id = sp.subtask_id_id
+      WHERE sp.subtask_participants_id IN (SELECT user_id FROM managed)
+        AND s.subtask_is_deleted = false AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+    )
+    SELECT REPLACE(u.username, '_deleted_user_' || u.id, '') AS user_name, p.project_name, t.task_uid, t.task_name, ts.task_status AS task_status,
+           string_agg(DISTINCT i.involvement, ', ') AS involvement
+    FROM involvement i
+    JOIN vpp_users u ON u.id = i.user_id
+    JOIN vpp_planning_tasks t ON t.task_uid = i.task_uid
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY u.username, u.id, p.project_name, t.task_uid, t.task_name, ts.task_status
+    ORDER BY user_name, p.project_name, t.task_uid
+  explanation: A resource manager sees the work of the users mapped to them in vpp_masterdata_resourcemanagersmapping.
+    As in the application's task lists, a managed user's work is every open task they manage or take part in, and
+    every task holding an open subtask they manage or take part in.
+  steps:
+  - Collect the users managed by the signed-in user (non-deleted mapping rows).
+  - 'Union the four kinds of involvement: task manager, task participant, open subtask manager, open subtask participant
+    (subtasks lead to their task).'
+  - Keep open tasks of running projects and list one row per person and task, with how they are involved.
+  mistakes:
+  - Using only task_manager_id (misses participants and subtask-level work).
+  - Using reporting managers for a resource-manager question (different mapping).
+  - Including deleted mapping rows.
+  expected_result: One row per managed person and open task, with their involvement.
+  rules:
+  - resource_and_reporting_managers
+  - my_tasks
+  - my_subtasks
+- id: my_without_user_block
+  category: my
+  nl: Show my tasks  (no SIGNED-IN USER block present)
+  source: vectorpro_codebase
+  sql: null
+  explanation: A 'my' question needs the signed-in user. With no SIGNED-IN USER block, do not guess a user, do not
+    pick a default one, and do not return everyone's tasks.
+  clarification: Reply that you cannot tell who is asking and ask the user to sign in, or to say whose tasks they
+    mean.
+  mistakes:
+  - Running the query for user 1 or for all users.
+  expected_result: A clarification message, no SQL.
+  rules:
+  - signed_in_user
+- id: team_load_vs_thresholds
+  category: heatmap
+  nl: Which heatmap teams are overloaded right now?
+  source: vectorpro_codebase
+  sql: |
+    SELECT h.team_name, h.team_type, ROUND(h.team_load::numeric, 1) AS team_load,
+           h.threshold_green_end, h.threshold_yellow_end,
+           CASE WHEN h.team_load <= h.threshold_green_end THEN 'within green limit'
+                WHEN h.team_load <= h.threshold_yellow_end THEN 'within yellow limit'
+                ELSE 'above yellow limit' END AS load_band
+    FROM vpp_masterdata_heatmapteams h
+    WHERE h.heatmap_enabled = true
+    ORDER BY h.team_load - h.threshold_yellow_end DESC
+  explanation: team_load is queued work in DAYS (remaining duration of queued subtasks / the team's flow rate),
+    not a count. Each team has its own green and yellow limits.
+  assumptions:
+  - The band compares team_load with the team's own thresholds. The heatmap screen's colour is calculated in the
+    database and may differ; say the band is relative to the configured limits.
+  mistakes:
+  - Calling team_load a number of subtasks.
+  - Summing team_load across teams (one subtask counts for every team its manager belongs to).
+  - Joining source_id to vpp_masterdata_teams without checking team_type.
+  variations:
+  - What is the load of the Design Squad team?
+  - Load in the next 30 days (team_load_30_days)
+  expected_result: Heatmap-enabled teams with their load band, most overloaded first.
+  rules:
+  - team_load_meaning
+  - heatmap_team_source
+- id: queue_by_project_latest
+  category: heatmap
+  nl: Which projects put the most queue on the 'Design Squad load' team today?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, q.queue_duration, q.queue_total_subtasks
+    FROM vpp_planning_projectwisequeuedetails q
+    JOIN vpp_masterdata_heatmapteams h ON h.team_id = q.team_id_id
+    JOIN vpp_planning_projects p ON p.project_id = q.project_id
+    WHERE h.team_name = 'Design Squad load'
+      AND p.project_is_deleted = false
+      AND q.entry_date = (SELECT MAX(entry_date) FROM vpp_planning_projectwisequeuedetails)
+    ORDER BY q.queue_duration DESC
+  explanation: vpp_planning_projectwisequeuedetails holds dated snapshots. For the current state use only the latest
+    entry_date; summing across dates multiplies the answer.
+  mistakes:
+  - Aggregating all snapshots.
+  - Joining team_id_id to vpp_masterdata_teams (it references the heatmap team).
+  expected_result: Projects with their queue on the team in the latest snapshot.
+  rules:
+  - queue_snapshots
+  - heatmap_team_source
+- id: users_with_role
+  category: people
+  nl: Which active users are Task Managers?
+  source: vectorpro_codebase
+  sql: |
+    SELECT REPLACE(u.username, '_deleted_user_' || u.id, '') AS user_name, u.email
+    FROM vpp_users u
+    JOIN vpp_user_groups ug ON ug.user_id = u.id
+    JOIN vpp_groups g ON g.group_id = ug.group_id
+    WHERE g.group_name = 'VP_TaskManager'
+      AND u.status = 1
+      AND u.is_active
+      AND u.id <> 1
+    ORDER BY user_name
+  explanation: Roles are vpp_groups via vpp_user_groups, with case-sensitive names. Active users are status = 1
+    AND is_active; user 1 is the hidden system administrator. This answers who holds the role, not who manages tasks.
+  mistakes:
+  - '''VP_SubtaskManager'' with a lowercase t (the stored name is VP_SubTaskManager).'
+  - Including deleted users (status 2).
+  - Answering 'who is managing tasks' from the role instead of task_manager_id.
+  variations:
+  - Who are the Subtask Managers? (group_name = 'VP_SubTaskManager')
+  - Who actually manages open tasks? (DISTINCT task_manager_id of open tasks)
+  expected_result: Active users holding the role.
+  rules:
+  - role_is_not_ownership
+  - active_users_and_names
+  - codes_are_stored_as_given
+- id: working_days_left
+  category: calendar
+  nl: How many working days are left until each running project's due date?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           (SELECT COUNT(*) FROM working_days_view w
+            WHERE w.calendar_date_unix > EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+              AND w.calendar_date_unix <= p.project_due_date) AS working_days_left
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND p.project_due_date >= EXTRACT(EPOCH FROM date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')::bigint
+    ORDER BY working_days_left
+  explanation: Working days are counted from working_days_view (calendar minus holidays and weekly offs). Both sides
+    are epoch seconds, so compare epochs directly. Count days after today up to and including the due date.
+  steps:
+  - Take running projects not yet past their due date.
+  - Count working dates strictly after today and up to the due date.
+  mistakes:
+  - Subtracting dates (calendar days) and calling it working days.
+  - Excluding only weekends with EXTRACT(DOW) (misses holidays).
+  variations:
+  - How many working days between two dates?
+  - Working days since project 101 started
+  expected_result: Running projects with the working days remaining.
+  rules:
+  - working_days_vs_calendar_days
+  - holidays_and_working_days
+- id: at_risk_projects
+  category: ambiguity
+  nl: Which projects are at risk?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name,
+           CASE p.status_color WHEN '#FFCB00' THEN 'yellow' ELSE p.status_color END AS status_color,
+           p.project_predicted_delay AS project_predicted_delay
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+      AND (p.status_color IN ('red', '#FFCB00') OR p.project_predicted_delay > 0)
+    ORDER BY p.project_predicted_delay DESC NULLS LAST
+  explanation: VectorPro has no single 'at risk' definition. Answer with the two signals the product does have,
+    health colour (red or yellow) and forecast delay, state the definition used, and offer to narrow it.
+  assumptions:
+  - At risk = red or yellow health colour, or a positive predicted delay. Overdue (black) projects are already late;
+    list them separately if asked.
+  clarification: Ask whether the user means health colour, forecast delay or buffer consumption if the answer will
+    drive decisions.
+  mistakes:
+  - Inventing a threshold on project_penetration.
+  - status_color = 'yellow'.
+  expected_result: Running projects with a risk signal, with the signals shown.
+  rules:
+  - project_health_color
+  - forecast_late_project
+- id: all_my_tasks_still_defaults_open
+  category: ambiguity
+  nl: Show me all my tasks  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_uid, t.task_name, ts.task_status AS task_status
+    FROM vpp_planning_tasks t
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE (t.task_manager_id = 42
+           OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp
+                      WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 42))
+      AND t.task_status_id IN (1, 2, 3)
+      AND t.task_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+  explanation: '''All'' on its own does not switch off the open default: people saying ''all my tasks'' mean the
+    ones still to do. Only an explicit request (including completed, whatever the status, history) widens it.'
+  mistakes:
+  - Returning completed tasks from closed projects because the question said 'all'.
+  variations:
+  - Show all my tasks including completed ones (drop the status and in_execution conditions)
+  expected_result: Same rows as my_open_tasks.
+  rules:
+  - default_task_scope
+  - my_tasks
+- id: delayed_ambiguous_word
+  category: ambiguity
+  nl: How delayed is project 101?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, p.project_status,
+           p.project_predicted_delay AS project_predicted_delay,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date,
+           timezone('Asia/Kolkata', to_timestamp(p.project_etc))::date AS project_etc,
+           (SELECT COUNT(*) FROM vpp_planning_tasks t
+            WHERE t.project_id_id = p.project_id AND COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false)
+              AND t.task_status_id IN (1, 2, 3) AND t.task_is_deleted = false) AS delayed_open_tasks
+    FROM vpp_planning_projects p
+    WHERE p.project_id = 101
+      AND p.project_is_deleted = false
+  explanation: For a project, 'delayed' means forecast lateness (project_predicted_delay, ETC versus due date).
+    The number of delayed tasks is a different measure; return it alongside and label both.
+  assumptions:
+  - The forecast delay is current only for in_execution projects; for any other status say it is the value from
+    the last calculation.
+  mistakes:
+  - Answering with the count of delayed tasks only.
+  - Using status_color as the delay.
+  expected_result: 'One row: forecast delay, dates, and delayed open tasks.'
+  rules:
+  - forecast_late_project
+  - delayed_task
+- id: what_to_work_on_next
+  category: my
+  nl: What should I work on next?  (SIGNED-IN USER id 42)
+  source: vectorpro_codebase
+  sql: |
+    WITH my_work AS (
+      SELECT t.task_uid, NULL::integer AS subtask_id
+      FROM vpp_planning_tasks t
+      WHERE (t.task_manager_id = 42
+             OR EXISTS (SELECT 1 FROM vpp_planning_taskparticipants tp
+                        WHERE tp.task_id_id = t.task_uid AND tp.task_participant_id = 42))
+        AND t.task_status_id IN (2, 3)
+        AND t.workflow_id IS NOT NULL
+      UNION
+      SELECT s.task_id, s.subtask_id
+      FROM vpp_planning_subtasks s
+      WHERE (s.subtask_manager_id = 42
+             OR EXISTS (SELECT 1 FROM vpp_planning_subtaskparticipants sp
+                        WHERE sp.subtask_id_id = s.subtask_id AND sp.subtask_participants_id = 42))
+        AND (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+        AND s.subtask_is_deleted = false
+    )
+    SELECT p.project_name, p.project_priority, t.task_uid, t.task_id, t.task_name,
+           s.subtask_id, s.subtask_name,
+           COALESCE(ss.subtask_status, ts.task_status) AS work_status,
+           timezone('Asia/Kolkata', to_timestamp(t.task_expected_finish_date))::date AS task_expected_finish_date
+    FROM my_work w
+    JOIN vpp_planning_tasks t ON t.task_uid = w.task_uid AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_planning_subtasks s ON s.subtask_id = w.subtask_id
+    LEFT JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id
+    LEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY p.project_priority ASC, t.task_tpr_sorting_index ASC NULLS LAST, s.subtask_tpr_sorting_index ASC NULLS FIRST
+    LIMIT 10
+  explanation: The application's work screens order by project priority, then the Task Priority Report index (task_tpr_sorting_index),
+    then subtask_tpr_sorting_index. A person's work is the leaf tasks they manage or take part in that are Ready
+    To Start or Started, plus the open subtasks they manage or take part in (so subtask-level workers also get an
+    answer). A task row (no subtask) comes before its subtasks.
+  steps:
+  - Collect the user's workable tasks (status 2 or 3, leaf) and open subtasks, each with its task.
+  - Keep non-deleted tasks of running projects.
+  - Order by project priority, task TPR index, subtask TPR index; show the top 10.
+  assumptions:
+  - The TPR index is calculated by SQL stored in the database; its formula is not in code. Present the order as
+    the application's priority order.
+  - The application's update screen also limits work to a configured horizon (15 days in the sample configuration);
+    this list is not limited that way.
+  mistakes:
+  - Ordering by task_expected_start_date or by float alone.
+  - Ordering project_priority descending.
+  - Looking only at task_manager_id (subtask-level workers get nothing).
+  - Including Not Started tasks that are not yet ready.
+  variations:
+  - What should my team work on first? (same ordering for the people the user manages)
+  expected_result: Up to 10 work items (tasks, or subtasks with their task) in priority order.
+  rules:
+  - work_priority_order
+  - my_tasks
+  - my_subtasks
+  - project_priority_direction
+- id: buffer_remaining
+  category: projects
+  nl: How much buffer is left on each running project?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name,
+           ROUND(p.project_buffer_duration::numeric, 1) AS project_buffer_duration,
+           ROUND(p.project_penetration::numeric, 1) AS project_penetration,
+           ROUND((p.project_buffer_duration * (1 - p.project_penetration / 100.0))::numeric, 1) AS buffer_left_working_days
+    FROM vpp_planning_projects p
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY buffer_left_working_days ASC NULLS LAST
+  explanation: project_penetration = buffer consumed / project_buffer_duration x 100, so the buffer left in working
+    days is project_buffer_duration x (1 - penetration / 100). A negative value means the buffer is overrun by that
+    many days.
+  mistakes:
+  - Using project_buffer (a percentage of duration) as days.
+  - Dividing by 100 with integer arithmetic.
+  expected_result: Running projects with buffer size, consumed share and days left, least left first.
+  rules:
+  - buffer_penetration
+- id: closed_projects_on_time_rate
+  category: projects
+  nl: What share of projects closed in each month of this year were on time?
+  source: vectorpro_codebase
+  sql: |
+    WITH closure AS (
+      SELECT r.host_id AS project_id,
+             EXTRACT(EPOCH FROM date_trunc('day', timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on))))
+                     AT TIME ZONE 'Asia/Kolkata')::bigint AS closed_day
+      FROM vpp_planning_remark r
+      WHERE r.host_type = 'project' AND r.host_status = 'closed'
+      GROUP BY r.host_id
+    )
+    SELECT date_trunc('month', timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date)::date AS month,
+           COUNT(*) AS closed_projects,
+           COUNT(*) FILTER (WHERE c.closed_day <= p.project_due_date) AS on_time_or_early,
+           ROUND(100.0 * COUNT(*) FILTER (WHERE c.closed_day <= p.project_due_date) / COUNT(*), 1) AS on_time_pct,
+           ROUND(AVG((timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date - timezone('Asia/Kolkata', to_timestamp(p.project_actual_start_date))::date))::numeric, 1) AS avg_calendar_days_start_to_close
+    FROM vpp_planning_projects p
+    JOIN closure c ON c.project_id = p.project_id
+    WHERE p.project_status = 'closed'
+      AND p.project_is_deleted = false
+      AND timezone('Asia/Kolkata', to_timestamp(c.closed_day))::date >= date_trunc('year', now() AT TIME ZONE 'Asia/Kolkata')::date
+    GROUP BY 1
+    ORDER BY 1
+  explanation: Throughput and on-time delivery use the closure day from the project's 'closed' status remark. On
+    time = closed on or before the due date, as the application's Before Time / On Time labels.
+  steps:
+  - Derive each project's closure day from its latest 'closed' remark.
+  - Keep projects closed this year.
+  - 'Group by closure month: count, on-time count and share, average calendar days from actual start to closure.'
+  mistakes:
+  - Grouping by project_modified_on.
+  - Counting closed projects without a closure remark date as closed this year.
+  expected_result: One row per month with closures.
+  rules:
+  - closed_project_lateness
+  - working_days_vs_calendar_days
+- id: project_pipeline
+  category: projects
+  nl: What projects are in the pipeline and when do they start?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_id, p.project_name, p.project_status,
+           timezone('Asia/Kolkata', to_timestamp(p.project_start_date))::date AS project_start_date,
+           timezone('Asia/Kolkata', to_timestamp(p.first_rfs_date))::date AS first_rfs_date,
+           timezone('Asia/Kolkata', to_timestamp(p.project_due_date))::date AS project_due_date
+    FROM vpp_planning_projects p
+    WHERE p.project_status IN ('in_planning', 'ready_to_schedule', 'scheduled')
+      AND p.project_is_deleted = false
+    ORDER BY p.project_start_date
+  explanation: 'The pipeline is projects not yet running: in_planning, ready_to_schedule and scheduled. first_rfs_date
+    is when the project first became ready to schedule (RFS = Ready For Scheduling). Scheduled projects move to
+    in_execution automatically on their start date.'
+  mistakes:
+  - Reading RFS as 'ready for start'.
+  - Including on_hold projects in the pipeline.
+  expected_result: Pipeline projects by planned start.
+  rules:
+  - project_lifecycle
+  - project_status_values
+- id: subtask_manager_workload
+  category: subtasks
+  nl: How much open work does each subtask manager have in running projects?
+  source: vectorpro_codebase
+  sql: |
+    SELECT COALESCE(REPLACE(u.username, '_deleted_user_' || u.id, ''), 'Unassigned') AS subtask_manager_name,
+           COUNT(*) AS open_subtasks,
+           ROUND(SUM(s.subtask_rem_weightage)::numeric, 1) AS remaining_days,
+           COUNT(*) FILTER (WHERE s.subtask_status_id = 2) AS active_subtasks
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    LEFT JOIN vpp_users u ON u.id = s.subtask_manager_id
+    WHERE (s.subtask_status_id IS NULL OR s.subtask_status_id <> 6)
+      AND s.subtask_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY u.username, u.id
+    ORDER BY remaining_days DESC
+  explanation: 'Per-person workload: open subtasks each Subtask Manager owns and their remaining duration (subtask_rem_weightage
+    is remaining DAYS despite its name). This is different from team_load, which is queue days per heatmap team.'
+  mistakes:
+  - Summing subtask_total_weightage as 'weight' (it is duration).
+  - Using team_load for a person-level question.
+  expected_result: One row per subtask manager, heaviest first.
+  rules:
+  - subtask_weightage_is_duration
+  - team_load_meaning
+- id: subtasks_waiting
+  category: subtasks
+  nl: Which subtasks are waiting, and on what?
+  source: vectorpro_codebase
+  sql: |
+    SELECT p.project_name, t.task_name, s.subtask_id, s.subtask_name, ss.subtask_status AS subtask_status,
+           s.subtask_stagnancy
+    FROM vpp_planning_subtasks s
+    JOIN vpp_planning_subtaskstatus ss ON ss.subtask_status_id = s.subtask_status_id
+    JOIN vpp_planning_tasks t ON t.task_uid = s.task_id AND t.task_is_deleted = false
+    JOIN vpp_planning_projects p ON p.project_id = t.project_id_id
+    WHERE s.subtask_status_id IN (3, 4)
+      AND s.subtask_is_deleted = false
+      AND p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    ORDER BY s.subtask_stagnancy DESC
+  explanation: Status codes 3 and 4 are the waiting states. What each one waits for must be read from vpp_planning_subtaskstatus
+    (subtask_status), not assumed.
+  assumptions:
+  - Codes 3 and 4 are waiting states (open question subtask_status_3_and_4); show the lookup's names.
+  mistakes:
+  - Hard-coding 3 = 'Waiting for resource' and 4 = 'Review'.
+  - Treating On Hold (5) as waiting.
+  expected_result: Waiting subtasks with the lookup's status name.
+  rules:
+  - subtask_status_values
+- id: open_issue_aging
+  category: issues
+  nl: How old are our open issues? Give an aging breakdown
+  source: vectorpro_codebase
+  sql: |
+    SELECT CASE WHEN i.issue_elapsed_days <= 5 THEN '0-5 working days'
+                WHEN i.issue_elapsed_days <= 15 THEN '6-15 working days'
+                WHEN i.issue_elapsed_days <= 30 THEN '16-30 working days'
+                ELSE 'over 30 working days' END AS age_bucket,
+           COUNT(*) AS open_issues,
+           COUNT(*) FILTER (WHERE COALESCE(i.issue_escalated_level, 0) > 0) AS escalated
+    FROM vpp_issue_issues i
+    WHERE i.issue_status IN (1, 2)
+      AND i.issue_is_deleted = false
+    GROUP BY 1
+    ORDER BY MIN(i.issue_elapsed_days)
+  explanation: Issue age is issue_elapsed_days (working days since the day after raising, refreshed daily). The
+    buckets are a presentation choice, not product thresholds.
+  assumptions:
+  - Bucket boundaries are illustrative; use the user's if given.
+  - Escalated = issue_escalated_level above 0; whether 0 or NULL means 'not escalated' is an open question.
+  mistakes:
+  - Computing age from issue_raised_on as calendar days and calling it working days.
+  - Including closed issues.
+  variations:
+  - Show the 10 oldest open issues (ORDER BY issue_elapsed_days DESC LIMIT 10)
+  expected_result: One row per age bucket.
+  rules:
+  - issue_aging
+  - issue_status_values
+- id: portfolio_health_summary
+  category: projects
+  nl: Give me a health summary per portfolio
+  source: vectorpro_codebase
+  sql: |
+    SELECT pf.portfolio_name,
+           COUNT(*) AS running_projects,
+           COUNT(*) FILTER (WHERE p.status_color = 'green') AS green,
+           COUNT(*) FILTER (WHERE p.status_color = '#FFCB00') AS yellow,
+           COUNT(*) FILTER (WHERE p.status_color = 'red') AS red,
+           COUNT(*) FILTER (WHERE p.status_color = 'black') AS black,
+           COUNT(*) FILTER (WHERE p.project_predicted_delay > 0) AS forecast_late
+    FROM vpp_planning_projects p
+    JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id AND pf.portfolio_is_deleted = false
+    WHERE p.project_status = 'in_execution'
+      AND p.project_is_deleted = false
+    GROUP BY pf.portfolio_name
+    ORDER BY pf.portfolio_name
+  explanation: Conditional counts (FILTER) give one row per portfolio with each colour as a column. Yellow is '#FFCB00'.
+    Only running projects have current colours.
+  mistakes:
+  - status_color = 'yellow'.
+  - Including closed or on-hold projects.
+  expected_result: One row per portfolio with colour counts.
+  rules:
+  - project_health_color
+  - forecast_late_project
+  - project_metrics_only_current_for_in_execution
