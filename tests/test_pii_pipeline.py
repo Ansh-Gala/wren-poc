@@ -306,7 +306,7 @@ class _Cursor:
 
 def _store() -> cs.ChatStore:
     settings = dataclasses.replace(api.load_settings(), history_db_name="chats",
-                                   history_db_user="writer")
+                                   history_db_user="writer", save_chats=True)
     return cs.ChatStore(settings, 5)
 
 
@@ -456,6 +456,22 @@ def test_after_a_restart_a_new_person_gets_the_next_number_never_001_again(world
     assert world.executed[1].endswith("= 'Amit Rao'")
     assert json.loads(FakeStore.rows[1]["metadata"])["pii"]["new_aliases"] == [
         {"alias": "PERSON_002", "label": "person", "original": "Amit Rao"}]
+
+
+def test_with_saving_paused_the_chat_keeps_its_aliases_and_its_thread(world, server,
+                                                                     monkeypatch):
+    # SAVE_CHATS=false: nothing is loaded or recorded.
+    monkeypatch.setattr(FakeStore, "enabled", False)
+    FakeStore.fail_record = True
+    server("tasks of Rahul Sharma", reply(BY_RAHUL))
+    server("now Amit Rao's", reply("SELECT task_id FROM tms_task_flat "
+                                   "WHERE assigned_user_name = 'PERSON_002'"))
+
+    assert FakeStore.rows == []
+    assert world.leaked() == []
+    assert "now PERSON_002's" in world.prompts[1]
+    assert "tasks of PERSON_001" in world.prompts[1]          # the thread was not reset
+    assert world.executed[1].endswith("= 'Amit Rao'")
 
 
 def test_a_turn_saved_before_aliasing_was_on_is_anonymized_on_the_way_in(world, server):

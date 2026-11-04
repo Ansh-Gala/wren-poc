@@ -136,6 +136,9 @@ class Conversation:
         # When the state was last saved, by the monotonic clock. None until
         # the first turn.
         self.saved_at: float | None = None
+        # The chat's PII aliases while saving is paused (SAVE_CHATS=false);
+        # otherwise they are read from the saved turns.
+        self.aliases: list[dict] = []
 
     def expire_if_idle(self) -> None:
         """Start the working state over when it has sat unused for
@@ -314,7 +317,8 @@ def console_info(settings, local: bool = False) -> dict:
             info["metadata"] = str(settings.metadata_dir)
         info["databases"] = {
             "read": {"name": settings.pg_database, "user": settings.pg_readonly_user},
-            "write": ({"name": settings.history_db_name, "user": settings.history_db_user}
+            "write": ({"name": settings.history_db_name, "user": settings.history_db_user,
+                       "saving": settings.save_chats}
                       if settings.chats_configured else None),
         }
     return info
@@ -673,6 +677,8 @@ class Runtime:
             # what it was about. On a reset this turn is the new start. The
             # turn number is counted from the rows, so it continues them.
             loaded = store.load(session_id)
+            if not store.enabled:
+                loaded["aliases"] = conversation.aliases
             pii = self.pii_guard(loaded)
             if loaded["chat_id"] is not None:
                 conversation.turn_index = loaded["turn_index"]
@@ -777,7 +783,10 @@ class Runtime:
                                   "download": {"chat_id": chat_id, "turn": turn_index + 1}}
             saved = store.record_turn(chat_id, turn_index, question, result, full,
                                       conversation.state)
-            if pii is not None and not saved:
+            if pii is not None and not store.enabled:
+                # Saving is paused: this process keeps the chat's aliases.
+                conversation.aliases = pii.vault.entries()
+            elif pii is not None and not saved:
                 # The aliases this turn introduced were not stored, and the
                 # state in memory already refers to them. Start the thread
                 # clean rather than carry aliases nothing can restore.
@@ -1368,7 +1377,9 @@ def main() -> int:
           f"   queries run as {settings.pg_readonly_user}")
     print("chat database:     " + (
         f"{settings.history_db_name} on {settings.history_db_host}:{settings.history_db_port}"
-        f"   written as {settings.history_db_user}" if settings.chats_configured
+        f"   written as {settings.history_db_user}"
+        + ("" if settings.save_chats else "   PAUSED (SAVE_CHATS=false): chats are not saved")
+        if settings.chats_configured
         else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
     print(f"run roles:         {', '.join(settings.run_roles) or 'none (CHATBOT_RUN_ROLES): nobody may ask'}")
     print(f"context mode: {args.context_mode}")

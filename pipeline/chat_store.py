@@ -138,9 +138,11 @@ class ChatStore:
 
     @property
     def enabled(self) -> bool:
-        """A database and login of its own, and somebody to own the chats."""
+        """A database and login of its own, somebody to own the chats, and
+        saving not paused (SAVE_CHATS)."""
         s = self.settings
-        return bool(s.history_db_name and s.history_db_user) and self.uid > 0
+        return (bool(s.history_db_name and s.history_db_user) and self.uid > 0
+                and s.save_chats)
 
     def _connect(self) -> psycopg.Connection:
         s = self.settings
