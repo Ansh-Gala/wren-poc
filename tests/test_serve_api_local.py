@@ -20,6 +20,11 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import scripts.serve_api as api  # noqa: E402
+import server.services.conversation as conversation_svc
+import server.routes as routes
+import server.services.runtime as runtime_svc
+import server.schemas as schemas
+import server.utils as server_utils
 from pipeline.run_access import RunNotAllowed, user_id_from  # noqa: E402
 
 LEAKY = 'relation "tms_secret_table" does not exist at character 15'
@@ -54,7 +59,7 @@ def server():
     """The app on this machine: the test client's address is loopback."""
     runtime = StubRuntime()
     api.app.state.runtime = runtime
-    api.SESSIONS.clear()
+    conversation_svc.SESSIONS.clear()
     yield TestClient(api.app, client=("127.0.0.1", 50000)), runtime
 
 
@@ -99,7 +104,7 @@ def test_this_machine_keeps_debug(server):
 
 def test_another_machine_gets_neither_debug_nor_the_debug_log(server, monkeypatch):
     client, runtime = server
-    monkeypatch.setattr(api, "_local_client", lambda address: False)
+    monkeypatch.setattr(server_utils, "_local_client", lambda address: False)
 
     status, _, _ = _post(client, "/debug", {**ME, "session_id": "s"})
     assert status == 403
@@ -115,7 +120,7 @@ def test_only_this_machine_may_skip_saving_the_chat(server, monkeypatch):
     _post(client, "/ask", {**ME, "question": "anything", "save_chat": False})
     assert runtime.payloads[-1]["save_chat"] is False
 
-    monkeypatch.setattr(api, "_local_client", lambda address: False)
+    monkeypatch.setattr(server_utils, "_local_client", lambda address: False)
     _post(client, "/ask", {**ME, "question": "anything", "save_chat": False})
     assert "save_chat" not in runtime.payloads[-1]
 
@@ -125,7 +130,7 @@ def test_only_this_machine_may_skip_saving_the_chat(server, monkeypatch):
     ("192.168.1.20", False), ("10.0.0.5", False),
 ])
 def test_what_counts_as_this_machine(address, local):
-    assert api._local_client(address) is local
+    assert server_utils._local_client(address) is local
 
 
 def test_unknown_paths_answer_in_the_servers_shape(server):
@@ -211,25 +216,25 @@ def _rows(n: int) -> dict:
 
 
 def test_the_browser_gets_200_rows_and_the_whole_count():
-    full = api.to_response(_turn(actual_result=_rows(250)), "q", {}, {}, SETTINGS)
+    full = schemas.to_response(_turn(actual_result=_rows(250)), "q", {}, {}, SETTINGS)
     assert len(full["result"]["rows"]) == 200
     assert full["result"]["row_count"] == 250
     assert full["result"]["truncated"] is True
 
 
 def test_the_explanation_travels_only_with_an_answer():
-    ok = api.to_response(_turn(explanation="The open tasks."), "q", {}, {}, SETTINGS)
-    failed = api.to_response(_turn(explanation="The open tasks.", error="boom"),
+    ok = schemas.to_response(_turn(explanation="The open tasks."), "q", {}, {}, SETTINGS)
+    failed = schemas.to_response(_turn(explanation="The open tasks.", error="boom"),
                              "q", {}, {}, SETTINGS)
     assert ok["explanation"] == "The open tasks."
     assert failed["explanation"] is None, "it would describe an answer that never arrived"
 
 
 def test_rows_from_a_snapshot_table_carry_the_note():
-    snapshot = api.to_response(
+    snapshot = schemas.to_response(
         _turn(actual_result=_rows(3), generated_sql="SELECT * FROM vf_report_task_summary"),
         "q", {}, {}, SETTINGS)
-    live = api.to_response(
+    live = schemas.to_response(
         _turn(actual_result=_rows(3), generated_sql="SELECT * FROM tms_task_flat"),
         "q", {}, {}, SETTINGS)
     assert snapshot["result"]["freshness"] == NOTE
@@ -238,8 +243,8 @@ def test_rows_from_a_snapshot_table_carry_the_note():
 
 def test_the_pills_are_passed_through():
     pills = [{"ref": "x", "label": "task status = open", "kind": "filter"}]
-    assert api.to_response(_turn(), "q", {}, {}, SETTINGS, pills)["context"] == pills
-    assert api.to_response(_turn(), "q", {}, {}, SETTINGS)["context"] == []
+    assert schemas.to_response(_turn(), "q", {}, {}, SETTINGS, pills)["context"] == pills
+    assert schemas.to_response(_turn(), "q", {}, {}, SETTINGS)["context"] == []
 
 
 @pytest.fixture
@@ -251,10 +256,10 @@ def runtime(monkeypatch):
         asked.append(turn.question)
         return _turn(question=turn.question)
 
-    monkeypatch.setattr(api, "run_turn", fake_run_turn)
-    monkeypatch.setattr(api, "resolve_identity", lambda settings, user_id: None)
-    api.SESSIONS.clear()
-    rt = api.Runtime.__new__(api.Runtime)
+    monkeypatch.setattr(runtime_svc, "run_turn", fake_run_turn)
+    monkeypatch.setattr(runtime_svc, "resolve_identity", lambda settings, user_id: None)
+    conversation_svc.SESSIONS.clear()
+    rt = runtime_svc.Runtime.__new__(runtime_svc.Runtime)
     rt.settings, rt.mcp_config_path = SETTINGS, None
     rt.privacy, rt.context_mode, rt.log_path = "strict", "state", None
     return rt, asked
@@ -262,7 +267,7 @@ def runtime(monkeypatch):
 
 def test_dropping_a_pill_asks_the_goal_again_without_it(runtime):
     rt, asked = runtime
-    state = api.conversation_for("drop", 7).state
+    state = conversation_svc.conversation_for("drop", 7).state
     state.active_goal = "open tasks in Sales"
     state.active_filters = {"task_status": "task_status = 'open'"}
 
@@ -280,7 +285,7 @@ def test_a_drop_with_nothing_to_ask_is_refused(runtime):
 
 def test_a_chip_ref_asks_the_reading_it_was_offered_for(runtime):
     rt, asked = runtime
-    state = api.conversation_for("chip", 7).state
+    state = conversation_svc.conversation_for("chip", 7).state
     state.pending_clarification = FollowUp(
         type="clarification", reason="ambiguous_interpretation", question="Which one?",
         suggestions=[Suggestion(id="a", label="Delayed open tasks", ref="n1:0")])
@@ -299,14 +304,14 @@ CHART = {"type": "groupedColumn", "category": "department", "values": ["n"]}
 
 
 def test_a_chart_drawn_from_the_rows_shown():
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True, chart=CHART,
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True, chart=CHART,
                                  generated_sql="SELECT 1"), "q", {}, {}, SETTINGS)
     assert full["result"]["chart"]["rows"] == [["Sales", 3], ["Design", 5]]
     assert full["chart_reason"] == "ok" and "chart_note" not in full["result"]
 
 
 def test_a_chart_query_that_failed_draws_nothing_and_says_so():
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
                                  chart={**CHART, "sql": "SELECT 2"}, chart_error="timeout"),
                            "q", {}, {}, SETTINGS)
     assert "chart" not in full["result"]
@@ -317,7 +322,7 @@ def test_a_chart_query_that_failed_draws_nothing_and_says_so():
 def test_a_chart_query_draws_from_its_own_rows():
     own = {"columns": ["department", "n"], "rows": [["All", "8"]], "row_count": 1,
            "truncated": False, "duration_ms": 3.0}
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
                                  chart={**CHART, "sql": "SELECT 2"}, chart_result=own),
                            "q", {}, {}, SETTINGS)
     assert full["result"]["chart"]["rows"] == [["All", 8]]
@@ -326,24 +331,24 @@ def test_a_chart_query_draws_from_its_own_rows():
 
 
 def test_a_title_that_names_the_schema_is_dropped():
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
                                  chart={**CHART, "title": "count of task_status"}),
                            "q", {}, {}, SETTINGS)
     assert "title" not in full["result"]["chart"]
 
 
 def test_no_chart_asked_for_says_nothing():
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True), "q", {}, {}, SETTINGS)
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True), "q", {}, {}, SETTINGS)
     assert full["chart_reason"] is None and "chart" not in full["result"]
 
 
 def test_the_chart_and_the_download_survive_debug_off():
-    full = api.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
+    full = schemas.to_response(_turn(actual_result=BY_DEPT, execution_success=True,
                                  chart={**CHART, "colors": {"Sales": "#123456"}}),
                            "q", {}, {}, SETTINGS)
     full["result"]["download"] = {"chat_id": 4, "turn": 2}
     full["result"]["chart"]["internal"] = "kept private"
-    public = api.public_response(full)
+    public = runtime_svc.public_response(full)
     assert public["result"]["download"] == {"chat_id": 4, "turn": 2}
     assert set(public["result"]["chart"]) == {"type", "labels", "rows", "colors"}
     assert "chart_reason" not in public and "chart_query" not in public
@@ -353,8 +358,8 @@ def test_the_chart_and_the_download_survive_debug_off():
 
 def test_a_busy_chat_is_waited_for_then_refused(runtime, monkeypatch):
     rt, asked = runtime
-    monkeypatch.setattr(api, "LOCK_WAIT_SECONDS", 0.05)
-    conversation = api.conversation_for("busy", 7)
+    monkeypatch.setattr(runtime_svc, "LOCK_WAIT_SECONDS", 0.05)
+    conversation = conversation_svc.conversation_for("busy", 7)
     conversation.lock.acquire()
     try:
         with pytest.raises(RuntimeError, match="still being answered"):
@@ -384,7 +389,7 @@ def _health(monkeypatch, settings=API, db_error=None, privileges=("SELECT",)):
     monkeypatch.setattr(connection, "read_only_posture", lambda s: {
         "privileges": list(privileges), "select_only": list(privileges) == ["SELECT"],
         "error": None})
-    return api.health(settings)
+    return runtime_svc.health(settings)
 
 
 def test_health_says_what_answers_and_that_all_is_well(monkeypatch):
@@ -415,7 +420,7 @@ def _stream(streaming: bool) -> str:
                 on_rows({"sql": "SELECT 1"})
             return {"answer": "done"}
 
-    return "".join(api.stream_events(Rt(), {"question": "q"}, 7))
+    return "".join(routes.stream_events(Rt(), {"question": "q"}, 7))
 
 
 def test_streaming_off_sends_only_the_answer():

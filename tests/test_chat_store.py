@@ -20,7 +20,7 @@ from pipeline.lean_runner import TurnResult
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-import scripts.serve_api as api  # noqa: E402
+import server.services.chats as chats_svc
 
 
 def _turn(**fields) -> TurnResult:
@@ -159,7 +159,7 @@ CHAT = {"id": 9, "session_id": "react-x", "title": "", "created_at": 1_760_000_0
 
 
 def test_a_reopened_chat_has_no_rows_and_no_sql():
-    out = api.present_chat({"chat": CHAT, "turns": [ROW]}, debug=False)
+    out = chats_svc.present_chat({"chat": CHAT, "turns": [ROW]}, debug=False)
     turn = out["turns"][0]
     assert turn["result"] == {"row_count": 3, "truncated": False, "rows": []}
     assert turn["explanation"] == "The open tasks."
@@ -170,19 +170,19 @@ def test_a_reopened_chat_has_no_rows_and_no_sql():
 
 def test_a_replayed_chip_cannot_answer_anything():
     """A ref ties a chip to an outstanding clarification; a transcript has none."""
-    turn = api.present_chat({"chat": CHAT, "turns": [ROW]}, debug=False)["turns"][0]
+    turn = chats_svc.present_chat({"chat": CHAT, "turns": [ROW]}, debug=False)["turns"][0]
     assert turn["followup"]["suggestions"] == [{"label": "Sales"}]
 
 
 def test_debug_adds_the_sql_and_the_timings():
-    turn = api.present_chat({"chat": CHAT, "turns": [ROW]}, debug=True)["turns"][0]
+    turn = chats_svc.present_chat({"chat": CHAT, "turns": [ROW]}, debug=True)["turns"][0]
     assert turn["generated_sql"].startswith("SELECT")
     assert turn["step_timings"] == {"total_ms": 1}
 
 
 def test_a_failed_turn_shows_its_stored_error():
     row = {**ROW, "status": "execution_failed", "llm_response": "I couldn't find that."}
-    turn = api.present_chat({"chat": CHAT, "turns": [row]}, debug=False)["turns"][0]
+    turn = chats_svc.present_chat({"chat": CHAT, "turns": [row]}, debug=False)["turns"][0]
     assert turn["error"] == "I couldn't find that." and turn["explanation"] is None
 
 
@@ -191,4 +191,4 @@ def test_a_failed_turn_shows_its_stored_error():
     ("AR_YD_Suiting", "AR_YD_Suiting"), (None, ""), (True, "true"), (3, "3"),
 ])
 def test_csv_cells_as_drupal_writes_them(value, cell):
-    assert api.csv_cell(value) == cell
+    assert chats_svc.csv_cell(value) == cell

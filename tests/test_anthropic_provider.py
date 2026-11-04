@@ -116,9 +116,9 @@ if str(SCRIPTS) not in sys.path:
 
 
 def test_the_server_starts_on_an_api_with_its_key_and_not_without():
-    import scripts.serve_api as api
-    api.preflight(SETTINGS)
+    import server.services.runtime as runtime_svc
+    runtime_svc.preflight(SETTINGS)
     with pytest.raises(SystemExit, match="ANTHROPIC_API_KEY"):
-        api.preflight(dataclasses.replace(SETTINGS, anthropic_api_key=""))
+        runtime_svc.preflight(dataclasses.replace(SETTINGS, anthropic_api_key=""))
     with pytest.raises(SystemExit, match="Use cli, anthropic"):
-        api.preflight(dataclasses.replace(SETTINGS, llm_provider="mystery"))
+        runtime_svc.preflight(dataclasses.replace(SETTINGS, llm_provider="mystery"))

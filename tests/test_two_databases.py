@@ -17,7 +17,9 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import scripts.serve_api as api  # noqa: E402
+import server.services.chats as chats_svc
+import server.services.conversation as conversation_svc
+import server.services.runtime as runtime_svc
 import database.connection as connection  # noqa: E402
 import pipeline.chat_store as chat_store  # noqa: E402
 import pipeline.run_access as access  # noqa: E402
@@ -143,12 +145,12 @@ def runtime(monkeypatch):
         def record_turn(self, *a):
             pass
 
-    monkeypatch.setattr(api, "ChatStore", Store)
-    monkeypatch.setattr(api, "run_turn", lambda turn, *a, **k: _turn(question=turn.question))
-    monkeypatch.setattr(api, "resolve_identity",
+    monkeypatch.setattr(runtime_svc, "ChatStore", Store)
+    monkeypatch.setattr(runtime_svc, "run_turn", lambda turn, *a, **k: _turn(question=turn.question))
+    monkeypatch.setattr(runtime_svc, "resolve_identity",
                         lambda settings, user_id: identities.append(user_id))
-    api.SESSIONS.clear()
-    rt = api.Runtime.__new__(api.Runtime)
+    conversation_svc.SESSIONS.clear()
+    rt = runtime_svc.Runtime.__new__(runtime_svc.Runtime)
     rt.settings = SimpleNamespace(freshness_tables=(), freshness_message="",
                                   monthly_token_limit=0, run_roles=("ticket_owner",))
     rt.mcp_config_path, rt.privacy = None, "strict"
@@ -166,7 +168,7 @@ def test_two_users_with_one_session_id_share_nothing(runtime):
     rt, _, _ = runtime
     rt.ask({"session_id": "same", "question": "q"}, 1)
     rt.ask({"session_id": "same", "question": "q"}, 2)
-    assert api.conversation_for("same", 1) is not api.conversation_for("same", 2)
+    assert conversation_svc.conversation_for("same", 1) is not conversation_svc.conversation_for("same", 2)
 
 
 def test_authorize_checks_the_role_before_the_turn(runtime, monkeypatch):
@@ -286,7 +288,7 @@ def test_a_stored_answer_on_an_unlisted_view_is_not_run_again(monkeypatch):
 
     monkeypatch.setattr(connection, "run_readonly",
                         lambda *a: pytest.fail("an unlisted view was queried"))
-    status, _ = api.full_csv(TWO, Store(), 1, 1)
+    status, _ = chats_svc.full_csv(TWO, Store(), 1, 1)
     assert status == 422
 
 

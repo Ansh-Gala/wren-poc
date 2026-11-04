@@ -31,6 +31,9 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import scripts.serve_api as api  # noqa: E402
+import server.services.chats as chats_svc
+import server.services.conversation as conversation_svc
+import server.services.runtime as runtime_svc
 
 FOUND = {"Rahul Sharma": ("person", 0.99), "Mumbai": ("city", 0.97),
          "rahul@gmail.com": ("email", 0.98), "Amit Rao": ("person", 0.96),
@@ -305,7 +308,7 @@ class _Cursor:
 
 
 def _store() -> cs.ChatStore:
-    settings = dataclasses.replace(api.load_settings(), history_db_name="chats",
+    settings = dataclasses.replace(runtime_svc.load_settings(), history_db_name="chats",
                                    history_db_user="writer", save_chats=True)
     return cs.ChatStore(settings, 5)
 
@@ -380,11 +383,11 @@ class FakeStore:
 @pytest.fixture
 def server(monkeypatch, world):
     FakeStore.rows, FakeStore.fail_load, FakeStore.fail_record = [], False, False
-    monkeypatch.setattr(api, "ChatStore", FakeStore)
-    monkeypatch.setattr(api, "SESSIONS", {})
-    monkeypatch.setattr(api, "resolve_identity", lambda settings, user_id: None)
-    runtime = object.__new__(api.Runtime)
-    runtime.settings = dataclasses.replace(api.load_settings(), pii_aliasing=True,
+    monkeypatch.setattr(runtime_svc, "ChatStore", FakeStore)
+    monkeypatch.setattr(conversation_svc, "SESSIONS", {})
+    monkeypatch.setattr(runtime_svc, "resolve_identity", lambda settings, user_id: None)
+    runtime = object.__new__(runtime_svc.Runtime)
+    runtime.settings = dataclasses.replace(runtime_svc.load_settings(), pii_aliasing=True,
                                            monthly_token_limit=0)
     runtime.anonymizer = anonymizer(FOUND)
     runtime.mcp_config_path, runtime.privacy, runtime.context_mode = None, "strict", "state"
@@ -448,7 +451,7 @@ def test_after_a_restart_a_new_person_gets_the_next_number_never_001_again(world
                                                                           monkeypatch):
     server("tasks of Rahul Sharma", reply(BY_RAHUL))
     # A restart: the in-memory conversation is gone; only the chat database is left.
-    monkeypatch.setattr(api, "SESSIONS", {})
+    monkeypatch.setattr(conversation_svc, "SESSIONS", {})
     server("now Amit Rao's", reply("SELECT task_id FROM tms_task_flat "
                                    "WHERE assigned_user_name = 'PERSON_002'"))
 
@@ -509,7 +512,7 @@ def test_a_chat_whose_aliases_cannot_be_read_is_not_answered(world, server):
 def test_an_unsaved_turn_leaves_no_alias_behind_in_memory(world, server):
     FakeStore.fail_record = True
     server("tasks of Rahul Sharma", reply(BY_RAHUL))
-    conversation = api.SESSIONS[(5, "s1")]
+    conversation = conversation_svc.SESSIONS[(5, "s1")]
     assert conversation.state.recent_questions == []
     assert conversation.state.active_filters == {}
 
@@ -518,7 +521,7 @@ def test_a_reopened_chat_reads_with_its_values(world, server):
     server("tasks of Rahul Sharma", reply(BY_RAHUL))
     row = {**FakeStore.rows[0], "llm_response": "Tasks for PERSON_001.", "response_type":
            "sql_result", "created_at": 0}
-    shown = api.present_chat({"chat": {"id": 1, "session_id": "s1", "title": "t",
+    shown = chats_svc.present_chat({"chat": {"id": 1, "session_id": "s1", "title": "t",
                                        "created_at": 0, "updated_at": 0}, "turns": [row]},
                              debug=False)
     assert shown["turns"][0]["explanation"] == "Tasks for Rahul Sharma."
@@ -537,6 +540,6 @@ def test_the_csv_download_reruns_the_query_with_its_values(world, server, monkey
         def open_chat(self, chat_id):
             return {"chat": {"id": 1}, "turns": FakeStore.rows}
 
-    status, body = api.full_csv(server.runtime.settings, Opened(), 1, 1)
+    status, body = chats_svc.full_csv(server.runtime.settings, Opened(), 1, 1)
     assert status == 200
     assert ran == ["SELECT task_id FROM tms_task_flat WHERE assigned_user_name = 'Rahul Sharma'"]

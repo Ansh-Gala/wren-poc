@@ -130,8 +130,12 @@ metadata/     Schema descriptions, business rules, worked examples,
               entity vocabulary -- what the model is told (Arvind TMS)
 products/     The same files for other products; pick one with
               METADATA_DIR in .env, with DATABASE_NAME to match
+server/       The HTTP server: routes.py (endpoints), services/ (answering a
+              question, saved chats, a chat's state), schemas.py (response
+              shapes), utils.py (shared helpers), config.py (constants)
 ui/           The console: one page, no build step, no dependencies
-scripts/      serve_api.py, and the bootstrap it imports
+scripts/      serve_api.py (makes the app and starts it), setup_databases.py,
+              and the bootstrap they import
 ```
 
 Everything here is reachable from `scripts/serve_api.py`. Nothing is kept
