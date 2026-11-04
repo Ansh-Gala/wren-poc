@@ -74,6 +74,20 @@ The query role should hold `SELECT` and nothing more. `pipeline/safety.py`
 rejects writes before they are sent, but a read-only grant is what makes that
 belt-and-braces rather than the only line of defence.
 
+## Set up the databases
+
+```
+python scripts/setup_databases.py --dry-run   # make every change, then roll back
+python scripts/setup_databases.py
+```
+
+It reads `.env` only, and stops before connecting if a key it needs is
+missing. `DATABASE_USER` / `DATABASE_PASSWORD` must be an owner login that can
+create logins and databases. It creates the read-only login with `SELECT` on
+exactly the columns the product's metadata describes, then the chat database,
+its writer login and its two tables. Each database's changes are one
+transaction. A login that exists keeps its password. Safe to run again.
+
 ## Run
 
 ```
