@@ -228,7 +228,8 @@ def main() -> int:
         print("schema_description.yaml is up to date")
         return 0
 
-    OUT.write_text(body, encoding="utf-8")
+    # LF on every OS: the Drupal copy must stay byte-identical.
+    OUT.write_text(body, encoding="utf-8", newline="\n")
     total = sum(len(t["columns"]) for t in tables_doc.values())
     print(f"wrote {OUT.relative_to(ROOT)}")
     print(f"  {len(tables_doc)} tables, {total} columns "
