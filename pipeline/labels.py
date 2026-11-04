@@ -14,34 +14,58 @@ from __future__ import annotations
 
 import re
 
-# Words the schema itself writes in capitals, and which title case makes
-# unreadable ("Task Sla Status"). Deliberately short: every entry is a token
-# that occurs in a real column name and is capitalised in that column's own
-# description in metadata/schema_description.yaml.
+# The product's own words come from product.yaml:
 #
-# Not included, on purpose: id, ref, qty, desc, dept. Those read correctly in
-# title case -- "Business Object Ref Id" -- and expanding them would fight the
-# convention rather than follow it.
-_ACRONYMS = {
-    "sla": "SLA",      # "SLA status", "allowed task duration / SLA buffer"
-    "bo": "BO",        # "Also known as Initiative, Order, or BO"
-    "moq": "MOQ",      # "Minimum order quantity attribute"
-    "csbd": "CSBD",    # "CSBD date attribute"
-    "pi": "PI",        # "PI date attribute"
-    "won": "WON",      # "MCode/WON number attribute"
-}
+#   headings.words    a word the schema writes in capitals, or renames, which
+#                     title case would make unreadable ("Task Sla Status").
+#                     id, ref, qty, desc and dept read fine in title case and
+#                     are left to it.
+#   headings.phrases  domain terms, applied to the underscore-delimited name
+#                     before it is split. A phrase rather than a word, because
+#                     "business" and "object" only mean Initiative together.
+#   columns.*.unit    units the view converts to and the name does not say.
+#                     Only the exact column name gets the unit; an alias is
+#                     the model's own name and says what it says.
 
 # Split on underscores and on runs of whitespace, so a column that already
 # arrived with spaces (a quoted alias) is handled by the same path.
 _SEPARATORS = re.compile(r"[_\s]+")
 
 
+def _words(name: str) -> list[str]:
+    from pipeline.metadata import profile
+
+    text = str(name).strip()
+    for phrase, replacement in profile().heading_phrases().items():
+        text = text.replace(phrase, replacement)
+    return [w for w in _SEPARATORS.split(text) if w]
+
+
 def column_label(name: str | None) -> str:
-    """One column name as a heading. ``business_object_ref_id`` -> ``Business Object Ref Id``."""
+    """One column name as a heading. ``initiative_ref_id`` -> ``Initiative Ref Id``."""
+    from pipeline.metadata import profile
+
     if not name:
         return ""
-    words = [w for w in _SEPARATORS.split(str(name).strip()) if w]
-    return " ".join(_ACRONYMS.get(w.lower(), w[:1].upper() + w[1:]) for w in words)
+    words = profile().heading_words()
+    label = " ".join(words.get(w.lower(), w[:1].upper() + w[1:])
+                     for w in _words(name))
+    unit = profile().units().get(str(name).strip())
+    return f"{label} ({unit})" if unit else label
+
+
+def column_phrase(name: str | None) -> str:
+    """One column name as ordinary words, to sit inside a sentence.
+
+    ``initiative_status`` -> ``initiative status``, for "Group by
+    initiative status". Shared with the follow-up layer rather than left to
+    `column.replace("_", " ")` at each call site: those labels are built from
+    column names too, so the domain terms have to be applied in one place or
+    the chips and the headings will disagree about what the thing is called.
+    """
+    if not name:
+        return ""
+    return " ".join(_words(name))
 
 
 def column_labels(names: list[str] | None) -> list[str]:
@@ -65,3 +89,22 @@ def with_column_labels(result):
     if not isinstance(result, dict):
         return result
     return {**result, "column_labels": column_labels(result.get("columns"))}
+
+
+def with_presentation(result, tables, grouped=False):
+    """A result dict with display order and hidden columns added.
+
+    Additive in the same way as with_column_labels, and for the same reason:
+    `columns` and `rows` keep exactly what PostgreSQL said, so the state
+    reader and the debug pane are unaffected. Anything that is not a dict
+    passes through -- a clarification has no result, and inventing an empty
+    table for it would put a header row under a sentence.
+    """
+    if not isinstance(result, dict):
+        return result
+    from pipeline.column_order import grouping, presentation
+
+    shape = presentation(result.get("columns"), tables)
+    return {**result, "column_order": shape["order"],
+            "hidden_columns": shape["hidden"],
+            "grouping": grouping(result.get("columns"), tables, grouped)}

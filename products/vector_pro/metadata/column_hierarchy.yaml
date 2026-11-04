@@ -1,0 +1,2379 @@
+# VectorPro column hierarchy: which columns to use, which to show, in what order, under what name.
+#
+# Companion to schema_description.yaml, business_rules.yaml and question_sql_pairs.yaml
+# (scripts/schema_description). Every column named here exists in schema_description.yaml.
+#
+# Two uses:
+#  1. The AI chooses OUTPUT columns with the tiers, guidelines, similar_columns and intents below, and
+#     keeps QUERY-only columns (keys, flags, JSON, codes) out of the final SELECT list.
+#  2. A grid can lay out a result with the per-table keys kept from the reference format:
+#       priority       output order, most useful first (columns not listed keep their order and follow)
+#       hidden         columns that, if present, start collapsed (the on_request tier)
+#       row_groups     columns that may be grouped on; tables that name none are never grouped
+#       value_columns  aggregations offered with grouping; aggFunc is one of
+#                      sum, min, max, count, avg, first, last
+#     Snapshot and load tables (vpp_planning_projectshistory, vpp_planning_projectwisequeuedetails,
+#     vpp_masterdata_heatmapteams) deliberately name no value_columns: summing them is wrong.
+#
+# Per table: label, identifier, name_column, priority, hidden, the six tiers (essential, optional,
+# on_request, query_only, technical, do_not_use; every column is in exactly one), derived output
+# columns (as / label / sql / join / tier / replaces), human labels, transforms, row_groups,
+# value_columns, notes. Derived columns are names resolved from ids, readable codes and JSON values;
+# each was executed against the schema.
+#
+# Display labels follow the product's terminology (the application's own grid headers are stored in the
+# database, not in code). Aliases in SQL stay snake_case; `labels` are what a client should display.
+
+version: 1
+tiers:
+  essential: Shown by default whenever rows of this table are listed or looked up.
+  optional: Shown when the question is about the column's topic, or in a single-record detail view.
+  on_request: Shown only when the user asks for it (or its topic) explicitly. Starts collapsed (hidden).
+  query_only: Needed to join, filter, sort or calculate; never part of the output. Show its derived name column
+    instead.
+  technical: Surrogate keys and internal bookkeeping; never output, rarely needed in a query.
+  do_not_use: Unmaintained or misleading; never select, filter or output. See the table notes.
+guidelines:
+- name: two_column_sets
+  rule: Every query has two column sets. QUERY columns are everything needed to join, filter, sort or calculate
+    (ids, flags, JSON, status codes). OUTPUT columns are what the person sees. Only output columns go in the final
+    SELECT list; query columns stay in JOIN, WHERE, GROUP BY, ORDER BY or inside expressions.
+- name: start_from_the_question
+  rule: 'Choose output columns in this order: (1) the identifier and name of the main entity; (2) the columns that
+    directly answer the question; (3) the table''s remaining essential columns, for listings only; (4) optional
+    columns only when the question is about their topic. Stop there. Never use SELECT *.'
+- name: keep_listings_short
+  rule: A listing shows the main entity's essential columns plus the columns that answer the question, normally
+    no more than 10, unless the user asks for more or for 'all details'. Detail views of one record may add optional
+    columns.
+- name: aggregates_show_only_groups_and_measures
+  rule: A count, total, average or breakdown outputs only the grouping labels and the measures, never row-level
+    columns or identifiers.
+- name: names_not_ids
+  rule: 'Never output a foreign-key id on its own. Replace it with the derived name column listed under the table
+    (replaces: <id>). The main entity''s own id may stay as a reference column (project_id, task_uid, subtask_id,
+    issue_id, action_id).'
+- name: context_with_child_records
+  rule: 'Output the parent with a child: a task always comes with its project_name; a subtask with task_name and
+    project_name; an issue with where it was raised; an action with its project.'
+- name: apply_transforms
+  rule: 'Format columns with the transform listed for them: epoch_date / epoch_datetime for dates, percent for percentages,
+    health_colour for status_color, user_name for people, lookup_name for coded ids, json_key for JSON. Keep the
+    source column name as the alias of a transformed column.'
+- name: aliases
+  rule: Raw and transformed columns keep their column name as the SQL alias; derived columns use the `as` name given
+    here. Computed measures (counts, differences, buckets) get a short snake_case alias that names the unit or meaning,
+    e.g. open_issues, calendar_days_late, buffer_left_working_days. The `labels` map gives the human header a client
+    should display; do not put spaces in SQL aliases.
+- name: one_of_each_similar_group
+  rule: From each similar_columns group, output one column (the group's default) unless the question compares them.
+    Never output two columns that look the same without labels that tell them apart.
+- name: on_request_means_asked
+  rule: Output an on_request column only when the question names it or its topic explicitly (audit dates, custom
+    attributes, configuration flags, e-mail, cumulative queue figures).
+- name: never_output_query_only_or_technical
+  rule: query_only and technical columns are never part of the output, even when the query uses them. If a user
+    explicitly asks for an internal id, show it with its label and say it is an internal identifier.
+- name: never_use_do_not_use
+  rule: do_not_use columns are unmaintained or misleading. Do not select, filter or display them, even on request;
+    explain why and offer the correct column (see the table's notes).
+- name: respect_access_and_privacy
+  rule: Do not output personal data (e-mail, other people's remarks) unless asked and allowed. Never output columns
+    excluded from schema_description.yaml (credentials, internal JSON caches).
+- name: order_rows_meaningfully
+  rule: Order rows by what the question implies (worst first for risks, soonest first for dates, priority for work).
+    Sort columns may be query-only (task_tpr_sorting_index, project_priority) and need not be shown.
+- name: order_columns_by_priority
+  rule: Order output columns by the table's priority list; columns not listed follow in their table order.
+transforms:
+  epoch_date:
+    applies_to: Planning dates stored as BIGINT epoch seconds (*_date, *_etc, holiday_date, entry_date).
+    sql: timezone('Asia/Kolkata', to_timestamp({col}))::date AS {col}
+    note: Keep the source column name as the alias so ordering and hiding still match.
+  epoch_datetime:
+    applies_to: Audit instants stored as epoch seconds (*_on, added_on, remark_created_on, history_created_on).
+    sql: timezone('Asia/Kolkata', to_timestamp({col})) AS {col}
+    note: Show date only (epoch_date) unless the time of day matters to the question.
+  percent:
+    applies_to: 0-100 percentages (completion, penetration, planned completion).
+    sql: ROUND({col}::numeric, 1) AS {col}
+    note: Values are already 0-100; never multiply by 100. Penetration can exceed 100.
+  days:
+    applies_to: Durations, remaining durations, stagnancy, elapsed and delay values in days.
+    sql: ROUND({col}::numeric, 1) AS {col}
+    note: Say whether the unit is working or calendar days (see business_rules working_days_vs_calendar_days).
+  health_colour:
+    applies_to: vpp_planning_projects.status_color and vpp_planning_projectshistory.status_color.
+    sql: CASE {col} WHEN '#FFCB00' THEN 'yellow' ELSE {col} END AS {col}
+    note: Yellow is stored as '#FFCB00'; never show the hex code to a person.
+  user_name:
+    applies_to: Any column holding a vpp_users.id (manager, owner, raised by, created by ...).
+    sql: LEFT JOIN vpp_users <alias> ON <alias>.id = {col} ... REPLACE(<alias>.username, '_deleted_user_' || <alias>.id,
+      '') AS <role>_name
+    note: Show the name, never the id. The application displays users by username; deleted users carry a suffix
+      that this removes.
+  lookup_name:
+    applies_to: Coded ids with a lookup table (task_status_id, subtask_status_id, reason ids, portfolio_id, department_id_id
+      ...).
+    sql: LEFT JOIN <lookup> ON <lookup>.<id> = {col} ... <lookup>.<name_column> AS <name alias>
+    note: Show the lookup's name column; keep the id only for filtering.
+  json_key:
+    applies_to: JSON columns (task_delay_indicator, task_elapsed, subtask_delay_indicator, subtasks' phase JSON,
+      tasks.issue_count).
+    sql: ({col}->>'<key>')::numeric AS <key>
+    note: Never show a raw JSON column; extract the keys the question needs.
+similar_columns:
+- group: project_end_dates
+  columns:
+  - project_due_date
+  - project_etc
+  - project_internal_due_date
+  - project_planned_due_date
+  - factored_project_etc
+  - original_etc
+  default: project_due_date
+  rule: Due date = committed date; project_etc = current forecast; internal = critical chain without buffer; planned
+    = due date at last plan save; factored = load-adjusted ETC. original_etc is do_not_use. Show due + ETC together
+    for lateness questions.
+- group: project_start_dates
+  columns:
+  - project_actual_start_date
+  - project_start_date
+  - first_rfs_date
+  default: project_actual_start_date
+  rule: The application shows project_actual_start_date as the start date of running and closed projects. For projects
+    not yet started (in_planning, ready_to_schedule, scheduled) use project_start_date, the planned start.
+- group: project_progress
+  columns:
+  - project_completion
+  - project_planned_completion
+  - project_completed_progress
+  - project_expected_progress
+  - project_penetration
+  default: project_completion
+  rule: Completion = work done; planned completion = time elapsed; completed/expected progress = recent window;
+    penetration = buffer consumed. Label each precisely when more than one is shown.
+- group: project_lateness
+  columns:
+  - project_predicted_delay
+  - status_color
+  - project_due_date
+  default: project_predicted_delay
+  rule: Predicted delay = forecast lateness in working days; status_color = health; due date passed = overdue (black).
+- group: task_identifiers
+  columns:
+  - task_uid
+  - task_id
+  - gantt_id
+  default: task_id
+  rule: Show the WBS task_id with the name; task_uid as reference; never show gantt_id.
+- group: task_dates
+  columns:
+  - task_baseline_finish_date
+  - task_expected_finish_date
+  - task_actual_finish_date
+  - task_etc
+  - milestone_baseline_etc
+  - milestone_actual_etc
+  - task_baseline_alap_finish_date
+  - task_baseline_asap_finish_date
+  - task_expected_alap_finish_date
+  - task_expected_asap_finish_date
+  default: task_expected_finish_date
+  rule: Planned = baseline; expected = forecast; actual = done. The ALAP/ASAP variants are on_request. Milestone
+    target = COALESCE(milestone_baseline_etc, task_baseline_start_date).
+- group: task_progress
+  columns:
+  - task_completion
+  - planned_task_completion
+  - task_completed_duration
+  - last_x_days_completion
+  default: task_completion
+  rule: Show planned_task_completion next to task_completion when the question is about delay.
+- group: task_delay
+  columns:
+  - delay_flag
+  - delay_days
+  - rollup_delay_days
+  - task_isdelayed
+  - task_elapsed_days
+  default: delay_flag
+  rule: delay_flag (from task_delay_indicator) is what the task screens call delayed; delay_days says by how much.
+    task_isdelayed means 'behind planned completion' and is filled only when enabled in configuration. task_elapsed_days
+    is do_not_use.
+- group: task_time_without_progress
+  columns:
+  - task_stagnancy
+  - elapsed_working_days
+  - last_modified_on
+  default: task_stagnancy
+  rule: Stagnancy = days without progress; elapsed = days since start.
+- group: subtask_weightage
+  columns:
+  - subtask_total_weightage
+  - subtask_rem_weightage
+  - subtask_actual_completion_weightage
+  - subtask_planned_completion_weightage
+  - subtask_computed_duration
+  default: subtask_actual_completion_weightage
+  rule: total/rem are durations in days; actual/planned completion are percentages. Label them that way.
+- group: subtask_delay
+  columns:
+  - subtask_delay_flag
+  - subtask_delay_days
+  - subtask_isdelayed
+  default: subtask_delay_flag
+  rule: subtask_delay_flag answers 'is it delayed', subtask_delay_days 'by how much'. subtask_isdelayed is do_not_use
+    (always false).
+- group: issue_people
+  columns:
+  - issue_owner_name
+  - raised_by_name
+  - closed_by_name
+  default: issue_owner_name
+  rule: Owner = who must resolve; raised by = who reported; closed by = who closed.
+- group: issue_counts
+  columns:
+  - vpp_planning_projects.issue_count
+  - vpp_planning_tasks.issue_count
+  - vpp_planning_subtasks.issue_count
+  default: null
+  rule: Pre-aggregated counts can drift. For any count shown to a person, recount from vpp_issue_issues; show the
+    stored count only on request.
+- group: status_labels
+  columns:
+  - task_status
+  - short_name
+  - display_text
+  - task_status_id
+  default: task_status
+  rule: Show the status name; short codes only when the user speaks in codes; never the id.
+- group: colours
+  columns:
+  - vpp_planning_projects.status_color
+  - vpp_planning_projectwisequeuedetails.heat_color
+  - vpp_masterdata_tags.color
+  - vpp_planning_taskstatus.color
+  default: null
+  rule: 'Different meanings: project health, team congestion, a tag''s display colour, a status''s display colour.
+    Only status_color is ''project health''.'
+- group: lags
+  columns:
+  - lag
+  - new_lag
+  - introduced_lag
+  default: new_lag
+  rule: new_lag for in_execution projects, lag for plans; introduced_lag only when FOL is asked about.
+- group: heatmap_team_ids
+  columns:
+  - vpp_masterdata_heatmapteams.team_id
+  - vpp_masterdata_heatmapteams.source_id
+  - vpp_masterdata_teams.team_id
+  default: null
+  rule: Never show these ids; show team_name. heatmapteams.team_id and teams.team_id are different keys.
+- group: latest_remark_vs_remarks
+  columns:
+  - task_latest_remark
+  - subtask_latest_remark
+  - vpp_planning_remark.remark
+  default: task_latest_remark
+  rule: Latest remark for listings; the remark table for history.
+- group: user_names
+  columns:
+  - user_name
+  - username
+  - first_name
+  - last_name
+  default: user_name
+  rule: Use the derived user_name (cleaned username) as the application does.
+intents:
+- intent: lookup_one
+  example: Show me project 101 / task 5003
+  output: Identifier, name, all essential columns and the most relevant optional ones (detail view). One row.
+- intent: list
+  example: Which tasks are delayed? / List open issues
+  output: Identifier, name, parent context, the columns that prove the condition (e.g. task_completion and planned_task_completion
+    for delayed), plus essential columns; about 8 columns.
+- intent: count
+  example: How many projects are running?
+  output: A single measure with a clear alias (running_projects). No other columns.
+- intent: breakdown
+  example: Open tasks by department / projects by health
+  output: Group label column(s) + measure(s). Translate codes to labels (yellow, status names).
+- intent: top_n
+  example: Top 5 priority projects / most delayed tasks
+  output: Name, the ranking measure, and one or two context columns; ordered by the measure.
+- intent: trend
+  example: How did completion change over the last week?
+  output: Date column first (snapshot date), then the measures; one row per period, oldest first.
+- intent: comparison
+  example: Plan vs actual completion
+  output: Name plus both compared columns side by side and, if useful, their difference with a clear label.
+- intent: explanation
+  example: Why is project 101 red?
+  output: The columns that drive the answer (status_color, project_completion, project_planned_completion, project_due_date,
+    project_etc) for the one record, then explain in words.
+- intent: export_all
+  example: Give me all details of project 101
+  output: All essential, optional and on_request columns of the entity, transformed and labelled, except personal
+    data (e-mail) and role-restricted columns (expected_rebaseline_type) unless the asker is allowed; never query_only,
+    technical or do_not_use columns.
+ambiguity:
+- name: which_date
+  rule: '''Deadline'' or ''due'' means the committed date: project_due_date for projects, task_baseline_finish_date
+    for tasks, milestone_target_date for milestones, action_planned_completion_date for actions. ''When will it
+    finish'' means the forecast: project_etc, task_expected_finish_date. ''When did it finish'' means the actual
+    date (task_actual_finish_date; project_closed_on for projects). For lateness show the committed date and the
+    forecast together (projects: due date + ETC; tasks: baseline finish + expected finish).'
+- name: which_completion
+  rule: '''Progress'' or ''how far'' means project_completion / task_completion. Add planned completion only for
+    ''on track'' or ''behind'' questions. Recent progress columns only for ''this week / recently''.'
+- name: which_person
+  rule: '''Who'' about a project means the Project Manager (plus coordinators if asked ''who is involved''); about
+    a task, the Task Manager; about a subtask, the Subtask Manager; about an issue, the owner (raiser only if the
+    question says raised / reported).'
+- name: which_name
+  rule: When the user identifies a project by code, show project_code first; by number, project_id; by name, project_name.
+    Always include project_name.
+- name: id_vs_name_requested
+  rule: If the user asks for 'the id', give the entity's own id (project_id, task_uid, issue_id). A WBS like '1.2'
+    is task_id. Never offer gantt_id or mapping ids.
+- name: details_requested
+  rule: '''Details'', ''everything'', ''full info'' switch to the export_all intent for that entity only, not for
+    joined tables.'
+- name: stale_values
+  rule: If the result includes non-running projects, either drop the health / ETC / delay columns or label them
+    as the last calculated values.
+- name: unknown_column_request
+  rule: If the user asks for a column that does not exist or is excluded, say so; do not substitute a similar-looking
+    column silently.
+examples:
+- question: Which tasks are delayed?
+  output_columns:
+  - project_name
+  - task_id
+  - task_name
+  - delay_days
+  - task_completion
+  - task_manager_name
+  - task_uid
+  query_only_columns:
+  - task_delay_indicator
+  - task_status_id
+  - task_is_deleted
+  - project_status
+  - project_is_deleted
+  - project_id_id
+  - task_manager_id
+  why: The delay flag filters the rows, so it is not repeated in the output; delay_days shows by how much. task_uid
+    comes last as the reference id.
+- question: How many projects are running?
+  output_columns:
+  - running_projects
+  query_only_columns:
+  - project_status
+  - project_is_deleted
+  why: Counts output a single measure.
+- question: Show me project 101
+  output_columns:
+  - project_id
+  - project_code
+  - project_name
+  - portfolio_name
+  - project_status
+  - project_manager_name
+  - project_due_date
+  - project_etc
+  - status_color
+  - project_completion
+  - project_actual_start_date
+  query_only_columns:
+  - portfolio_id
+  - project_manager_id
+  - project_is_deleted
+  why: 'Detail view: essential columns plus the start date; ids replaced by names; health shown as a word.'
+- question: Open issues of project 101
+  output_columns:
+  - issue_id
+  - issue_description
+  - raised_on_level
+  - raised_on_item
+  - issue_status_label
+  - issue_owner_name
+  - issue_raised_on
+  query_only_columns:
+  - issue_status
+  - issue_is_deleted
+  - issue_type
+  - host_id
+  - issue_owner_id
+  why: host_id and issue_type drive the joins; the output shows where the issue was raised in words.
+- question: Open tasks by department
+  output_columns:
+  - department_name
+  - open_tasks
+  query_only_columns:
+  - department_id_id
+  - task_status_id
+  - task_is_deleted
+  - workflow_id
+  why: Breakdowns show only the label and the measure.
+- question: How has project 101's completion changed this week?
+  output_columns:
+  - history_created_on
+  - project_completion
+  - status_color
+  query_only_columns:
+  - project_id
+  why: 'Trend: date first, one row per day, oldest first; project name is in the question, so not repeated.'
+- question: What should I work on next?
+  output_columns:
+  - project_name
+  - project_priority
+  - task_uid
+  - task_id
+  - task_name
+  - subtask_id
+  - subtask_name
+  - work_status
+  - task_expected_finish_date
+  query_only_columns:
+  - task_tpr_sorting_index
+  - subtask_tpr_sorting_index
+  - task_manager_id
+  - subtask_manager_id
+  why: 'The TPR sort keys stay query-only: the order is visible from the row order. project_priority is shown because
+    it explains the order across projects.'
+- question: Which heatmap teams are overloaded?
+  output_columns:
+  - team_name
+  - team_load
+  - threshold_green_end
+  - threshold_yellow_end
+  query_only_columns:
+  - heatmap_enabled
+  - team_id
+  why: Show the limits next to the load so the judgement is visible.
+tables:
+  vpp_planning_projects:
+    label: Project
+    identifier: project_id
+    name_column: project_name
+    priority:
+    - project_id
+    - project_code
+    - project_name
+    - portfolio_name
+    - project_status
+    - project_manager_name
+    - project_due_date
+    - project_etc
+    - status_color
+    - project_completion
+    - project_predicted_delay
+    - project_priority
+    - project_penetration
+    - project_planned_completion
+    - project_actual_start_date
+    hidden:
+    - project_start_date
+    - project_buffer
+    - near_cc
+    - project_slack
+    - project_is_slack_applicable
+    - project_is_feeder_buffer_applicable
+    - expected_rebaseline_type
+    - project_overwrite_task_baseline_dates
+    - factored_project_etc
+    - current_quarter_progress
+    - next_quarter_target
+    - project_created_on
+    - project_modified_on
+    - last_successful_buffer_run_on
+    - issue_count
+    - project_attachment_count
+    - project_group_name
+    - rts_rule_label
+    - cost_consumption_label
+    essential:
+    - project_id
+    - project_code
+    - project_name
+    - project_status
+    - project_due_date
+    - project_etc
+    - status_color
+    - project_completion
+    - project_priority
+    optional:
+    - project_actual_start_date
+    - project_penetration
+    - project_predicted_delay
+    - project_planned_completion
+    - project_completed_progress
+    - project_expected_progress
+    - project_buffer_duration
+    - project_duration
+    - project_rem_duration
+    - project_internal_due_date
+    - project_planned_due_date
+    - first_rfs_date
+    - scheduling_logic
+    - project_last_rebaselined_on
+    on_request:
+    - project_start_date
+    - project_buffer
+    - near_cc
+    - project_slack
+    - project_is_slack_applicable
+    - project_is_feeder_buffer_applicable
+    - expected_rebaseline_type
+    - project_overwrite_task_baseline_dates
+    - factored_project_etc
+    - current_quarter_progress
+    - next_quarter_target
+    - project_created_on
+    - project_modified_on
+    - last_successful_buffer_run_on
+    - issue_count
+    - project_attachment_count
+    query_only:
+    - portfolio_id
+    - project_manager_id
+    - project_group_id_id
+    - cost_manager_id
+    - project_created_by_id
+    - project_modified_by_id
+    - project_is_deleted
+    - project_rebaseline_type
+    - project_task_rts_config
+    - consume_when
+    - project_custom_attribute
+    do_not_use:
+    - original_etc
+    derived:
+    - as: portfolio_name
+      label: Portfolio
+      sql: pf.portfolio_name
+      tier: essential
+      join: LEFT JOIN vpp_masterdata_portfolios pf ON pf.portfolio_id = p.portfolio_id
+      replaces: portfolio_id
+    - as: project_manager_name
+      label: Project Manager
+      sql: REPLACE(pm.username, '_deleted_user_' || pm.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users pm ON pm.id = p.project_manager_id
+      replaces: project_manager_id
+    - as: project_group_name
+      label: Project Group
+      sql: pg.project_group_name
+      tier: on_request
+      join: LEFT JOIN vpp_masterdata_projectgroups pg ON pg.project_group_id = p.project_group_id_id
+      replaces: project_group_id_id
+    - as: coordinator_names
+      label: Coordinators
+      sql: (SELECT string_agg(REPLACE(cu.username, '_deleted_user_' || cu.id, ''), ', ') FROM vpp_planning_projectcoordinatormapping
+        c JOIN vpp_users cu ON cu.id = c.coordinator_id_id WHERE c.project_id_id = p.project_id)
+      tier: optional
+    - as: project_closed_on
+      label: Closed On
+      sql: (SELECT timezone('Asia/Kolkata', to_timestamp(MAX(r.remark_created_on)))::date FROM vpp_planning_remark
+        r WHERE r.host_type = 'project' AND r.host_status = 'closed' AND r.host_id = p.project_id)
+      tier: optional
+      note: Closed projects only; there is no closure-date column. Shown by default when the listing is restricted
+        to closed projects, with lateness (see business_rules closed_project_lateness).
+    - as: rebaseline_type_label
+      label: Last Rebaseline
+      sql: 'CASE p.project_rebaseline_type WHEN 0 THEN ''Never rebaselined'' WHEN 1 THEN ''Type 1: due date kept''
+        WHEN 2 THEN ''Type 2: due date from total duration'' WHEN 3 THEN ''Type 3: due date from remaining duration''
+        END'
+      tier: optional
+      replaces: project_rebaseline_type
+    - as: rts_rule_label
+      label: Ready-To-Start Rule
+      sql: CASE p.project_task_rts_config WHEN 1 THEN 'Start of any predecessor' WHEN 2 THEN 'Start of all predecessors'
+        WHEN 3 THEN 'Network dependency of any predecessor' WHEN 4 THEN 'Network dependency of all predecessors'
+        END
+      tier: on_request
+      replaces: project_task_rts_config
+    - as: cost_consumption_label
+      label: Cost Consumed When
+      sql: CASE p.consume_when WHEN 1 THEN 'Task starts' WHEN 2 THEN 'Task finishes' WHEN 3 THEN 'In line with actual
+        completion' END
+      tier: on_request
+      replaces: consume_when
+    labels:
+      project_id: Project ID
+      project_code: Project Code
+      project_name: Project
+      project_status: Status
+      project_due_date: Due Date
+      project_etc: ETC
+      status_color: Health
+      project_completion: Completion %
+      project_priority: Priority
+      project_actual_start_date: Start Date
+      project_penetration: Buffer Consumed %
+      project_predicted_delay: Predicted Delay (working days)
+      project_planned_completion: Time Elapsed %
+      project_completed_progress: Progress, last 15 working days (pts)
+      project_expected_progress: Progress needed, next 15 working days (pts)
+      project_buffer_duration: Buffer (working days)
+      project_duration: Duration (working days)
+      project_rem_duration: Remaining Duration (working days)
+      project_internal_due_date: Internal Due Date
+      project_planned_due_date: Planned Due Date
+      first_rfs_date: First Ready For Scheduling
+      scheduling_logic: Scheduling Mode
+      project_last_rebaselined_on: Last Rebaselined On
+    transforms:
+      project_due_date: epoch_date
+      project_etc: epoch_date
+      project_actual_start_date: epoch_date
+      project_internal_due_date: epoch_date
+      project_planned_due_date: epoch_date
+      first_rfs_date: epoch_date
+      project_start_date: epoch_date
+      factored_project_etc: epoch_date
+      project_last_rebaselined_on: epoch_date
+      project_created_on: epoch_datetime
+      project_modified_on: epoch_datetime
+      last_successful_buffer_run_on: epoch_datetime
+      status_color: health_colour
+      project_completion: percent
+      project_penetration: percent
+      project_planned_completion: percent
+      project_completed_progress: percent
+      project_expected_progress: percent
+      project_predicted_delay: days
+      project_buffer_duration: days
+      project_duration: days
+      project_rem_duration: days
+    row_groups:
+    - project_status
+    - portfolio_name
+    value_columns:
+    - column: project_completion
+      aggFunc: avg
+    - column: project_predicted_delay
+      aggFunc: max
+    notes:
+    - Health, ETC, completion, penetration and delay are current only for in_execution projects; for other statuses
+      show them only on request and say they are from the last calculation.
+    - Show project_actual_start_date as the start date; project_start_date can be a virtual date after a Type 3
+      rebaseline. For projects not yet started (in_planning, ready_to_schedule, scheduled) show project_start_date
+      as the planned start instead.
+    - expected_rebaseline_type is shown by the application only to VP_Admin, VP_MasterScheduler and VP_TopManagement;
+      output it only to those roles.
+    - Custom attributes (project_custom_attribute) are JSON keyed by attribute UUIDs whose names are stored in the
+      database; never output them raw.
+    - The 15-working-day window of the progress columns is configurable (project_report_config).
+  vpp_planning_projectcoordinatormapping:
+    label: Project coordinator
+    identifier: projectcoordinatormapping_id
+    priority: []
+    hidden: []
+    query_only:
+    - project_id_id
+    - coordinator_id_id
+    technical:
+    - projectcoordinatormapping_id
+    notes:
+    - Never output this table's columns; output the coordinator's name (see vpp_planning_projects derived coordinator_names).
+  vpp_planning_projectactions:
+    label: Project action
+    identifier: action_id
+    name_column: action_description
+    priority:
+    - action_id
+    - project_name
+    - action_description
+    - action_owner_name
+    - action_status
+    - action_planned_completion_date
+    - action_elapsed_days
+    hidden:
+    - action_latest_remark
+    - project_action_created_on
+    - project_action_modified_on
+    essential:
+    - action_id
+    - action_description
+    - action_status
+    - action_planned_completion_date
+    optional:
+    - action_elapsed_days
+    - action_published_date
+    - action_request_closure_date
+    on_request:
+    - action_latest_remark
+    - project_action_created_on
+    - project_action_modified_on
+    query_only:
+    - project_id_id
+    - action_owner_id
+    - action_is_deleted
+    - project_action_custom_attribute
+    - project_action_created_by_id
+    - project_action_modified_by_id
+    derived:
+    - as: action_owner_name
+      label: Owner
+      sql: REPLACE(ao.username, '_deleted_user_' || ao.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users ao ON ao.id = a.action_owner_id
+      replaces: action_owner_id
+    - as: project_name
+      label: Project
+      sql: ap.project_name
+      tier: essential
+      join: JOIN vpp_planning_projects ap ON ap.project_id = a.project_id_id
+      replaces: project_id_id
+    labels:
+      action_id: Action ID
+      action_description: Action
+      action_status: Status
+      action_planned_completion_date: Planned Completion
+      action_elapsed_days: Elapsed (working days)
+      action_latest_remark: Latest Remark
+      action_published_date: Published On
+      action_request_closure_date: Closure Requested On
+    transforms:
+      action_planned_completion_date: epoch_date
+      action_published_date: epoch_date
+      action_request_closure_date: epoch_date
+      project_action_created_on: epoch_datetime
+      project_action_modified_on: epoch_datetime
+    row_groups:
+    - action_status
+  vpp_planning_tasks:
+    label: Task
+    identifier: task_uid
+    name_column: task_name
+    priority:
+    - project_name
+    - task_id
+    - task_name
+    - task_status
+    - task_manager_name
+    - task_completion
+    - planned_task_completion
+    - task_expected_finish_date
+    - task_baseline_finish_date
+    - delay_days
+    - task_stagnancy
+    - task_uid
+    hidden:
+    - task_isdelayed
+    - task_latest_remark
+    - task_fullkit_readiness_date
+    - task_etc
+    - task_rts_start_date
+    - milestone_actual_etc
+    - critical_phase_summary
+    - predecessor_status
+    - successor_status
+    - short_term_target
+    - is_short_term_task
+    - is_heatmap_queue_task
+    - factored_rem_duration
+    - factored_actual_etc
+    - task_total_weightage
+    - task_max_weightage
+    - task_completed_weightage
+    - task_roll_up_type
+    - task_created_on
+    - task_modified_on
+    - last_modified_on
+    - task_attachment_count
+    - task_expected_alap_start_date
+    - task_expected_alap_finish_date
+    - task_expected_asap_start_date
+    - task_expected_asap_finish_date
+    - task_baseline_alap_start_date
+    - task_baseline_alap_finish_date
+    - task_baseline_asap_start_date
+    - task_baseline_asap_finish_date
+    - workflow_name
+    - task_group_name
+    - rollup_delay_days
+    - participant_names
+    essential:
+    - task_uid
+    - task_id
+    - task_name
+    - task_completion
+    - task_expected_finish_date
+    optional:
+    - task_baseline_start_date
+    - task_baseline_finish_date
+    - task_expected_start_date
+    - task_actual_start_date
+    - task_actual_finish_date
+    - planned_task_completion
+    - task_is_critical
+    - task_is_milestone
+    - floating_time_gap
+    - is_flowobstacle_task
+    - task_duration
+    - task_rem_duration
+    - task_completed_duration
+    - task_stagnancy
+    - last_x_days_completion
+    on_request:
+    - task_isdelayed
+    - task_latest_remark
+    - task_fullkit_readiness_date
+    - task_etc
+    - task_rts_start_date
+    - milestone_actual_etc
+    - critical_phase_summary
+    - predecessor_status
+    - successor_status
+    - short_term_target
+    - is_short_term_task
+    - is_heatmap_queue_task
+    - factored_rem_duration
+    - factored_actual_etc
+    - task_total_weightage
+    - task_max_weightage
+    - task_completed_weightage
+    - task_roll_up_type
+    - task_created_on
+    - task_modified_on
+    - last_modified_on
+    - task_attachment_count
+    - task_expected_alap_start_date
+    - task_expected_alap_finish_date
+    - task_expected_asap_start_date
+    - task_expected_asap_finish_date
+    - task_baseline_alap_start_date
+    - task_baseline_alap_finish_date
+    - task_baseline_asap_start_date
+    - task_baseline_asap_finish_date
+    query_only:
+    - project_id_id
+    - task_manager_id
+    - workflow_id
+    - parent_task_id_id
+    - department_id_id
+    - milestone_baseline_etc
+    - task_group_id_id
+    - task_status_id
+    - task_is_deleted
+    - gant_task_type
+    - gantt_id
+    - gantt_parent_task_id
+    - task_delay_indicator
+    - task_elapsed
+    - issue_count
+    - task_custom_attribute
+    - task_tpr_sorting_index
+    - task_created_by_id
+    - task_modified_by_id
+    technical:
+    - subtask_custom_attribute_group_id
+    - task_sequence
+    do_not_use:
+    - task_elapsed_days
+    - task_horizon
+    derived:
+    - as: project_name
+      label: Project
+      sql: tp.project_name
+      tier: essential
+      join: JOIN vpp_planning_projects tp ON tp.project_id = t.project_id_id
+      replaces: project_id_id
+    - as: task_status
+      label: Status
+      sql: ts.task_status
+      tier: essential
+      join: LEFT JOIN vpp_planning_taskstatus ts ON ts.task_status_id = t.task_status_id
+      replaces: task_status_id
+    - as: task_manager_name
+      label: Task Manager
+      sql: REPLACE(tm.username, '_deleted_user_' || tm.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users tm ON tm.id = t.task_manager_id
+      replaces: task_manager_id
+    - as: department_name
+      label: Department
+      sql: td.department_name
+      tier: optional
+      join: LEFT JOIN vpp_masterdata_departments td ON td.department_id = t.department_id_id
+      replaces: department_id_id
+    - as: workflow_name
+      label: Workflow
+      sql: tw.workflow_name
+      tier: on_request
+      join: LEFT JOIN vpp_masterdata_workflows tw ON tw.workflow_id = t.workflow_id
+      replaces: workflow_id
+    - as: task_group_name
+      label: Task Group
+      sql: tg.task_group_name
+      tier: on_request
+      join: LEFT JOIN vpp_masterdata_taskgroups tg ON tg.task_group_id = t.task_group_id_id
+      replaces: task_group_id_id
+    - as: delay_flag
+      label: Delayed
+      sql: COALESCE((t.task_delay_indicator->>'task_is_delayed')::boolean, false)
+      tier: optional
+      replaces: task_delay_indicator
+      note: What the task screens show as delayed.
+    - as: delay_days
+      label: Delay (working days)
+      sql: (t.task_delay_indicator->>'delay_on_task_progress')::numeric
+      tier: optional
+      replaces: task_delay_indicator
+    - as: rollup_delay_days
+      label: Roll-up Delay (working days)
+      sql: (t.task_delay_indicator->>'roll_up_delay_on_subtask_progress')::numeric
+      tier: on_request
+      replaces: task_delay_indicator
+    - as: elapsed_working_days
+      label: Elapsed (working days)
+      sql: (t.task_elapsed->>'elapsed_with_actual_start')::numeric
+      tier: optional
+      replaces: task_elapsed
+    - as: participant_names
+      label: Participants
+      sql: (SELECT string_agg(REPLACE(pu.username, '_deleted_user_' || pu.id, ''), ', ') FROM vpp_planning_taskparticipants
+        x JOIN vpp_users pu ON pu.id = x.task_participant_id WHERE x.task_id_id = t.task_uid)
+      tier: on_request
+    - as: milestone_target_date
+      label: Milestone Target
+      sql: timezone('Asia/Kolkata', to_timestamp(COALESCE(t.milestone_baseline_etc, t.task_baseline_start_date)))::date
+      tier: optional
+      replaces: milestone_baseline_etc
+      note: Milestones only.
+    labels:
+      task_uid: Task UID
+      task_id: WBS ID
+      task_name: Task
+      task_completion: Completion %
+      task_expected_finish_date: Expected Finish
+      task_baseline_start_date: Planned Start
+      task_baseline_finish_date: Planned Finish
+      task_expected_start_date: Expected Start
+      task_actual_start_date: Actual Start
+      task_actual_finish_date: Actual Finish
+      planned_task_completion: Planned Completion %
+      task_isdelayed: Behind Planned Completion
+      task_is_critical: Critical
+      task_is_milestone: Milestone
+      floating_time_gap: Float (working days)
+      is_flowobstacle_task: Near-critical (incl. critical)
+      task_duration: Duration (working days)
+      task_rem_duration: Remaining (working days)
+      task_completed_duration: Completed (working days)
+      task_stagnancy: Days Without Progress
+      task_latest_remark: Latest Remark
+      last_x_days_completion: Progress, last 7 days (pts)
+    transforms:
+      task_expected_finish_date: epoch_date
+      task_baseline_start_date: epoch_date
+      task_baseline_finish_date: epoch_date
+      task_expected_start_date: epoch_date
+      task_actual_start_date: epoch_date
+      task_actual_finish_date: epoch_date
+      milestone_actual_etc: epoch_date
+      task_fullkit_readiness_date: epoch_date
+      task_etc: epoch_date
+      task_rts_start_date: epoch_date
+      factored_actual_etc: epoch_date
+      task_expected_alap_start_date: epoch_date
+      task_expected_alap_finish_date: epoch_date
+      task_expected_asap_start_date: epoch_date
+      task_expected_asap_finish_date: epoch_date
+      task_baseline_alap_start_date: epoch_date
+      task_baseline_alap_finish_date: epoch_date
+      task_baseline_asap_start_date: epoch_date
+      task_baseline_asap_finish_date: epoch_date
+      task_created_on: epoch_datetime
+      task_modified_on: epoch_datetime
+      last_modified_on: epoch_datetime
+      task_completion: percent
+      planned_task_completion: percent
+      last_x_days_completion: percent
+      floating_time_gap: days
+      task_duration: days
+      task_rem_duration: days
+      task_completed_duration: days
+      task_stagnancy: days
+      factored_rem_duration: days
+    row_groups:
+    - project_name
+    - task_status
+    value_columns:
+    - column: task_rem_duration
+      aggFunc: sum
+    - column: task_completion
+      aggFunc: avg
+    notes:
+    - Always output the project with a task (task names repeat). Output the WBS task_id next to the name; keep task_uid
+      as the reference id, shown last.
+    - 'task_status_id is never shown: output the status name (derived task_status).'
+    - gant_task_type is used to tell leaf / parent / milestone apart in filters; describe the kind in words if the
+      user needs it, not with the raw value 'project' (which would read as a project).
+    - 'Stagnancy and elapsed days are meaningful only for Started tasks (task_status_id = 3); the task screens blank
+      them otherwise: CASE WHEN t.task_status_id = 3 THEN t.task_stagnancy END.'
+    - is_flowobstacle_task is also true for critical tasks; add task_is_critical = false to match the Flow Obstacle
+      screen.
+    - last_x_days_completion covers a configurable window (7 days by default); a task with no history in the window
+      shows its full completion.
+    - task_latest_remark is free text; show it only when the question is about remarks.
+  vpp_planning_taskstatus:
+    label: Task status
+    identifier: task_status_id
+    name_column: task_status
+    priority:
+    - task_status
+    hidden:
+    - color
+    essential:
+    - task_status
+    optional:
+    - short_name
+    - display_text
+    on_request:
+    - color
+    query_only:
+    - task_status_id
+    notes:
+    - Use task_status (or display_text) as the label. short_name (NS, RTS) only when the user uses the codes.
+  vpp_planning_taskshierarchy:
+    label: Task hierarchy
+    identifier: id
+    priority: []
+    hidden: []
+    optional:
+    - depth
+    query_only:
+    - gantt_id
+    - gantt_task_uid
+    - gantt_parent_task_id
+    - project_id
+    technical:
+    - id
+    labels:
+      depth: Level Below
+    notes:
+    - A join table for ancestor / descendant questions. Output the tasks' own columns; show depth as a level only
+      when the question is about the structure.
+  vpp_planning_links:
+    label: Dependency
+    identifier: link_id
+    priority:
+    - dependency_type
+    - lag
+    - new_lag
+    hidden:
+    - introduced_lag
+    optional:
+    - lag
+    - new_lag
+    on_request:
+    - introduced_lag
+    query_only:
+    - link_type
+    - gantt_source_id
+    - gantt_target_id
+    - project_id
+    technical:
+    - link_id
+    derived:
+    - as: dependency_type
+      label: Dependency
+      sql: CASE l.link_type WHEN '0' THEN 'Finish-to-Start' WHEN '1' THEN 'Start-to-Start' WHEN '2' THEN 'Finish-to-Finish'
+        WHEN '3' THEN 'Start-to-Finish' END
+      tier: essential
+      replaces: link_type
+    labels:
+      lag: Planned Lag (working days)
+      new_lag: Current Lag (working days)
+      introduced_lag: FOL Lag (working days)
+    notes:
+    - Output the predecessor and successor task names (joined through gantt_id), never the UUIDs.
+    - 'Show only one lag unless comparing: new_lag for in_execution projects, lag otherwise.'
+    - When FOL scheduling is on, lag already includes introduced_lag; the planner's own lag is lag - introduced_lag.
+  vpp_planning_taskparticipants:
+    label: Task participant
+    identifier: id
+    priority: []
+    hidden: []
+    query_only:
+    - task_id_id
+    - task_participant_id
+    technical:
+    - id
+    notes:
+    - Output participant names (see vpp_planning_tasks derived participant_names).
+  vpp_planning_taskdelaydetail:
+    label: Task delay reason
+    identifier: id
+    priority:
+    - major_reason_name
+    - minor_reason_name
+    - description
+    hidden: []
+    essential:
+    - description
+    optional:
+    - taskdelaydetail_updated_on
+    query_only:
+    - task_uid
+    - major_reason_id
+    - minor_reason_id
+    - taskdelaydetail_updated_by_id
+    technical:
+    - id
+    derived:
+    - as: major_reason_name
+      label: Major Reason
+      sql: dmr.major_reason_name
+      tier: essential
+      join: LEFT JOIN vpp_masterdata_majorreasons dmr ON dmr.major_reason_id = dd.major_reason_id
+      replaces: major_reason_id
+    - as: minor_reason_name
+      label: Minor Reason
+      sql: dmn.minor_reason_name
+      tier: essential
+      join: LEFT JOIN vpp_masterdata_minorreasons dmn ON dmn.minor_reason_id = dd.minor_reason_id
+      replaces: minor_reason_id
+    labels:
+      description: Delay Explanation
+      taskdelaydetail_updated_on: Recorded On
+    transforms:
+      taskdelaydetail_updated_on: epoch_datetime
+    row_groups:
+    - major_reason_name
+  vpp_planning_rebaselinelog:
+    label: Baseline version
+    identifier: id
+    priority:
+    - name
+    - version
+    - task_baseline_start_date
+    - task_baseline_finish_date
+    hidden:
+    - task_baseline_alap_start_date
+    - task_baseline_alap_finish_date
+    - task_baseline_asap_start_date
+    - task_baseline_asap_finish_date
+    essential:
+    - name
+    - version
+    - task_baseline_start_date
+    - task_baseline_finish_date
+    optional:
+    - task_duration
+    - created_on
+    on_request:
+    - task_baseline_alap_start_date
+    - task_baseline_alap_finish_date
+    - task_baseline_asap_start_date
+    - task_baseline_asap_finish_date
+    query_only:
+    - task_id
+    - project_id
+    technical:
+    - id
+    labels:
+      name: Baseline Version
+      version: Version No.
+      task_baseline_start_date: Planned Start
+      task_baseline_finish_date: Planned Finish
+      task_duration: Duration (working days)
+      created_on: Logged On
+    transforms:
+      task_baseline_start_date: epoch_date
+      task_baseline_finish_date: epoch_date
+      task_baseline_alap_start_date: epoch_date
+      task_baseline_alap_finish_date: epoch_date
+      task_baseline_asap_start_date: epoch_date
+      task_baseline_asap_finish_date: epoch_date
+      created_on: epoch_datetime
+    notes:
+    - name is 'Rebaseline N' or 'Milestone'; show it so the user can tell the two kinds apart.
+  vpp_planning_subtasks:
+    label: Subtask
+    identifier: subtask_id
+    name_column: subtask_name
+    priority:
+    - project_name
+    - task_name
+    - subtask_name
+    - subtask_status
+    - subtask_manager_name
+    - subtask_actual_completion_weightage
+    - stage_under_progress
+    - subtask_stagnancy
+    - subtask_id
+    hidden:
+    - subtask_latest_remark
+    - subtask_priority
+    - phase_unit
+    - subtask_relationship
+    - subtask_computed_duration
+    - subtask_created_on
+    - subtask_modified_on
+    - last_modified_on
+    - subtask_attachment_count
+    - issue_count
+    essential:
+    - subtask_id
+    - subtask_name
+    - subtask_actual_completion_weightage
+    optional:
+    - subtask_actual_start_date
+    - subtask_actual_finish_date
+    - stage_under_progress
+    - subtask_stagnancy
+    - subtask_elapsed_days
+    - subtask_planned_completion_weightage
+    - subtask_rem_weightage
+    - subtask_total_weightage
+    - completed_phase_count
+    - total_phase_count
+    - last_x_days_completion
+    on_request:
+    - subtask_latest_remark
+    - subtask_priority
+    - phase_unit
+    - subtask_relationship
+    - subtask_computed_duration
+    - subtask_created_on
+    - subtask_modified_on
+    - last_modified_on
+    - subtask_attachment_count
+    - issue_count
+    query_only:
+    - task_id
+    - gantt_id
+    - subtask_manager_id
+    - subtask_status_id
+    - subtask_is_deleted
+    - subtask_custom_attribute
+    - subtask_delay_indicator
+    - subtask_phase_json
+    - subtask_tpr_sorting_index
+    - subtask_created_by_id
+    - subtask_modified_by_id
+    do_not_use:
+    - subtask_isdelayed
+    derived:
+    - as: task_name
+      label: Task
+      sql: st.task_name
+      tier: essential
+      join: JOIN vpp_planning_tasks st ON st.task_uid = s.task_id
+      replaces: task_id
+    - as: project_name
+      label: Project
+      sql: sp.project_name
+      tier: essential
+      join: JOIN vpp_planning_tasks st2 ON st2.task_uid = s.task_id JOIN vpp_planning_projects sp ON sp.project_id
+        = st2.project_id_id
+    - as: subtask_status
+      label: Status
+      sql: COALESCE(sss.subtask_status, 'Not Started')
+      tier: essential
+      join: LEFT JOIN vpp_planning_subtaskstatus sss ON sss.subtask_status_id = s.subtask_status_id
+      replaces: subtask_status_id
+    - as: subtask_manager_name
+      label: Subtask Manager
+      sql: REPLACE(sm.username, '_deleted_user_' || sm.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users sm ON sm.id = s.subtask_manager_id
+      replaces: subtask_manager_id
+    - as: subtask_delay_flag
+      label: Delayed
+      sql: COALESCE((s.subtask_delay_indicator->>'subtask_is_delayed')::boolean, false)
+      tier: optional
+      replaces: subtask_delay_indicator
+    - as: subtask_delay_days
+      label: Delay (working days)
+      sql: (s.subtask_delay_indicator->>'delay_on_subtask_progress')::numeric
+      tier: optional
+      replaces: subtask_delay_indicator
+    labels:
+      subtask_id: Subtask ID
+      subtask_name: Subtask
+      subtask_actual_completion_weightage: Completion %
+      subtask_actual_start_date: Actual Start
+      subtask_actual_finish_date: Actual Finish
+      stage_under_progress: Current Phase
+      subtask_stagnancy: Days Without Progress
+      subtask_elapsed_days: Elapsed (working days)
+      subtask_planned_completion_weightage: Planned Completion %
+      subtask_rem_weightage: Remaining (days)
+      subtask_total_weightage: Duration (days)
+      subtask_latest_remark: Latest Remark
+      completed_phase_count: Phases Done
+      total_phase_count: Phases
+      last_x_days_completion: Progress, last 7 days (pts)
+    transforms:
+      subtask_actual_start_date: epoch_date
+      subtask_actual_finish_date: epoch_date
+      subtask_created_on: epoch_datetime
+      subtask_modified_on: epoch_datetime
+      last_modified_on: epoch_datetime
+      subtask_actual_completion_weightage: percent
+      subtask_planned_completion_weightage: percent
+      last_x_days_completion: percent
+      subtask_stagnancy: days
+      subtask_elapsed_days: days
+      subtask_rem_weightage: days
+      subtask_total_weightage: days
+      subtask_computed_duration: days
+    row_groups:
+    - task_name
+    - subtask_status
+    value_columns:
+    - column: subtask_rem_weightage
+      aggFunc: sum
+    notes:
+    - Label the *_weightage columns as durations or percentages (see labels); never call them weight.
+    - A subtask with no status id is Not Started (as on the subtask screen).
+    - Stagnancy and elapsed days freeze when a subtask finishes; show them for open subtasks only.
+    - Always output the task (and project) with a subtask.
+  vpp_planning_subtaskstatus:
+    label: Subtask status
+    identifier: subtask_status_id
+    name_column: subtask_status
+    priority:
+    - subtask_status
+    hidden:
+    - color
+    essential:
+    - subtask_status
+    optional:
+    - short_name
+    on_request:
+    - color
+    query_only:
+    - subtask_status_id
+  vpp_planning_subtaskparticipants:
+    label: Subtask participant
+    identifier: id
+    priority: []
+    hidden: []
+    query_only:
+    - subtask_id_id
+    - subtask_participants_id
+    technical:
+    - id
+  vpp_planning_remark:
+    label: Remark
+    identifier: remark_id
+    priority:
+    - remark_created_on
+    - remark_author
+    - remark
+    hidden: []
+    essential:
+    - remark
+    - remark_created_on
+    optional:
+    - host_status
+    query_only:
+    - host_id
+    - host_type
+    - remark_created_by_id
+    technical:
+    - remark_id
+    derived:
+    - as: remark_author
+      label: By
+      sql: REPLACE(ra.username, '_deleted_user_' || ra.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users ra ON ra.id = r.remark_created_by_id
+      replaces: remark_created_by_id
+    labels:
+      remark: Remark
+      remark_created_on: Written On
+      host_status: Status At The Time
+    transforms:
+      remark_created_on: epoch_datetime
+    notes:
+    - 'Strip HTML tags for display: regexp_replace(remark, ''<[^>]+>'', '''', ''g'').'
+    - Remark text is free text that may name people; show it only when the question is about remarks or comments.
+  vpp_planning_projectattachmentsmappings:
+    label: Project attachment
+    identifier: id
+    priority:
+    - file_name
+    - url
+    - added_on
+    hidden: []
+    optional:
+    - url
+    - added_on
+    query_only:
+    - project_id
+    - file_id
+    - added_by_id
+    technical:
+    - id
+    derived:
+    - as: file_name
+      label: File
+      sql: af.file_name
+      tier: essential
+      join: LEFT JOIN vpp_utility_fileupload af ON af.file_id = am.file_id
+      replaces: file_id
+    labels:
+      url: Link
+      added_on: Added On
+    transforms:
+      added_on: epoch_datetime
+    notes:
+    - A row is either a file (file_name) or a link (url); show whichever is filled.
+  vpp_planning_taskattachmentsmappings:
+    label: Task attachment
+    identifier: id
+    priority:
+    - file_name
+    - url
+    - added_on
+    hidden: []
+    optional:
+    - url
+    - added_on
+    query_only:
+    - task_id
+    - file_id
+    - added_by_id
+    technical:
+    - id
+    derived:
+    - as: file_name
+      label: File
+      sql: af.file_name
+      tier: essential
+      join: LEFT JOIN vpp_utility_fileupload af ON af.file_id = am.file_id
+      replaces: file_id
+    labels:
+      url: Link
+      added_on: Added On
+    transforms:
+      added_on: epoch_datetime
+    notes:
+    - A row is either a file (file_name) or a link (url); show whichever is filled.
+  vpp_planning_subtaskattachmentsmappings:
+    label: Subtask attachment
+    identifier: id
+    priority:
+    - file_name
+    - url
+    - added_on
+    hidden: []
+    optional:
+    - url
+    - added_on
+    query_only:
+    - subtask_id
+    - file_id
+    - added_by_id
+    technical:
+    - id
+    derived:
+    - as: file_name
+      label: File
+      sql: af.file_name
+      tier: essential
+      join: LEFT JOIN vpp_utility_fileupload af ON af.file_id = am.file_id
+      replaces: file_id
+    labels:
+      url: Link
+      added_on: Added On
+    transforms:
+      added_on: epoch_datetime
+    notes:
+    - A row is either a file (file_name) or a link (url); show whichever is filled.
+  vpp_utility_fileupload:
+    label: File
+    identifier: file_id
+    name_column: file_name
+    priority:
+    - file_name
+    hidden: []
+    essential:
+    - file_name
+    optional:
+    - file_size
+    - file_uploaded
+    query_only:
+    - file_id
+    - file_isdeleted
+    - file_uploaded_by_id
+    labels:
+      file_name: File
+      file_size: Size
+      file_uploaded: Uploaded On
+  vpp_issue_issues:
+    label: Issue
+    identifier: issue_id
+    name_column: issue_description
+    priority:
+    - issue_id
+    - issue_description
+    - raised_on_item
+    - issue_status_label
+    - issue_owner_name
+    - issue_raised_on
+    - issue_elapsed_days
+    - raised_by_name
+    - major_reason_name
+    hidden:
+    - issue_escalated_level
+    - issue_escalated_users
+    - issue_modified_on
+    - current_issue_owner_modified_on
+    - minor_reason_name
+    - closed_by_name
+    essential:
+    - issue_id
+    - issue_description
+    - issue_raised_on
+    optional:
+    - issue_elapsed_days
+    - issue_closed_on
+    on_request:
+    - issue_escalated_level
+    - issue_escalated_users
+    - issue_modified_on
+    - current_issue_owner_modified_on
+    query_only:
+    - issue_status
+    - issue_owner_id
+    - issue_raised_by_id
+    - major_reason_id
+    - minor_reason_id
+    - issue_is_deleted
+    - issue_modified_by_id
+    - issue_closed_by_id
+    derived:
+    - as: raised_on_item
+      label: Raised On (item)
+      sql: (SELECT string_agg(CASE hm.issue_type WHEN 'common' THEN hp.project_name WHEN 'task' THEN ht.task_name
+        WHEN 'subtask' THEN hs.subtask_name END, ', ') FROM vpp_issue_issuehostmappings hm LEFT JOIN vpp_planning_projects
+        hp ON hm.issue_type = 'common' AND hp.project_id = hm.host_id LEFT JOIN vpp_planning_tasks ht ON hm.issue_type
+        = 'task' AND ht.task_uid = hm.host_id LEFT JOIN vpp_planning_subtasks hs ON hm.issue_type = 'subtask' AND
+        hs.subtask_id = hm.host_id WHERE hm.issue_id = i.issue_id)
+      tier: essential
+    - as: issue_status_label
+      label: Status
+      sql: CASE i.issue_status WHEN 1 THEN 'Open' WHEN 2 THEN 'Resolved, awaiting closure' WHEN 3 THEN 'Closed'
+        END
+      tier: essential
+      replaces: issue_status
+    - as: issue_owner_name
+      label: Owner
+      sql: REPLACE(io.username, '_deleted_user_' || io.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users io ON io.id = i.issue_owner_id
+      replaces: issue_owner_id
+    - as: raised_by_name
+      label: Raised By
+      sql: REPLACE(ir.username, '_deleted_user_' || ir.id, '')
+      tier: optional
+      join: LEFT JOIN vpp_users ir ON ir.id = i.issue_raised_by_id
+      replaces: issue_raised_by_id
+    - as: major_reason_name
+      label: Reason
+      sql: imr.major_reason_name
+      tier: optional
+      join: LEFT JOIN vpp_masterdata_majorreasons imr ON imr.major_reason_id = i.major_reason_id
+      replaces: major_reason_id
+    - as: minor_reason_name
+      label: Sub-reason
+      sql: imn.minor_reason_name
+      tier: on_request
+      join: LEFT JOIN vpp_masterdata_minorreasons imn ON imn.minor_reason_id = i.minor_reason_id
+      replaces: minor_reason_id
+    - as: closed_by_name
+      label: Closed By
+      sql: REPLACE(ic.username, '_deleted_user_' || ic.id, '')
+      tier: on_request
+      join: LEFT JOIN vpp_users ic ON ic.id = i.issue_closed_by_id
+      replaces: issue_closed_by_id
+    labels:
+      issue_id: Issue ID
+      issue_description: Issue
+      issue_raised_on: Raised On
+      issue_elapsed_days: Age (working days)
+      issue_closed_on: Closed On
+    transforms:
+      issue_raised_on: epoch_date
+      issue_closed_on: epoch_date
+      issue_modified_on: epoch_datetime
+      current_issue_owner_modified_on: epoch_datetime
+    row_groups:
+    - issue_status_label
+    - major_reason_name
+    value_columns:
+    - column: issue_elapsed_days
+      aggFunc: avg
+    notes:
+    - 'Always say where an issue was raised (project / task / subtask) and on which item: derive it from vpp_issue_issuehostmappings,
+      one row per issue (string_agg when an issue has several hosts).'
+  vpp_issue_issuehostmappings:
+    label: Issue host
+    identifier: id
+    priority: []
+    hidden: []
+    query_only:
+    - issue_id
+    - host_id
+    - issue_type
+    technical:
+    - id
+    derived:
+    - as: raised_on_level
+      label: Raised At (level)
+      sql: CASE m.issue_type WHEN 'common' THEN 'Project' WHEN 'task' THEN 'Task' WHEN 'subtask' THEN 'Subtask'
+        END
+      tier: optional
+      replaces: issue_type
+    notes:
+    - 'Never output host_id: it means a project, task or subtask id depending on issue_type. Output the host''s
+      name instead (project_name, task_name or subtask_name via the matching join).'
+  vpp_issue_issueremarksmappings:
+    label: Issue comment
+    identifier: id
+    priority:
+    - remark
+    - added_on
+    - comment_author
+    hidden: []
+    essential:
+    - remark
+    - added_on
+    query_only:
+    - issue_id
+    - added_by_id
+    technical:
+    - id
+    derived:
+    - as: comment_author
+      label: By
+      sql: REPLACE(ica.username, '_deleted_user_' || ica.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users ica ON ica.id = irm.added_by_id
+      replaces: added_by_id
+    labels:
+      remark: Comment
+      added_on: Added On
+    transforms:
+      added_on: epoch_datetime
+  vpp_issue_issueresolutionmappings:
+    label: Issue resolution
+    identifier: id
+    priority:
+    - resolution
+    - added_on
+    - resolution_kind
+    - resolution_author
+    hidden: []
+    essential:
+    - resolution
+    - added_on
+    query_only:
+    - issue_id
+    - added_by_id
+    - resolution_type
+    technical:
+    - id
+    derived:
+    - as: resolution_kind
+      label: Kind
+      sql: CASE rm.resolution_type WHEN 'resolution' THEN 'Resolution' WHEN 'resolution_rejection' THEN 'Rejection'
+        END
+      tier: essential
+      replaces: resolution_type
+    - as: resolution_author
+      label: By
+      sql: REPLACE(rsa.username, '_deleted_user_' || rsa.id, '')
+      tier: essential
+      join: LEFT JOIN vpp_users rsa ON rsa.id = rm.added_by_id
+      replaces: added_by_id
+    labels:
+      resolution: Resolution / Rejection Note
+      added_on: Added On
+    transforms:
+      added_on: epoch_datetime
+  vpp_masterdata_heatmapteams:
+    label: Heatmap team
+    identifier: team_id
+    name_column: team_name
+    priority:
+    - team_name
+    - team_load
+    - threshold_green_end
+    - threshold_yellow_end
+    - team_type
+    hidden:
+    - manual_flow_rate
+    - historical_flow_rate
+    - applicable_for_etc
+    - heatmap_created_on
+    - heatmap_created_by
+    - heatmap_modified_on
+    - heatmap_modified_by
+    essential:
+    - team_name
+    - team_load
+    - threshold_green_end
+    - threshold_yellow_end
+    optional:
+    - team_type
+    - team_load_30_days
+    - team_load_60_days
+    - team_load_90_days
+    - team_load_all
+    - current_flow_rate
+    on_request:
+    - manual_flow_rate
+    - historical_flow_rate
+    - applicable_for_etc
+    - heatmap_created_on
+    - heatmap_created_by
+    - heatmap_modified_on
+    - heatmap_modified_by
+    query_only:
+    - team_id
+    - source_id
+    - heatmap_enabled
+    - is_default_config
+    - enable_heatmap_calculation
+    technical:
+    - user_sequence_index
+    - severity_seqnence_index
+    - team_load_json
+    - team_json
+    labels:
+      team_name: Team
+      team_load: Queue (days)
+      threshold_green_end: Green Up To (days)
+      threshold_yellow_end: Yellow Up To (days)
+      team_type: Team Type
+      team_load_30_days: Queue, next 30 days
+      team_load_60_days: Queue, next 60 days
+      team_load_90_days: Queue, next 90 days
+      team_load_all: Queue, all open work
+      current_flow_rate: Flow Rate
+    transforms:
+      team_load: days
+      team_load_30_days: days
+      team_load_60_days: days
+      team_load_90_days: days
+      team_load_all: days
+      heatmap_created_on: epoch_datetime
+      heatmap_modified_on: epoch_datetime
+    notes:
+    - 'No row_groups or value_columns: loads must never be summed across teams (one subtask counts for every team
+      its manager belongs to).'
+    - Rows with team_type 'user' or 'rm' are one person's workload. Include them only when the asker is that person,
+      manages them, or holds a role allowed to see everyone's load; otherwise filter team_type IN ('team', 'department').
+  vpp_planning_projectwisequeuedetails:
+    label: Project queue on a team
+    identifier: queue_details_id
+    priority:
+    - project_name
+    - team_name
+    - queue_duration
+    - queue_total_subtasks
+    - entry_date
+    hidden:
+    - cum_queue_duration
+    - cum_queue_total_subtasks
+    - cum_active_subtask_count
+    - cum_future_subtask_duration
+    - cum_future_queue_time
+    - cum_all_fol
+    - future_subtask_duration
+    - all_fol_duration
+    essential:
+    - queue_duration
+    - queue_total_subtasks
+    optional:
+    - entry_date
+    - heat_color
+    - active_subtask_count
+    - future_queue_time
+    - closure_rate
+    - scope_in_project
+    on_request:
+    - cum_queue_duration
+    - cum_queue_total_subtasks
+    - cum_active_subtask_count
+    - cum_future_subtask_duration
+    - cum_future_queue_time
+    - cum_all_fol
+    - future_subtask_duration
+    - all_fol_duration
+    query_only:
+    - project_id
+    - team_id_id
+    technical:
+    - queue_details_id
+    derived:
+    - as: project_name
+      label: Project
+      sql: qp.project_name
+      tier: essential
+      join: JOIN vpp_planning_projects qp ON qp.project_id = q.project_id
+      replaces: project_id
+    - as: team_name
+      label: Team
+      sql: qh.team_name
+      tier: essential
+      join: JOIN vpp_masterdata_heatmapteams qh ON qh.team_id = q.team_id_id
+      replaces: team_id_id
+    labels:
+      queue_duration: Queue (days)
+      queue_total_subtasks: Queued Subtasks
+      entry_date: Snapshot Date
+      heat_color: Heat
+      active_subtask_count: Active Subtasks
+      future_queue_time: Future Queue (days)
+      closure_rate: Closure Rate
+      scope_in_project: Subtasks In Scope
+    transforms:
+      entry_date: epoch_date
+      queue_duration: days
+      future_queue_time: days
+    notes:
+    - 'Snapshots: filter the latest entry_date unless the question is about change over time. No value_columns,
+      because summing snapshots multiplies the totals.'
+    - cum_* are running totals across projects; show them only when the user asks for cumulative figures.
+  vpp_masterdata_portfolios:
+    label: Portfolio
+    identifier: portfolio_id
+    name_column: portfolio_name
+    priority:
+    - portfolio_name
+    hidden:
+    - portfolio_created_on
+    - portfolio_created_by
+    - portfolio_modified_on
+    - portfolio_modified_by
+    essential:
+    - portfolio_name
+    optional:
+    - portfolio_description
+    on_request:
+    - portfolio_created_on
+    - portfolio_created_by
+    - portfolio_modified_on
+    - portfolio_modified_by
+    query_only:
+    - portfolio_id
+    - portfolio_is_deleted
+    transforms:
+      portfolio_created_on: epoch_datetime
+      portfolio_modified_on: epoch_datetime
+  vpp_masterdata_departments:
+    label: Department
+    identifier: department_id
+    name_column: department_name
+    priority:
+    - department_name
+    hidden:
+    - department_created_on
+    - department_created_by
+    - department_modified_on
+    - department_modified_by
+    essential:
+    - department_name
+    optional:
+    - department_description
+    on_request:
+    - department_created_on
+    - department_created_by
+    - department_modified_on
+    - department_modified_by
+    query_only:
+    - department_id
+    - department_is_deleted
+    transforms:
+      department_created_on: epoch_datetime
+      department_modified_on: epoch_datetime
+  vpp_masterdata_projectgroups:
+    label: Project group
+    identifier: project_group_id
+    name_column: project_group_name
+    priority:
+    - project_group_name
+    hidden: []
+    essential:
+    - project_group_name
+    query_only:
+    - project_group_id
+  vpp_masterdata_taskgroups:
+    label: Task group
+    identifier: task_group_id
+    name_column: task_group_name
+    priority:
+    - task_group_name
+    hidden: []
+    essential:
+    - task_group_name
+    query_only:
+    - task_group_id
+  vpp_masterdata_majorreasons:
+    label: Major reason
+    identifier: major_reason_id
+    name_column: major_reason_name
+    priority:
+    - major_reason_name
+    hidden:
+    - major_reason_created_on
+    - major_reason_created_by
+    - major_reason_modified_on
+    - major_reason_modified_by
+    essential:
+    - major_reason_name
+    on_request:
+    - major_reason_created_on
+    - major_reason_created_by
+    - major_reason_modified_on
+    - major_reason_modified_by
+    query_only:
+    - major_reason_id
+    - major_reason_is_deleted
+    transforms:
+      major_reason_created_on: epoch_datetime
+      major_reason_modified_on: epoch_datetime
+  vpp_masterdata_minorreasons:
+    label: Minor reason
+    identifier: minor_reason_id
+    name_column: minor_reason_name
+    priority:
+    - minor_reason_name
+    hidden:
+    - minor_reason_created_on
+    - minor_reason_created_by
+    - minor_reason_modified_on
+    - minor_reason_modified_by
+    essential:
+    - minor_reason_name
+    on_request:
+    - minor_reason_created_on
+    - minor_reason_created_by
+    - minor_reason_modified_on
+    - minor_reason_modified_by
+    query_only:
+    - minor_reason_id
+    - minor_reason_is_deleted
+    - major_reason_id
+    transforms:
+      minor_reason_created_on: epoch_datetime
+      minor_reason_modified_on: epoch_datetime
+  vpp_masterdata_workflows:
+    label: Workflow
+    identifier: workflow_id
+    name_column: workflow_name
+    priority:
+    - workflow_name
+    hidden:
+    - workflow_is_applicable_for_etc
+    - workflow_is_system_defined
+    - workflow_is_hidden
+    - workflow_created_on
+    - workflow_created_by
+    - workflow_modified_on
+    - workflow_modified_by
+    essential:
+    - workflow_name
+    optional:
+    - workflow_is_critical
+    on_request:
+    - workflow_is_applicable_for_etc
+    - workflow_is_system_defined
+    - workflow_is_hidden
+    - workflow_created_on
+    - workflow_created_by
+    - workflow_modified_on
+    - workflow_modified_by
+    query_only:
+    - workflow_id
+    - workflow_is_deleted
+    transforms:
+      workflow_created_on: epoch_datetime
+      workflow_modified_on: epoch_datetime
+  vpp_masterdata_phases:
+    label: Phase
+    identifier: phase_id
+    name_column: phase_name
+    priority:
+    - phase_name
+    - phase_sequence_index
+    - phase_type
+    hidden:
+    - phase_created_on
+    - phase_created_by
+    - phase_modified_on
+    - phase_modified_by
+    essential:
+    - phase_name
+    - phase_sequence_index
+    - phase_type
+    optional:
+    - phase_weightage
+    - phase_is_critical
+    - phase_target_value
+    - phase_unit
+    on_request:
+    - phase_created_on
+    - phase_created_by
+    - phase_modified_on
+    - phase_modified_by
+    query_only:
+    - phase_id
+    - phase_code
+    - workflow_id
+    - phase_is_deleted
+    labels:
+      phase_name: Phase
+      phase_sequence_index: Order
+      phase_type: Type
+    transforms:
+      phase_created_on: epoch_datetime
+      phase_modified_on: epoch_datetime
+    notes:
+    - phase_type spelling varies ('Binary', 'PERCENTAGE', 'Quantitative'); display it in title case.
+  vpp_masterdata_holidays:
+    label: Holiday
+    identifier: holiday_id
+    name_column: holiday_description
+    priority:
+    - holiday_description
+    - holiday_date
+    hidden:
+    - day_of_week
+    - holiday_recurring
+    essential:
+    - holiday_description
+    - holiday_date
+    on_request:
+    - day_of_week
+    - holiday_recurring
+    query_only:
+    - holiday_id
+    - holiday_is_deleted
+    labels:
+      holiday_description: Holiday
+      holiday_date: Date
+    transforms:
+      holiday_date: epoch_date
+    notes:
+    - day_of_week and holiday_recurring have undocumented values; show them raw only on request.
+  vpp_masterdata_tags:
+    label: Tag
+    identifier: tag_id
+    name_column: tag_name
+    priority:
+    - tag_name
+    hidden:
+    - color
+    essential:
+    - tag_name
+    on_request:
+    - color
+    query_only:
+    - tag_id
+  vpp_masterdata_tagmapping:
+    label: Tag assignment
+    identifier: mapping_id
+    priority: []
+    hidden: []
+    query_only:
+    - tag_id
+    - entity_type
+    - entity_id
+    technical:
+    - mapping_id
+  vpp_masterdata_teams:
+    label: Team
+    identifier: team_id
+    name_column: team_name
+    priority:
+    - team_name
+    hidden:
+    - team_created_on
+    - team_created_by
+    - team_modified_on
+    - team_modified_by
+    essential:
+    - team_name
+    optional:
+    - alternate_team_name
+    - team_type
+    - team_category
+    on_request:
+    - team_created_on
+    - team_created_by
+    - team_modified_on
+    - team_modified_by
+    query_only:
+    - team_id
+    - team_is_deleted
+    transforms:
+      team_created_on: epoch_datetime
+      team_modified_on: epoch_datetime
+  vpp_masterdata_mappings:
+    label: Membership mapping
+    identifier: mapping_id
+    priority: []
+    hidden: []
+    query_only:
+    - e1type_e2type
+    - entity1_id
+    - entity2_id
+    technical:
+    - mapping_id
+    notes:
+    - Join-only. Output the resolved names (user, portfolio, department, team), never entity ids.
+  vpp_masterdata_resourcemanagersmapping:
+    label: Resource manager mapping
+    identifier: resourcemanager_mapping_id
+    priority: []
+    hidden:
+    - resourcemanager_created_on
+    - resourcemanager_created_by
+    - resourcemanager_modified_on
+    - resourcemanager_modified_by
+    on_request:
+    - resourcemanager_created_on
+    - resourcemanager_created_by
+    - resourcemanager_modified_on
+    - resourcemanager_modified_by
+    query_only:
+    - resourcemanager_id
+    - user_id
+    - resourcemanager_is_deleted
+    technical:
+    - resourcemanager_mapping_id
+    transforms:
+      resourcemanager_created_on: epoch_datetime
+      resourcemanager_modified_on: epoch_datetime
+    notes:
+    - Join-only. Output manager and user names.
+  vpp_masterdata_reportingmanagersmapping:
+    label: Reporting manager mapping
+    identifier: reportingmanager_mapping_id
+    priority: []
+    hidden:
+    - reportingmanager_created_on
+    - reportingmanager_created_by
+    - reportingmanager_modified_on
+    - reportingmanager_modified_by
+    on_request:
+    - reportingmanager_created_on
+    - reportingmanager_created_by
+    - reportingmanager_modified_on
+    - reportingmanager_modified_by
+    query_only:
+    - reportingmanager_id
+    - user_id
+    - reportingmanager_is_deleted
+    technical:
+    - reportingmanager_mapping_id
+    transforms:
+      reportingmanager_created_on: epoch_datetime
+      reportingmanager_modified_on: epoch_datetime
+    notes:
+    - Join-only. Output manager and user names.
+  vpp_planning_projectshistory:
+    label: Project snapshot
+    identifier: history_id
+    priority:
+    - history_created_on
+    - project_name
+    - project_completion
+    - status_color
+    - project_etc
+    - project_predicted_delay
+    hidden:
+    - project_code
+    - project_actual_start_date
+    - project_start_date
+    - project_planned_due_date
+    - project_internal_due_date
+    - project_duration
+    - project_rem_duration
+    - project_buffer_duration
+    - project_buffer
+    - near_cc
+    - project_slack
+    - project_is_slack_applicable
+    - project_is_feeder_buffer_applicable
+    - scheduling_logic
+    - project_task_rts_config
+    - project_rebaseline_type
+    - expected_rebaseline_type
+    - project_overwrite_task_baseline_dates
+    - project_last_rebaselined_on
+    - last_successful_buffer_run_on
+    - factored_project_etc
+    - current_quarter_progress
+    - next_quarter_target
+    - first_rfs_date
+    - project_custom_attribute
+    - project_created_on
+    - project_modified_on
+    essential:
+    - history_created_on
+    - project_id
+    - project_name
+    - project_completion
+    - status_color
+    - project_etc
+    optional:
+    - project_penetration
+    - project_predicted_delay
+    - project_planned_completion
+    - project_due_date
+    - project_status
+    - project_priority
+    - project_completed_progress
+    - project_expected_progress
+    on_request:
+    - project_code
+    - project_actual_start_date
+    - project_start_date
+    - project_planned_due_date
+    - project_internal_due_date
+    - project_duration
+    - project_rem_duration
+    - project_buffer_duration
+    - project_buffer
+    - near_cc
+    - project_slack
+    - project_is_slack_applicable
+    - project_is_feeder_buffer_applicable
+    - scheduling_logic
+    - project_task_rts_config
+    - project_rebaseline_type
+    - expected_rebaseline_type
+    - project_overwrite_task_baseline_dates
+    - project_last_rebaselined_on
+    - last_successful_buffer_run_on
+    - factored_project_etc
+    - current_quarter_progress
+    - next_quarter_target
+    - first_rfs_date
+    - project_custom_attribute
+    - project_created_on
+    - project_modified_on
+    query_only:
+    - portfolio_id
+    - project_manager_id
+    - project_group_id
+    - project_created_by_id
+    - project_modified_by_id
+    - project_is_deleted
+    technical:
+    - history_id
+    do_not_use:
+    - original_etc
+    labels:
+      history_created_on: Snapshot Date
+      project_completion: Completion %
+      status_color: Health
+      project_etc: ETC
+      project_penetration: Buffer Consumed %
+      project_predicted_delay: Predicted Delay (working days)
+      project_planned_completion: Time Elapsed %
+    transforms:
+      history_created_on: epoch_date
+      status_color: health_colour
+      project_etc: epoch_date
+      project_due_date: epoch_date
+      project_actual_start_date: epoch_date
+      project_start_date: epoch_date
+      project_planned_due_date: epoch_date
+      project_internal_due_date: epoch_date
+      project_last_rebaselined_on: epoch_date
+      factored_project_etc: epoch_date
+      first_rfs_date: epoch_date
+      project_created_on: epoch_datetime
+      project_modified_on: epoch_datetime
+      last_successful_buffer_run_on: epoch_datetime
+      project_completion: percent
+      project_penetration: percent
+      project_planned_completion: percent
+      project_completed_progress: percent
+      project_expected_progress: percent
+    notes:
+    - 'Snapshots: one row per day (latest of the day), ordered by date ascending. No value_columns, because values
+      are point-in-time and must not be summed.'
+  vpp_users:
+    label: User
+    identifier: id
+    priority:
+    - user_name
+    - first_name
+    - last_name
+    hidden:
+    - email
+    - date_joined
+    optional:
+    - first_name
+    - last_name
+    on_request:
+    - email
+    - date_joined
+    query_only:
+    - id
+    - username
+    - status
+    - is_active
+    derived:
+    - as: user_name
+      label: User
+      sql: REPLACE(u.username, '_deleted_user_' || u.id, '')
+      tier: essential
+      replaces: username
+    labels:
+      first_name: First Name
+      last_name: Last Name
+      email: E-mail
+      date_joined: Joined On
+    notes:
+    - 'email is personal data: show it only when explicitly asked, and only for people the asker is allowed to see.'
+    - status and is_active filter active users; describe status in words if asked.
+  vpp_groups:
+    label: Role
+    identifier: group_id
+    name_column: group_name
+    priority:
+    - group_name
+    hidden: []
+    essential:
+    - group_name
+    query_only:
+    - group_id
+    labels:
+      group_name: Role
+  vpp_user_groups:
+    label: Role assignment
+    identifier: user_group_id
+    priority: []
+    hidden: []
+    query_only:
+    - user_id
+    - group_id
+    technical:
+    - user_group_id
+  working_days_view:
+    label: Working day
+    identifier: calendar_date_unix
+    priority: []
+    hidden: []
+    query_only:
+    - calendar_date_unix
+    notes:
+    - Counting only. Output a count of working days, never the rows.

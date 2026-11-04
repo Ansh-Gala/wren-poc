@@ -11,6 +11,7 @@ query as a data point, not crash on it, so errors come back inside QueryResult.
 
 from __future__ import annotations
 
+import threading
 import time
 
 import psycopg
@@ -37,11 +38,86 @@ def connect(settings: Settings, readonly: bool = False) -> psycopg.Connection:
     return psycopg.connect(**_dsn(settings, readonly))
 
 
+# One read-only connection per thread, kept open between queries.
+#
+# Opening one costs about 110ms -- measured with `SELECT 1`, which is almost
+# entirely connect and TLS/auth handshake rather than query time -- and an
+# answer runs one or two statements, so this was up to 220ms of every turn
+# spent saying hello. Per-thread rather than a shared pool because psycopg
+# connections are not thread-safe and the HTTP server is threaded; a thread
+# gets its own or it gets nothing. The server makes a thread per HTTP
+# connection and closes its database connection when that one ends, so reuse
+# lasts for one browser connection, or for a whole benchmark run.
+#
+# The connection is still used exactly as before: READ ONLY transaction, a
+# statement timeout, and a rollback after every query. Reuse changes how
+# often we connect, not what a query is allowed to do.
+_LOCAL = threading.local()
+
+
+def _reusable(settings: Settings, readonly: bool) -> psycopg.Connection | None:
+    """This thread's connection, opening or reopening it as needed.
+
+    Returns None if the connection cannot be established, so the caller can
+    report the error the same way it always did.
+    """
+    conn = getattr(_LOCAL, "conn", None)
+    key = (settings.pg_host, settings.pg_port, settings.pg_database, readonly)
+    if conn is not None and getattr(_LOCAL, "key", None) == key:
+        if not conn.closed:
+            return conn
+    close_thread_connection()
+    conn = psycopg.connect(**_dsn(settings, readonly))
+    _LOCAL.conn, _LOCAL.key = conn, key
+    return conn
+
+
+def close_thread_connection() -> None:
+    """Drop this thread's pooled connection, if it has one."""
+    conn = getattr(_LOCAL, "conn", None)
+    _LOCAL.conn = _LOCAL.key = None
+    if conn is not None and not conn.closed:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _type_name(oid: int) -> str:
+    """A column's type as PDO's native_type names it: "numeric", or "_text"
+    for an array of text. Empty for a type psycopg does not know."""
+    info = psycopg.postgres.types.get(oid)
+    if info is None:
+        return ""
+    return "_" + info.name if info.array_oid == oid else info.name
+
+
+def read_only_posture(settings: Settings) -> dict:
+    """What the read-only role may do to tables; SELECT alone is the aim.
+
+    Asked as that role, as Drupal's QueryRunner::readOnlyPosture asks it.
+    Column grants count too: scripts/setup_databases.py grants SELECT on the
+    described columns only, which role_table_grants does not list.
+    """
+    try:
+        with connect(settings, readonly=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT privilege_type FROM information_schema.role_table_grants"
+                " WHERE grantee = %s"
+                " UNION SELECT privilege_type FROM information_schema.role_column_grants"
+                " WHERE grantee = %s",
+                (settings.pg_readonly_user, settings.pg_readonly_user))
+            privileges = sorted(row[0] for row in cur.fetchall())
+        return {"privileges": privileges, "select_only": privileges == ["SELECT"],
+                "error": None}
+    except Exception as exc:
+        return {"privileges": [], "select_only": False, "error": str(exc)}
+
+
 def run_readonly(
     settings: Settings,
     sql: str,
     timeout_ms: int | None = None,
-    readonly_role: bool = True,
 ) -> QueryResult:
     """Execute one statement under a READ ONLY transaction and a hard timeout.
 
@@ -51,20 +127,39 @@ def run_readonly(
     timeout = timeout_ms or settings.statement_timeout_ms
     started = time.perf_counter()
     try:
-        with psycopg.connect(**_dsn(settings, readonly_role)) as conn:
+        conn = _reusable(settings, True)
+        try:
             with conn.cursor() as cur:
                 cur.execute("SET TRANSACTION READ ONLY")
                 cur.execute(f"SET LOCAL statement_timeout = {int(timeout)}")
                 cur.execute(sql)
                 columns = [d.name for d in cur.description] if cur.description else []
+                types = [_type_name(d.type_code) for d in cur.description] if cur.description else []
                 rows = [tuple(r) for r in cur.fetchall()] if cur.description else []
-            conn.rollback()
+        finally:
+            # Always, on the success and the failure path alike. The
+            # connection outlives the query now, so leaving a transaction
+            # open would poison every later query on this thread -- and
+            # `SET LOCAL` only lasts as long as the transaction, which is
+            # what keeps the statement timeout honest per query.
+            try:
+                conn.rollback()
+            except psycopg.Error:
+                # The connection itself is gone. Drop it rather than let the
+                # rollback failure mask whatever really went wrong.
+                close_thread_connection()
         return QueryResult(
             columns=columns,
             rows=rows,
             duration_ms=(time.perf_counter() - started) * 1000,
+            types=types,
         )
     except psycopg.Error as exc:
+        # A reused connection must never carry a fault into the next query,
+        # and there is no cheap way to tell "bad SQL" from "broken socket"
+        # here. Dropping it costs one reconnect; keeping a poisoned one costs
+        # every subsequent answer on this thread.
+        close_thread_connection()
         return QueryResult(
             columns=[],
             rows=[],
@@ -73,6 +168,7 @@ def run_readonly(
             sqlstate=getattr(exc, "sqlstate", None),
         )
     except Exception as exc:  # driver-level problems, e.g. bad DSN
+        close_thread_connection()
         return QueryResult(
             columns=[],
             rows=[],

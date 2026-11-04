@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SQL chatbot</title>
+<title>SQL chatbot — QA console</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,13 +11,14 @@
 <header class="bar">
   <div class="bar-left">
     <strong>SQL chatbot</strong>
-    <span id="source-badge" class="badge badge-live">live</span>
+    <span class="muted">QA console</span>
   </div>
   <div class="bar-right">
     <label class="toggle" title="Off by default. The server omits SQL, metadata and diagnostics entirely rather than the page hiding them, so this applies from the next question onwards.">
       <input type="checkbox" id="debug-mode">
       debug mode
     </label>
+    <button id="toggle-setup" type="button" class="btn" aria-controls="setup-rail">Hide setup</button>
     <button id="reset-context" type="button" class="btn">Reset context</button>
     <button id="clear-chat" type="button" class="btn">Clear chat</button>
   </div>
@@ -31,17 +32,8 @@
       <div class="empty" id="empty-hint">
         <h1 class="chat-hero">Ready when you are.</h1>
         <p>Ask anything. Every turn shows what the backend decided.</p>
-        <p class="muted">Try a thread:</p>
-        <div class="starters">
-          <button class="chip" data-send="Show AR_YD_Suiting items">Show AR_YD_Suiting items</button>
-          <button class="chip" data-send="only active">only active</button>
-          <button class="chip" data-send="how many?">how many?</button>
-        </div>
-        <p class="muted">Or a clarification flow:</p>
-        <div class="starters">
-          <button class="chip" data-send="Show the AR_YD items">Show the AR_YD items</button>
-          <button class="chip" data-send="show the AR_YD_Suiting itmes">show the AR_YD_Suiting itmes <span class="muted">(typo)</span></button>
-        </div>
+        <!-- product.yaml's starter questions, from GET /info. -->
+        <div id="starters" class="chips starters"></div>
       </div>
     </div>
 
@@ -54,29 +46,17 @@
     </form>
   </section>
 
-  <!-- ------------------------------------------ conversation state -->
-  <aside class="rail" id="state-rail" aria-label="Conversation state" hidden>
-    <h2>Conversation state</h2>
-    <p class="muted rail-note">
-      What the next turn will be understood against. Survives between turns
-      until something resets it.
-    </p>
-
-    <dl id="state-fields" class="kv"></dl>
-
-    <h3>Pending question</h3>
-    <div id="state-pending" class="pending muted">none</div>
-
-    <h3>Last mutations</h3>
-    <ul id="state-mutations" class="mutations"><li class="muted">none yet</li></ul>
-
-    <h3>Session totals</h3>
-    <dl id="totals" class="kv"></dl>
+  <!-- ------------------------------------------------ setup panel -->
+  <!-- Which databases, modes and model answer. Filled from GET /info. -->
+  <aside class="rail" id="setup-rail" aria-label="Setup">
+    <h2>Setup</h2>
+    <div id="setup" aria-live="polite"></div>
   </aside>
 
 </main>
 
 <script src="table-copy.js"></script>
+<script src="sql-highlight.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
 </body>

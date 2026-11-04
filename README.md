@@ -62,17 +62,32 @@ Then set, at a minimum:
 |---|---|
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME` | where PostgreSQL is |
 | `DATABASE_READONLY_USER`, `DATABASE_READONLY_PASSWORD` | the role queries run as |
-| `LLM_PROVIDER` | `cli` |
+| `LLM_PROVIDER` | `cli` (Claude Code on this machine), `anthropic` (Claude API, `ANTHROPIC_API_KEY`) or `openai` (`OPENAI_API_KEY`) |
 | `CLI_LEAN` | `true` |
 
-Both values are required, not defaults. This branch ships only the lean
-path: `LLM_PROVIDER` anything but `cli`, or `CLI_LEAN=false`, and the server
-exits at startup saying so. The MCP path it would otherwise select needs
-`wren_setup`, which is not part of a deployment.
+`CLI_LEAN=true` is required, not a default: this branch ships only the lean
+path, and with `CLI_LEAN=false` the server exits at startup saying so. The MCP
+path it would otherwise select needs `wren_setup`, which is not part of a
+deployment. For an API provider, install its package too (`pip install
+anthropic` or `pip install openai`; see requirements.txt).
 
 The query role should hold `SELECT` and nothing more. `pipeline/safety.py`
 rejects writes before they are sent, but a read-only grant is what makes that
 belt-and-braces rather than the only line of defence.
+
+## Set up the databases
+
+```
+python scripts/setup_databases.py --dry-run   # make every change, then roll back
+python scripts/setup_databases.py
+```
+
+It reads `.env` only, and stops before connecting if a key it needs is
+missing. `DATABASE_USER` / `DATABASE_PASSWORD` must be an owner login that can
+create logins and databases. It creates the read-only login with `SELECT` on
+exactly the columns the product's metadata describes, then the chat database,
+its writer login and its two tables. Each database's changes are one
+transaction. A login that exists keeps its password. Safe to run again.
 
 ## Run
 
@@ -103,15 +118,6 @@ so it is also the only one to read when integrating something else.
 
 `GET /health` returns `{"ok": true}` and the live session count.
 
-## Tests
-
-```
-python -m pytest
-```
-
-Tests needing a live database or the Claude CLI are marked `integration`;
-`python -m pytest -m "not integration"` skips them.
-
 ## Layout
 
 ```
@@ -122,10 +128,15 @@ config/       Settings and logging
 database/     Read-only connection handling
 llm_api/      Provider abstraction over the Claude CLI
 metadata/     Schema descriptions, business rules, worked examples,
-              entity vocabulary -- what the model is told
+              entity vocabulary -- what the model is told (Arvind TMS)
+products/     The same files for other products; pick one with
+              METADATA_DIR in .env, with DATABASE_NAME to match
+server/       The HTTP server: routes.py (endpoints), services/ (answering a
+              question, saved chats, a chat's state), schemas.py (response
+              shapes), utils.py (shared helpers), config.py (constants)
 ui/           The console: one page, no build step, no dependencies
-scripts/      serve_api.py, and the bootstrap it imports
-tests/        The tests for the above
+scripts/      serve_api.py (makes the app and starts it), setup_databases.py,
+              and the bootstrap they import
 ```
 
 Everything here is reachable from `scripts/serve_api.py`. Nothing is kept

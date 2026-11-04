@@ -15,6 +15,8 @@ import re
 import sqlglot
 from sqlglot import exp
 
+from pipeline.chart_check import (COLOUR, MAX_SERIES, ONE_VALUE_TYPES, PHP_TRIM as _PHP_TRIM,
+                                  TITLE_LENGTH, TYPES)
 from pipeline.models import ParsedSQL
 
 _SQL_START = re.compile(r"\b(SELECT|WITH)\b", re.IGNORECASE)
@@ -180,3 +182,286 @@ def parse_clarification(text: str) -> str | None:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     return None
+
+
+def _json_objects(text: str) -> list[dict]:
+    """The JSON objects in a reply, whole-reply first.
+
+    The whole reply is tried before the fragments because the fragment scan is
+    the non-greedy ``\\{.*?\\}`` that parse_clarification uses, which stops at
+    the first closing brace and so cannot read a nested object. The readers
+    below want flat fields, so that is sufficient for them -- but taking the
+    whole reply first means a well-formed answer is read correctly whatever it
+    nests.
+    """
+    objects: list[dict] = []
+    if not text:
+        return objects
+    try:
+        whole = json.loads(text.strip())
+    except Exception:
+        whole = None
+    if isinstance(whole, dict):
+        objects.append(whole)
+    for match in re.finditer(r"\{.*?\}", text, re.DOTALL):
+        try:
+            obj = json.loads(match.group(0))
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            objects.append(obj)
+    return objects
+
+
+def _parse_string(text: str, key: str) -> str | None:
+    """One non-empty string field, or nothing."""
+    for obj in _json_objects(text):
+        value = obj.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _parse_string_list(text: str, key: str) -> list[str]:
+    """A flat list of non-empty strings under one key, or nothing.
+
+    All-or-nothing on purpose. Dropping the malformed entries would offer a
+    list missing whichever choice the user was looking for, and a silently
+    short list is worse than no list: the schema-derived path can answer
+    instead, and does.
+    """
+    for obj in _json_objects(text):
+        raw = obj.get(key)
+        if not isinstance(raw, list):
+            continue
+        values = [v.strip() for v in raw if isinstance(v, str) and v.strip()]
+        if len(values) > 1 and len(values) == len(raw):
+            return values
+    return []
+
+
+def parse_explanation(text: str) -> str | None:
+    """The plain-English account the model gave of what it understood.
+
+    Separate from the SQL rather than derived from it, because the two answer
+    different questions: the statement says what will be selected, and this
+    says what the user asked for. A sentence generated from the parsed SQL
+    could only ever restate the query in words, which is the thing a
+    non-technical reader already could not read.
+    """
+    return _parse_string(text, "explanation")
+
+
+def parse_goal(text: str) -> str | None:
+    """The model's restatement of what the user is after, if it sent one.
+
+    The running goal is otherwise the question that opened the block, which is
+    right until a follow-up contradicts it: "open tasks for Sales" then
+    "forget the department" leaves a goal still naming Sales beside filters
+    that no longer do, and the model is handed a contradiction. Only the model
+    can tell that the aim moved, so it is allowed to say so.
+    """
+    return _parse_string(text, "goal")
+
+
+def parse_recap(text: str) -> str | None:
+    """The model's rewritten summary of the conversation, if it sent one.
+
+    Optional by design. The model is told to leave it out when the thread has
+    not moved on from what the recap already says, so most turns send nothing
+    and cost nothing -- the same bargain `goal` makes.
+    """
+    return _parse_string(text, "recap")
+
+
+def parse_clarify_about(text: str) -> str | None:
+    """The column a clarification is about, if the model named one.
+
+    The chips offered with a clarification are the real values of whichever
+    column the doubt is about, and until now the only way to find that column
+    was to look for its name inside the question the user is shown -- which
+    meant the feature could only work when the question leaked a schema name.
+    Asking for the column in its own key separates the two: the prose stays
+    written for a person, and the lookup gets the identifier it needs.
+
+    Never public. redact.public_response does not carry it, and nothing
+    renders it.
+    """
+    return _parse_string(text, "about")
+
+
+def parse_group(text: str) -> bool:
+    """Whether the model asked for this answer's rows to be collected.
+
+    A grouping is a claim about how an answer reads, and only the question and
+    the answer together decide that -- which is why the table-level nomination
+    in column_hierarchy.yaml could not: it fires on every answer off that
+    table, including the ones nobody asked to have grouped. The file still
+    says WHICH columns may head a group and which are totals, so the model
+    never sees or names a column; it only says whether to use them here.
+
+    False unless the model said otherwise. A plain list is the normal answer,
+    and an absent key is the model not asking for anything.
+    """
+    for obj in _json_objects(text):
+        value = obj.get("group")
+        if isinstance(value, bool):
+            return value
+    return False
+
+
+def parse_options(text: str) -> list[str]:
+    """The readings the model offered to choose between.
+
+    Only the model can produce these. When it says a question has five
+    possible meanings, those meanings exist nowhere in the schema -- they are
+    readings of the sentence, not values in a column -- so nothing else can
+    offer them and the user is left retyping one of them by hand.
+    """
+    return _parse_string_list(text, "options")
+
+
+def parse_next(text: str) -> list[str]:
+    """Follow-up questions the model thinks are worth asking next.
+
+    The registry can only offer what the schema affords -- narrow by a status,
+    group by a column, count the rows -- and after "which departments are
+    performing poorly" it duly offers "Just count them", which answers nothing
+    anyone wanted. Relevance needs the question, and only the model has it.
+    """
+    return _parse_string_list(text, "next")
+
+
+# ------------------------------------------------------- partial replies --
+#
+# Everything above reads a reply that has fully arrived. This reads one that
+# has not.
+#
+# The contract in claude/prompts.py puts `sql` first in the object, and the
+# SQL is complete a mean of 2.02 seconds before the last token (measured with
+# `claude --include-partial-messages` across three questions; the rest of that
+# time writes explanation, goal, recap and next). Knowing where the value ends
+# is what lets the query run in that gap instead of after it.
+
+
+def sql_value_end(text: str) -> int | None:
+    """Index just past the closing quote of the ``sql`` value, or None.
+
+    None means "not yet, or not at all": the value is still arriving, or this
+    is a clarification, which carries no ``sql`` key and never will.
+
+    Scanned rather than parsed because at the moment of asking the text is a
+    half-finished JSON object, which ``json.loads`` cannot read. A backslash
+    escapes the byte after it, which is the common case and not the edge one:
+    the contract requires ``\n`` escapes so the JSON stays valid on one line.
+    """
+    key = text.find('"sql"')
+    if key < 0:
+        return None
+    colon = text.find(":", key + 5)
+    if colon < 0:
+        return None
+    open_quote = text.find('"', colon + 1)
+    if open_quote < 0:
+        return None
+    i = open_quote + 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            # Both bytes, and the second may not have arrived yet -- a chunk
+            # can split an escape pair. Stepping past the end ends the loop,
+            # which is the right answer: not yet.
+            i += 2
+            continue
+        if c == '"':
+            return i + 1
+        i += 1
+    return None
+
+
+def partial_sql(text: str) -> str | None:
+    """The SQL from a reply still arriving, or None if it is not all there.
+
+    The object is closed by hand before parsing, so the same ``parse_sql``
+    that reads a finished reply reads this one -- rather than a second
+    extraction path that could disagree with it about what the model said.
+    """
+    end = sql_value_end(text)
+    if end is None:
+        return None
+    parsed = parse_sql(text[:end] + "}")
+    return parsed.sql
+
+
+def _is_php_list(value: dict) -> bool:
+    """Whether PHP would decode this JSON object as a list: keys "0".."n-1".
+    An empty object is one too."""
+    return list(value) == [str(i) for i in range(len(value))]
+
+
+def parse_chart(text: str) -> dict | None:
+    """The chart the model asked for, if it asked for one.
+
+    Ported from the Drupal port's ResponseParser::parseChart. None when the
+    reply has no chart. A chart that is present but unusable comes back as
+    {"invalid": code}, never as a partial chart, so a bad config cannot be
+    drawn and the debug view can say why. The chart's own "sql" is kept as
+    written; the turn decides whether it is SQL, because a malformed chart
+    query drops the whole chart, not just its query.
+    """
+    for obj in _json_objects(text):
+        chart = obj.get("chart")
+        if chart is None or chart is False:
+            continue
+        if "clarify" in obj:
+            return {"invalid": "in_clarify"}
+        if not isinstance(chart, dict) or _is_php_list(chart):
+            return {"invalid": "bad_shape"}
+        kind = chart.get("type")
+        if not isinstance(kind, str) or kind not in TYPES:
+            return {"invalid": "bad_type"}
+        category = chart.get("category")
+        if not isinstance(category, str) or category.strip(_PHP_TRIM) == "":
+            return {"invalid": "bad_category"}
+        values = chart.get("values")
+        if not isinstance(values, list) or not values or len(values) > MAX_SERIES:
+            return {"invalid": "bad_values"}
+        if any(not isinstance(v, str) or v.strip(_PHP_TRIM) == "" for v in values):
+            return {"invalid": "bad_values"}
+        if kind in ONE_VALUE_TYPES and len(values) != 1:
+            return {"invalid": "pie_values"}
+        if chart.get("sql") is not None and not isinstance(chart["sql"], str):
+            return {"invalid": "bad_sql"}
+        # Long rows: one row per category and part, one value, pivoted by
+        # chart_check. A pie has no second dimension to split by.
+        series = chart.get("series")
+        if series is not None and (not isinstance(series, str) or series.strip(_PHP_TRIM) == ""
+                                   or len(values) != 1 or kind in ONE_VALUE_TYPES):
+            return {"invalid": "bad_series"}
+
+        parsed = {"type": kind, "category": category.strip(_PHP_TRIM),
+                  "values": [v.strip(_PHP_TRIM) for v in values]}
+        if series is not None:
+            parsed["series"] = series.strip(_PHP_TRIM)
+        title = chart.get("title")
+        if isinstance(title, str) and title.strip(_PHP_TRIM) != "":
+            parsed["title"] = title.strip(_PHP_TRIM)[:TITLE_LENGTH]
+        if chart.get("sql") is not None:
+            parsed["sql"] = chart["sql"].strip(_PHP_TRIM)
+        # Colours by value column, series or category name. A bad entry is
+        # dropped on its own: a colour is never worth losing the chart.
+        colors = chart.get("colors")
+        if isinstance(colors, dict) and not _is_php_list(colors):
+            kept = {str(name).strip(_PHP_TRIM): colour for name, colour in colors.items()
+                    if str(name).strip(_PHP_TRIM) != "" and isinstance(colour, str)
+                    and COLOUR.match(colour)}
+            if kept:
+                parsed["colors"] = kept
+        return parsed
+    return None
+
+
+def chart_sql(text) -> str | None:
+    """The chart's own query, cleaned as the main one is, or None if not SQL."""
+    cleaned = _clean(str(text or ""))
+    return cleaned if cleaned and _looks_like_sql(cleaned) else None

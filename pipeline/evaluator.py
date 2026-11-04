@@ -19,8 +19,11 @@ real errors.
 
 from __future__ import annotations
 
+import json
+import math
+import struct
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal
 from itertools import permutations
 from typing import Any
@@ -72,8 +75,12 @@ def normalize_value(value: Any) -> Any:
         except (ValueError, OverflowError):
             return str(value)
     if isinstance(value, datetime):
-        # Midnight timestamps and plain dates describe the same day.
-        if value.hour == value.minute == value.second == value.microsecond == 0:
+        # Midnight timestamps and plain dates describe the same day -- when
+        # the midnight is UTC's or has no zone, as Drupal's Comparator reads
+        # it. Midnight in Kolkata is still the previous day in UTC.
+        offset = value.utcoffset()
+        if (value.hour == value.minute == value.second == value.microsecond == 0
+                and (offset is None or not offset)):
             return value.date().isoformat()
         return value.isoformat(sep=" ")
     if isinstance(value, date):
@@ -89,6 +96,12 @@ def normalize_rows(rows: list[tuple]) -> list[tuple]:
     return [tuple(normalize_value(v) for v in row) for row in rows]
 
 
+def _comparable(expected: QueryResult | None, actual: QueryResult | None) -> bool:
+    """Both results exist and neither is an error."""
+    return (expected is not None and actual is not None
+            and expected.error is None and actual.error is None)
+
+
 def _matches(expected: list[tuple], actual: list[tuple], ordered: bool) -> bool:
     if ordered:
         return expected == actual
@@ -100,9 +113,7 @@ def compare_results(
     actual: QueryResult,
     ordered: bool = False,
 ) -> bool:
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
 
     n = len(expected.columns)
@@ -144,8 +155,12 @@ def compare_results(
     return False
 
 
-def result_summary(result: QueryResult, max_rows: int = 20) -> dict:
+def result_summary(result: QueryResult, max_rows: int | None = 20) -> dict:
     """Compact, JSON-safe view of a result for the report.
+
+    ``max_rows=None`` keeps every row, as the Drupal port's summary does for a
+    turn: the follow-up layer reads the whole answer, and the cut is made only
+    for what is shown (SHOWN_ROWS) or kept in a log (LOGGED_ROWS).
 
     Only ever applied to results already held on the Python side. Nothing from
     here is sent to Claude.
@@ -154,25 +169,150 @@ def result_summary(result: QueryResult, max_rows: int = 20) -> dict:
         return {"error": "no result"}
     if result.error is not None:
         return {"error": result.error, "sqlstate": result.sqlstate}
+    types = result.types or []
     rows = [
-        [_jsonable(v) for v in row] for row in result.rows[:max_rows]
+        [pg_text(v, types[i] if i < len(types) else "") for i, v in enumerate(row)]
+        for row in result.rows[:max_rows]
     ]
     return {
         "columns": list(result.columns),
         "row_count": len(result.rows),
         "rows": rows,
-        "truncated": len(result.rows) > max_rows,
+        "truncated": max_rows is not None and len(result.rows) > max_rows,
     }
 
 
-def _jsonable(value: Any) -> Any:
-    if value is None or isinstance(value, (bool, int, float, str)):
+# Rows the browser is sent. More are cut, with `truncated` set; row_count
+# keeps the whole count. The Drupal port's ChatRuntime::SHOWN_ROWS.
+SHOWN_ROWS = 200
+
+# Rows a log file keeps per turn: enough to read the answer back, and the
+# figure every turn log has always held.
+LOGGED_ROWS = 20
+
+
+def first_rows(summary, limit: int):
+    """A summary with at most ``limit`` rows. An error summary or None passes
+    through, and row_count keeps the whole count."""
+    if not isinstance(summary, dict) or len(summary.get("rows") or []) <= limit:
+        return summary
+    return {**summary, "rows": summary["rows"][:limit], "truncated": True}
+
+
+def pg_text(value: Any, pg_type: str = "") -> Any:
+    """A value as Drupal's PDO hands it over: integers and booleans as
+    themselves, everything else as PostgreSQL's own text for it.
+
+    psycopg has already read that text into a Python value, so it is written
+    back the way PostgreSQL writes it: numeric "12.50", timestamp
+    "2026-10-01 12:00:00.12", timestamptz "...+05:30", interval
+    "3 days 04:00:00", array "{a,b}". ``pg_type`` is the column's type name
+    (QueryResult.types); it tells float4 from float8, and JSON from an array.
+    """
+    if value is None:
+        return None
+    if pg_type in ("json", "jsonb"):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, (date, datetime)):
+        return format(value, "f") if value.is_finite() else str(value)
+    if isinstance(value, float):
+        return _pg_float(value, pg_type == "float4")
+    if isinstance(value, datetime):
+        return (f"{value.year:04d}-{value.month:02d}-{value.day:02d} "
+                f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+                + _pg_fraction(value.microsecond) + _pg_offset(value.utcoffset()))
+    if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, dt_time):
+        return (f"{value.hour:02d}:{value.minute:02d}:{value.second:02d}"
+                + _pg_fraction(value.microsecond) + _pg_offset(value.utcoffset()))
+    if isinstance(value, timedelta):
+        return _pg_interval(value)
+    if isinstance(value, (list, tuple)):
+        return _pg_array(value, pg_type[1:] if pg_type.startswith("_") else "")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # PostgreSQL's default hex form. A server with bytea_output = escape
+        # prints octal instead; no view the chatbot reads has a bytea column.
+        return "\\x" + bytes(value).hex()
     return str(value)
+
+
+def _pg_float(value: float, single: bool) -> str:
+    """float8out / float4out: the shortest digits that read back as the same
+    value, in exponent form below 1e-4 or from 1e15 (1e6 for float4)."""
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+    shortest = repr(value)
+    if single:
+        # psycopg widened the float4 to a double; its own shortest digits
+        # are the fewest that narrow back to the same float4.
+        for places in range(1, 10):
+            shortest = f"{value:.{places}g}"
+            if struct.unpack("f", struct.pack("f", float(shortest)))[0] == value:
+                break
+    number = Decimal(shortest).normalize()
+    sign, digits, exponent = number.as_tuple()
+    leading = len(digits) + exponent - 1
+    if -4 <= leading < (6 if single else 15):
+        return format(number, "f")
+    mantissa = str(digits[0]) + ("." + "".join(map(str, digits[1:])) if len(digits) > 1 else "")
+    return f"{'-' if sign else ''}{mantissa}e{'-' if leading < 0 else '+'}{abs(leading):02d}"
+
+
+def _pg_fraction(microseconds: int) -> str:
+    """Fractional seconds without trailing zeros, as PostgreSQL prints them."""
+    return f".{microseconds:06d}".rstrip("0") if microseconds else ""
+
+
+def _pg_offset(offset: timedelta | None) -> str:
+    """A UTC offset as PostgreSQL prints it: +05:30, +00, -04."""
+    if offset is None:
+        return ""
+    total = int(offset.total_seconds())
+    sign, total = ("-" if total < 0 else "+"), abs(total)
+    hours, rest = divmod(total, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return (f"{sign}{hours:02d}" + (f":{minutes:02d}" if minutes or seconds else "")
+            + (f":{seconds:02d}" if seconds else ""))
+
+
+def _pg_interval(value: timedelta) -> str:
+    """An interval in PostgreSQL's default style: "3 days 04:00:00"."""
+    negative = value < timedelta(0)
+    if negative:
+        value = -value
+    sign = "-" if negative else ""
+    parts = []
+    if value.days:
+        parts.append(f"{sign}{value.days} day" + ("" if value.days == 1 and not negative else "s"))
+    if value.seconds or value.microseconds or not value.days:
+        hours, rest = divmod(value.seconds, 3600)
+        minutes, seconds = divmod(rest, 60)
+        parts.append(f"{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
+                     + _pg_fraction(value.microseconds))
+    return " ".join(parts)
+
+
+def _pg_array(items, element_type: str) -> str:
+    """An array in PostgreSQL's text form: {a,b}, quoting what needs it."""
+    parts = []
+    for item in items:
+        if isinstance(item, (list, tuple)):
+            parts.append(_pg_array(item, element_type))
+            continue
+        if item is None:
+            parts.append("NULL")
+            continue
+        text = pg_text(item, element_type)
+        text = ("t" if text else "f") if isinstance(text, bool) else str(text)
+        if text == "" or text.upper() == "NULL" or any(c in text for c in '{},"\\ \t\n\r'):
+            text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        parts.append(text)
+    return "{" + ",".join(parts) + "}"
 
 
 def compare_row_subset(
@@ -189,16 +329,16 @@ def compare_row_subset(
 
     Scoring it as wrong would understate the semantic layer badly, since the
     hard part (which rows) was right and the easy part (which columns) is
-    genuinely ambiguous in the question. Scoring it as right would hide real
-    errors. So it is reported as a SEPARATE metric, and the failure is
-    classified EXTRA_COLUMNS rather than being folded into the accuracy number.
+    genuinely ambiguous in the question. The lean runner counts it as a match
+    and names it, with match_mode "superset".
 
-    True when every expected column can be matched to some actual column with
-    the same values in the same row order.
+    True when every expected column can be matched to a distinct actual column
+    holding the same values -- in the same order when ``ordered``, as the same
+    multiset otherwise -- and the projected rows then match. Columns are
+    matched greedily, first fit, as Drupal's Comparator does; two actual
+    columns holding the same values can make it miss a match that exists.
     """
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
     if len(actual.columns) < len(expected.columns):
         return False
@@ -216,37 +356,21 @@ def compare_row_subset(
     exp_cols = [[row[i] for row in exp_rows] for i in range(n_exp)]
     act_cols = [[row[j] for row in act_rows] for j in range(n_act)]
 
-    if not ordered:
-        # Rows may come back in a different order. Align on the first expected
-        # column, then require the rest to agree under that same alignment.
-        exp_tuples = [tuple(row) for row in exp_rows]
-        used: set[int] = set()
-        chosen: list[int] = []
-        for i in range(n_exp):
-            for j in range(n_act):
-                if j in used:
-                    continue
-                if Counter(act_cols[j]) == Counter(exp_cols[i]):
-                    used.add(j)
-                    chosen.append(j)
-                    break
-            else:
-                return False
-        projected = [tuple(row[j] for j in chosen) for row in act_rows]
-        return Counter(projected) == Counter(exp_tuples)
-
-    used = set()
-    chosen = []
+    used: set[int] = set()
+    chosen: list[int] = []
     for i in range(n_exp):
         for j in range(n_act):
-            if j not in used and act_cols[j] == exp_cols[i]:
+            if j in used:
+                continue
+            same = (act_cols[j] == exp_cols[i]) if ordered                 else Counter(act_cols[j]) == Counter(exp_cols[i])
+            if same:
                 used.add(j)
                 chosen.append(j)
                 break
         else:
             return False
     projected = [tuple(row[j] for j in chosen) for row in act_rows]
-    return projected == [tuple(row) for row in exp_rows]
+    return _matches(exp_rows, projected, ordered)
 
 
 def compare_projection_agnostic(
@@ -268,9 +392,7 @@ def compare_projection_agnostic(
     must be shared and the row counts must agree, which keeps this from
     degenerating into "any query with the right number of rows passes".
     """
-    if expected is None or actual is None:
-        return False
-    if expected.error is not None or actual.error is not None:
+    if not _comparable(expected, actual):
         return False
     if len(expected.rows) != len(actual.rows):
         return False

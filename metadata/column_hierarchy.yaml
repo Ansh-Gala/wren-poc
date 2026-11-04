@@ -1,0 +1,190 @@
+# Which columns matter, and which the UI may start collapsed.
+#
+# Presentation only. Nothing here reaches the model and nothing here changes a
+# query: a generic question can still project all 33 columns of
+# tms_initiative_flat, and this file decides the order they are shown in
+# and which of them start hidden. Keeping it out of the prompt is deliberate --
+# the built system prompt is compared byte for byte against the PHP port, and
+# accuracy figures are only comparable while the prompt is unchanged.
+#
+# `priority` is the order the listed columns are shown in, most useful first.
+# A column absent from the list keeps its own relative order and follows
+# everything named. `hidden` columns are still in the result and still
+# exported; they simply do not open by default.
+#
+# `row_groups` and `value_columns` are the grouping nomination, and they are
+# optional: a table that names neither is never grouped. Nothing is enabled
+# unconditionally, because grouping changes what a row means and a page of
+# groups is not a page of records. Each entry in `value_columns` carries an
+# `aggFunc`, validated against the seven ag-grid accepts -- an unknown name
+# yields blank aggregates rather than an error, which is the same silent
+# failure an unknown column name has here.
+#
+# Pivot is deliberately not nominated. It is the half that breaks the layout:
+# pagination counts top-level groups, so with pivotMode and no row groups the
+# pager reads "1 to 1 of 1", and sizeColumnsToFit nulls flex against dozens of
+# generated columns. The frontend suppresses it until a nomination exists.
+#
+# Only columns that exist are listed. The names below were taken from
+# metadata/schema_description.yaml, not from memory.
+
+version: 1
+tables:
+  tms_initiative_flat:
+    priority:
+    - initiative_id
+    - initiative_status
+    - initiative_type
+    - initiative_color
+    - initiative_client_due_at
+    - days_to_due_date
+    - open_task_count
+    - total_task_count
+    - initiative_ref_id
+    - workflow_name
+    - workflow_code
+    - current_active_milestone
+    hidden:
+    - business_unit
+    - initiative_note
+    - workflow_id
+    - short_closed_by
+    - short_closed_on
+    - open_tasks_list
+    - common_buffer
+    - buff_penetration_prcnt
+    - buff_penetration_days
+    row_groups:
+    - initiative_type
+    value_columns:
+    - column: open_task_count
+      aggFunc: sum
+    - column: total_task_count
+      aggFunc: sum
+  tms_task_flat:
+    priority:
+    - task_id
+    - task_code
+    - task_display_name
+    - task_status
+    - assigned_user_name
+    - task_department
+    - task_sla_status
+    - task_elapsed_days
+    - next_followup_at
+    - initiative_type
+    hidden:
+    - task_machine_code
+    - display_flag
+    - is_open_task
+    - is_closed_task
+    - is_not_started_task
+    - is_delayed_open_task
+    - is_delayed_closed_task
+    - is_initiative_delayed
+    - task_reopen_at
+    - task_display_status
+    - tms_initiative_flat
+    - business_unit
+    - initiative_ref_id
+    - tms_task_flat
+    - instant_closer
+    - is_followup
+    - initiative_color
+    - assigned_role
+    row_groups:
+    - task_department
+    value_columns:
+    - column: task_elapsed_days
+      aggFunc: avg
+  tms_user_flat:
+    priority:
+    - user_id
+    - user_name
+    - role_count
+    - department_count
+    hidden: []
+  tms_user_department_flat:
+    priority:
+    - user_id
+    - user_name
+    - department
+    - sub_department
+    hidden: []
+  tms_attachment_flat:
+    priority:
+    - tag_name
+    - file_name
+    - task_id
+    - initiative_id
+    - attachment_created_at
+    - file_size
+    hidden:
+    - folder_path
+    - file_uri
+    - entity_type
+    - entity_id
+    - status
+    - sequence
+    - tag_desc
+    - extensions
+    - max_file_size
+    - task_names
+    row_groups:
+    - tag_name
+    value_columns:
+    - column: file_size
+      aggFunc: sum
+  tms_task_issue_flat:
+    priority:
+    - issue_title
+    - last_comment
+    - issue_status
+    - issue_category_name
+    - issue_sub_department
+    - task_id
+    - comment_count
+    - issue_created_at
+    hidden:
+    - issue_description
+    - issue_hold_days
+    - issue_updated_by_user_id
+    - issue_created_by_user_id
+    row_groups:
+    - issue_status
+    value_columns:
+    - column: comment_count
+      aggFunc: sum
+  # No row_groups or value_columns: a grid sum over open_* would add weeks
+  # together, and the open counts are snapshots that must never be summed.
+  vf_report_task_summary:
+    priority:
+    - week_of_month
+    - name
+    - task_display_name
+    - bo_type
+    - field_1
+    - bucket
+    - open_green
+    - open_yellow
+    - open_red
+    - open_black
+    - close_green
+    - close_yellow
+    - close_red
+    - close_black
+    hidden:
+    - dt
+    - assigned_uid
+    - assigned_role
+    - report_type
+    - last_week_dt
+    - open_white
+    - close_white
+    - field_2
+    - field_3
+    - field_4
+    - field_5
+    - field_6
+    - field_7
+    - field_8

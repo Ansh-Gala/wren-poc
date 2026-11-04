@@ -9,12 +9,13 @@ Three things can be worth saying at the end of a turn:
   none           the answer stood on its own.
 
 Every one of them is decided from state the pipeline already has -- the
-structured conversation state, the schema, and the gazetteer generated from
-the database. There is no LLM call in this module. That is not a performance
+structured conversation state and the schema. There is no LLM call in this module. That is not a performance
 compromise; it is what makes the candidates trustworthy. A model asked to
 propose "which order did you mean?" will produce plausible order numbers, and
 plausible is exactly wrong. Values offered here can only come from the
-database, because there is nowhere else for them to come from.
+database, because there is nowhere else for them to come from. The model's
+own readings and next questions are offered too, but only as free text with
+no action, and only past names_a_database_object.
 
 The output is shaped for a frontend that renders buttons. A suggestion
 therefore carries a machine-readable ``action`` alongside its human label, so
@@ -24,17 +25,19 @@ the UI never has to parse "Show overdue ones" to work out what it does.
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
-from pathlib import Path
 
-import yaml
+from pipeline import metadata
+from pipeline.column_order import hidden_names
+from pipeline.labels import column_phrase
+from pipeline.redact import names_a_database_object
 
 # What a suggestion can ask the system to do. Each maps onto a mutation of
 # ConversationState, and from there back through the normal pipeline -- so
 # there is still exactly one thing that writes SQL.
 ACTION_TYPES = (
-    "set_entity",
     "add_filter",
     "replace_filter",
     "remove_filter",
@@ -45,7 +48,8 @@ ACTION_TYPES = (
     "drill_down",
 )
 
-FOLLOWUP_TYPES = ("clarification", "exploration", "none")
+# The actions that act on a column, and so must name one.
+_NEEDS_FIELD = ("add_filter", "replace_filter", "remove_filter", "add_group_by", "set_sort")
 
 
 @dataclass(frozen=True)
@@ -73,10 +77,24 @@ class Action:
 class Suggestion:
     id: str
     label: str
-    action: Action
+    # None for a reading or a next question, which mutate no state: choosing
+    # one rewrites the question rather than the filters.
+    action: Action | None = None
+    # A handle, present only on the chips the model wrote. A label is not a
+    # handle -- two readings can read alike, and a chip left on screen from
+    # three turns ago sends a label that still matches something -- so the ref
+    # says which offer it came from and a stale one resolves against nothing.
+    ref: str | None = None
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "label": self.label, "action": self.action.to_dict()}
+        out = {
+            "id": self.id,
+            "label": self.label,
+            "action": self.action.to_dict() if self.action else {},
+        }
+        if self.ref is not None:
+            out["ref"] = self.ref
+        return out
 
 
 @dataclass(frozen=True)
@@ -110,7 +128,7 @@ def _slug(text: str) -> str:
 def _value_id(value: str) -> str:
     """An id for a data value, keeping the case the database uses.
 
-    business_object_type holds case-variant near-duplicates that are genuinely
+    initiative_type holds case-variant near-duplicates that are genuinely
     distinct -- AR_YD_Shirting has 52 rows and AR_YD_SHIRTING has 2. Lowercasing
     to build the id collapsed them into one, so a frontend sending back the id
     it was given would silently select the other value.
@@ -123,10 +141,19 @@ def _value_id(value: str) -> str:
 _CANDIDATE_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 
 # Words that look like candidate tokens but never name a business object.
+# Plain English; the words that name a whole subject ("items") are added from
+# product.yaml by _not_an_entity().
 _NOT_AN_ENTITY = frozenset(
-    "show the and for with items item all any are how many what which "
+    "show the and for with all any are how many what which "
     "give me my this that those these them list count total".split()
 )
+
+
+def _not_an_entity() -> frozenset[str]:
+    """_NOT_AN_ENTITY and the words that name a whole subject."""
+    from pipeline.metadata import profile
+
+    return _NOT_AN_ENTITY | frozenset(profile().subject_nouns())
 
 
 def _is_partial_name(token: str, value: str) -> bool:
@@ -148,72 +175,27 @@ def _is_partial_name(token: str, value: str) -> bool:
     )
 
 
-def clarify_entity(question: str, gazetteer: list[str]) -> FollowUp | None:
-    """Ask which entity was meant, when a partial name matches several.
-
-    "AR_YD" is not a business object type, but three of them begin with it.
-    Guessing picks one at random; refusing to answer helps nobody. Naming the
-    three is the only useful move, and it is only possible because the
-    gazetteer is generated from the database.
-
-    Returns None when the question names an entity outright, or names nothing
-    resembling one -- neither is this kind of ambiguity.
-    """
-    from pipeline.context import detect_entity
-
-    if detect_entity(question, gazetteer) is not None:
-        return None  # unambiguous; nothing to ask
-
-    for token in sorted(_CANDIDATE_TOKEN.findall(question), key=len, reverse=True):
-        if token.lower() in _NOT_AN_ENTITY:
-            continue
-        matches = [v for v in gazetteer if _is_partial_name(token, v)]
-        if len(matches) < 2:
-            continue
-        # A word that ends every name it matches is naming a family, not an
-        # unfinished identifier. "Suiting" is the last component of all five
-        # types that carry it and means all of them; "AR_YD" is the last
-        # component of none of its matches, which is what makes it a name the
-        # user stopped typing.
-        if all(v.lower().endswith(token.lower()) for v in matches):
-            continue
-        return FollowUp(
-            type="clarification",
-            reason="ambiguous_entity",
-            question=f"Which {token} type did you mean?",
-            suggestions=[
-                Suggestion(
-                    id=f"set_entity_{_value_id(value)}",
-                    label=value,
-                    action=Action(type="set_entity",
-                                  field="business_object_type",
-                                  operator="=",
-                                  value=value),
-                )
-                for value in sorted(matches)
-            ],
-        )
-    return None
-
-
 # ------------------------------------------------------------------ schema --
 
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
+def _sortable() -> list[str]:
+    """Columns worth sorting by, most interesting first: name fragments from
+    product.yaml's suggestions.sort_by, so one list fits every table."""
+    from pipeline.metadata import profile
 
-# Columns worth sorting by, most interesting first. Name fragments rather than
-# literal columns so this stays true for both tms_business_object_flat and
-# tms_task_flat without listing either.
-_SORTABLE = ("due", "delay", "elapsed", "remaining", "created")
+    return profile().sort_by()
 
-# Never offered as a grouping: the entity column is what the user already
-# chose, and free-text columns produce one group per row.
-_NOT_GROUPABLE = frozenset({"business_object_type", "workflow_code", "workflow_name"})
+
+def _not_groupable() -> frozenset[str]:
+    """Never offered as a grouping: the entity's kind column is what the user
+    already chose, and free-text columns produce one group per row."""
+    from pipeline.metadata import profile
+
+    return frozenset(profile().not_groupable())
 
 
 @lru_cache(maxsize=1)
 def _schema() -> dict:
-    return yaml.safe_load(
-        (META_DIR / "schema_description.yaml").read_text(encoding="utf-8")) or {}
+    return metadata.schema()
 
 
 @lru_cache(maxsize=1)
@@ -230,8 +212,7 @@ def _rule_predicates() -> tuple[tuple[str, str, str, str], ...]:
     equality. Multi-condition rules like my_tasks are skipped: they are not a
     filter a user can toggle.
     """
-    doc = yaml.safe_load(
-        (META_DIR / "business_rules.yaml").read_text(encoding="utf-8")) or {}
+    doc = metadata.rules()
     out = []
     pattern = re.compile(r"^(\w+)\.(\w+)\s*=\s*'([^']*)'$")
     for rule in doc.get("rules") or []:
@@ -242,12 +223,22 @@ def _rule_predicates() -> tuple[tuple[str, str, str, str], ...]:
     return tuple(out)
 
 
-def _enum_columns(table: str) -> dict[str, list[str]]:
-    spec = (_schema().get("tables") or {}).get(table) or {}
+def _default_values() -> dict[str, str]:
+    """Column -> the value the active-first default would have added.
+
+    Read out of the registry rather than written here, so that renaming a
+    status value in the rules cannot leave this list quietly wrong. The
+    default_to_active policy rule carries no fragment of its own by design --
+    it must not become a togglable filter -- so the values come from the
+    rules it refers to, which product.yaml names as entities' default_rule.
+    """
+    from pipeline.metadata import profile
+
+    default_rules = set(profile().default_rules())
     return {
-        column: [str(v) for v in cspec["values"]]
-        for column, cspec in (spec.get("columns") or {}).items()
-        if isinstance(cspec, dict) and 2 <= len(cspec.get("values") or []) <= 12
+        column: value
+        for name, _table, column, value in _rule_predicates()
+        if name in default_rules
     }
 
 
@@ -255,9 +246,48 @@ def _columns(table: str) -> dict:
     return ((_schema().get("tables") or {}).get(table) or {}).get("columns") or {}
 
 
+def _enum_columns(table: str) -> dict[str, list[str]]:
+    return {
+        column: [str(v) for v in cspec["values"]]
+        for column, cspec in _columns(table).items()
+        if isinstance(cspec, dict) and 2 <= len(cspec.get("values") or []) <= 12
+    }
+
+
 # ------------------------------------------------------------- exploration --
 
-def explore(state, row_count: int | None) -> FollowUp | None:
+def _varies(result: dict | None, column: str) -> bool | None:
+    """Whether the returned rows hold more than one value for ``column``.
+
+    None means "no information": there was no result, no rows, or the column
+    was not projected. None is not False -- a suggestion must not be
+    suppressed because the evidence is missing, only because the evidence is
+    against it.
+    """
+    if not isinstance(result, dict):
+        return None
+    columns, rows = result.get("columns"), result.get("rows")
+    if not columns or not rows or column not in columns:
+        return None
+    index = columns.index(column)
+    seen = set()
+    for row in rows:
+        if index < len(row):
+            seen.add(row[index])
+        if len(seen) > 1:
+            return True
+    return False
+
+
+def _projected(result: dict | None, column: str) -> bool | None:
+    """Whether ``column`` is among the columns the answer actually carries."""
+    if not isinstance(result, dict) or not result.get("columns"):
+        return None
+    return column in result["columns"]
+
+
+def explore(state, row_count: int | None,
+            result: dict | None = None) -> FollowUp | None:
     """Next moves worth offering, or None when there are none worth offering.
 
     Suggestions are only useful while they are specific, so this is gated
@@ -272,6 +302,13 @@ def explore(state, row_count: int | None) -> FollowUp | None:
 
     table = state.active_tables[0]
     in_force = set(state.active_filters)
+    # A column the hierarchy does not show is not worth grouping or
+    # sorting by either. That one declaration is what keeps
+    # task_display_status out of a GROUP BY the schema explicitly
+    # forbids, and boolean flags like is_delayed_open_task out of a sort.
+    hidden = hidden_names(state.active_tables)
+    # The predicates themselves, not just their columns: telling a
+    # defaulted status from one the user chose means reading the value.
     suggestions: list[Suggestion] = []
 
     # A grouped answer's most obvious continuation is the rows behind it.
@@ -302,23 +339,32 @@ def explore(state, row_count: int | None) -> FollowUp | None:
     # Breaking the answer down, but only if it is not already broken down.
     if not state.active_grouping:
         for column in _enum_columns(table):
-            if column in _NOT_GROUPABLE or column in in_force:
+            if column in _not_groupable() or column in in_force or column in hidden:
+                continue
+            # One group is not a breakdown. Only skip on evidence against:
+            # _varies returns None when the column was not projected, and that
+            # is not a reason to withhold the suggestion.
+            if _varies(result, column) is False:
                 continue
             suggestions.append(Suggestion(
                 id=f"group_{_slug(column)}",
-                label=f"Group by {column.replace('_', ' ')}",
+                label=f"Group by {column_phrase(column)}",
                 action=Action(type="add_group_by", field=column),
             ))
             break
 
     # Ordering, once there is a list to order.
     if state.active_sorting is None and state.last_intent == "list":
-        for fragment in _SORTABLE:
-            column = next((c for c in _columns(table) if fragment in c), None)
+        for fragment in _sortable():
+            column = next(
+                (c for c in _columns(table)
+                 if fragment in c and c not in hidden
+                 and _projected(result, c) is not False),
+                None)
             if column:
                 suggestions.append(Suggestion(
                     id=f"sort_{_slug(column)}",
-                    label=f"Sort by {column.replace('_', ' ')}",
+                    label=f"Sort by {column_phrase(column)}",
                     action=Action(type="set_sort", field=column, operator="DESC"),
                 ))
                 break
@@ -329,12 +375,28 @@ def explore(state, row_count: int | None) -> FollowUp | None:
     # with one suggestion, which is not a choice, so the layer said nothing.
     # The subject is still never offered: dropping that is a different
     # question, not a refinement of this one.
-    removable = [c for c in in_force if c not in _NOT_GROUPABLE]
+    removable = [c for c in in_force if c not in _not_groupable()]
     if removable:
-        column = sorted(removable)[0]
+        column = min(removable)
+        # A status filter matching the active-first default was never typed by
+        # the user, so "remove your filter" describes it from the system's
+        # point of view. Dropping it is the only way out of the default, which
+        # makes this label load-bearing: it has to read like the question a
+        # person would actually ask. The action is unchanged -- remove_filter
+        # on the status column is exactly right.
+        defaulted = _default_values().get(column)
+        was_defaulted = (
+            defaulted is not None
+            and f"'{defaulted}'" in (state.active_filters.get(column) or "")
+        )
+        label = (
+            f"Show every {column_phrase(column)}, not just {defaulted.lower()}"
+            if was_defaulted
+            else f"Remove the {column_phrase(column)} filter"
+        )
         suggestions.append(Suggestion(
             id=f"remove_{_slug(column)}",
-            label=f"Remove the {column.replace('_', ' ')} filter",
+            label=label,
             action=Action(type="remove_filter", field=column),
         ))
 
@@ -348,11 +410,24 @@ def explore(state, row_count: int | None) -> FollowUp | None:
 
     if len(suggestions) < 2:
         return None
+
+    # Four chips, and the escape hatch is built last, so it is the first thing
+    # the cap drops -- while being the one suggestion the reader cannot
+    # reconstruct for themselves. Every other chip here narrows an answer they
+    # can already see; this is the only way back out of a filter the system
+    # added and never mentioned. It is kept at the cost of the chip in front of
+    # it, whatever that happens to be.
+    chosen = suggestions[:4]
+    escape = next(
+        (s for s in suggestions if s.action.type == "remove_filter"), None)
+    if escape is not None and escape not in chosen:
+        chosen = chosen[:3] + [escape]
+
     return FollowUp(
         type="exploration",
         reason="useful_next_actions",
         question="What would you like to explore next?",
-        suggestions=suggestions[:4],
+        suggestions=chosen,
     )
 
 
@@ -372,7 +447,9 @@ def apply_action(state, action: Action) -> str:
     written here is provisional in exactly the way the rest of the pipeline
     expects: update_state overwrites it from whatever query actually ran.
     """
-    label = (action.field or "").replace("_", " ")
+    if action.type in _NEEDS_FIELD and not action.field:
+        raise ValueError("action needs a field")
+    label = column_phrase(action.field)
 
     if action.type in ("add_filter", "replace_filter"):
         operator = action.operator or "="
@@ -405,16 +482,6 @@ def apply_action(state, action: Action) -> str:
         state.last_intent = "aggregate"
         return "How many are there?"
 
-    if action.type == "set_entity":
-        state.active_entity = action.value
-        state.active_filters = {
-            column: predicate
-            for column, predicate in state.active_filters.items()
-            if column != action.field
-        }
-        state.active_filters[action.field] = f"{action.field} = '{action.value}'"
-        return f"{action.value}"
-
     raise ValueError(f"no mutation defined for action type {action.type!r}")
 
 
@@ -424,7 +491,7 @@ def apply_action(state, action: Action) -> str:
 def _enum_lookup() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Every enumerated column in the schema, longest name first.
 
-    Longest first so that "business_object_status" is recognised before the
+    Longest first so that "initiative_status" is recognised before the
     "status" inside it, which belongs to a different table.
     """
     found: dict[str, tuple[str, ...]] = {}
@@ -435,7 +502,13 @@ def _enum_lookup() -> tuple[tuple[str, tuple[str, ...]], ...]:
     return tuple(sorted(found.items(), key=lambda kv: -len(kv[0])))
 
 
-def clarification_followup(text: str) -> FollowUp:
+def _interpretation_token() -> str:
+    """A nonce identifying one clarification's set of chips."""
+    return secrets.token_hex(6)
+
+
+def clarification_followup(text: str, model_options: list[str] | None = None,
+                           about: str | None = None) -> FollowUp:
     """Turn the model's free-text clarification into the structured contract.
 
     The division of labour is deliberate. The model is good at noticing that a
@@ -446,9 +519,54 @@ def clarification_followup(text: str) -> FollowUp:
 
     The prose is kept as the question because it explains the specific problem
     better than any template could.
+
+    One exception, and it is narrow. When the ambiguity is about what the
+    question MEANS rather than which value it names, the schema has nothing to
+    offer: "performing poorly" could be overdue tasks, delayed tasks, open
+    backlog or initiatives at risk, and no column enumerates those readings.
+    Only the model can produce them, and it already does -- it numbers them in
+    the prose. Discarding them and offering the values of whichever column the
+    prose happened to mention is how a five-way question came back as "No /
+    Yes". So model-supplied readings are taken when present.
     """
+    # The readings are prose the model wrote, so they can name a table exactly
+    # as a clarification can. Asked about a table that does not exist, it
+    # helpfully offered the two that do -- as chips, which the boundary does
+    # not scrub because a chip is normally a value rather than a sentence.
+    #
+    # Filtered here rather than at the boundary because only here is it known
+    # where a chip came from. The enum chips below are built
+    # from real data by this function, and must not be filtered: a genuine
+    # initiative type like AR_YD_Suiting looks exactly like an identifier and
+    # is exactly what the user needs offered.
+    readings = [o for o in (model_options or [])
+                if not names_a_database_object(o)]
+
+    question = " ".join(text.split())
+
+    # Same cutoff as the enum path below, for the same reason.
+    if readings and len(readings) <= 8:
+        token = _interpretation_token()
+        return FollowUp(
+            type="clarification",
+            reason="ambiguous_interpretation",
+            question=question,
+            suggestions=[
+                Suggestion(id=f"interpretation_{i + 1}", label=option,
+                           action=None, ref=f"{token}.{i + 1}")
+                for i, option in enumerate(readings)
+            ],
+        )
+
+    # `about` is the model saying which column the doubt is about, in a key of
+    # its own. The scan of the question is kept behind it: a reply that omits
+    # the key, and every reply written before the key existed, still finds its
+    # column the old way. What changes is that a clean question no longer has
+    # to go without chips -- which it did, because the scan could only match a
+    # question that named the column out loud.
+    named = (about or "").strip()
     for column, values in _enum_lookup():
-        if column not in text:
+        if column != named and column not in text:
             continue
         # Too many options stop being a choice and become a list to read.
         if len(values) > 8:
@@ -456,7 +574,7 @@ def clarification_followup(text: str) -> FollowUp:
         return FollowUp(
             type="clarification",
             reason="unknown_value",
-            question=" ".join(text.split()),
+            question=question,
             suggestions=[
                 Suggestion(
                     id=f"filter_{_slug(column)}_{_value_id(value)}",
@@ -471,7 +589,7 @@ def clarification_followup(text: str) -> FollowUp:
     return FollowUp(
         type="clarification",
         reason="ambiguous_request",
-        question=" ".join(text.split()),
+        question=question,
         suggestions=[],
     )
 
@@ -482,7 +600,40 @@ NO_FOLLOWUP = FollowUp(type="none", reason="answer_complete", question="",
                        suggestions=[], allow_free_text=True)
 
 
-def decide(state, row_count: int | None, clarification: str | None) -> FollowUp:
+def next_questions(row_count: int | None,
+                   model_next: list[str] | None = None) -> FollowUp | None:
+    """The model's follow-up questions, as chips.
+
+    The same row-count gate the registry path applies: an empty result
+    has nothing to explore, and one suggestion is not a choice.
+
+    Each carries no action. Choosing one sends its text as an ordinary
+    question, so a suggestion that turns out to name something absent is caught
+    by the clarification path exactly as a typed question would be -- there is
+    nothing here that can put a made-up value into a query.
+    """
+    if not model_next or len(model_next) < 2:
+        return None
+    if row_count is not None and row_count <= 0:
+        return None
+    token = _interpretation_token()
+    return FollowUp(
+        type="exploration",
+        reason="useful_next_questions",
+        question="What would you like to know next?",
+        suggestions=[
+            Suggestion(id=f"next_{i + 1}", label=question, action=None,
+                       ref=f"{token}.{i + 1}")
+            for i, question in enumerate(list(model_next)[:4])
+        ],
+    )
+
+
+def decide(state, row_count: int | None, clarification: str | None,
+           result: dict | None = None,
+           model_options: list[str] | None = None,
+           model_next: list[str] | None = None,
+           clarify_about: str | None = None) -> FollowUp:
     """What to say once the turn is over.
 
     Ordered by how much the user needs it. An unanswered question needs a
@@ -491,8 +642,20 @@ def decide(state, row_count: int | None, clarification: str | None) -> FollowUp:
     how a helpful feature becomes noise.
     """
     if clarification is not None:
-        return clarification_followup(clarification)
-    return explore(state, row_count) or NO_FOLLOWUP
+        return clarification_followup(clarification, model_options,
+                                      clarify_about)
+    # The model's own suggestions first, because only they can be about the
+    # question. explore() reads the business-rule registry, which knows what
+    # the schema affords and nothing about what was asked -- so after "which
+    # departments are performing poorly" it offers "Just count them".
+    #
+    # Kept as the fallback rather than replaced: a reply that carries no
+    # suggestions, and every reply written before this field existed, still
+    # gets the registry's.
+    suggested = next_questions(row_count, model_next)
+    if suggested is not None:
+        return suggested
+    return explore(state, row_count, result) or NO_FOLLOWUP
 
 
 # ------------------------------------------------ answering a clarification --
@@ -528,34 +691,129 @@ def resolve_clarification(
     # An id is a machine token and is matched exactly. Lowercasing it would
     # reintroduce the collision between AR_YD_Shirting and AR_YD_SHIRTING that
     # the id was made case-preserving to avoid.
-    by_id = [s.action.value for s in pending.suggestions if s.id == reply]
+    by_id = [_chosen_value(s) for s in pending.suggestions if s.id == reply]
     if len(by_id) == 1:
         chosen = by_id[0]
     else:
         # A person types the value, in whatever case they please -- unless
         # that is itself ambiguous, in which case the exact spelling decides.
         candidates = [
-            s.action.value for s in pending.suggestions
-            if s.action.value
-            and reply.lower() in (s.action.value.lower(), s.label.lower())
+            _chosen_value(s) for s in pending.suggestions
+            if _chosen_value(s)
+            and reply.lower() in (_chosen_value(s).lower(), s.label.lower())
         ]
         if len(candidates) > 1:
             candidates = [v for v in candidates if v == reply]
         if len(candidates) != 1:
+            # "4", when the model numbered four readings and the user picked
+            # one. Before the substring pass, so a numeric value cannot be
+            # resolved by the looser rule.
+            ordinal = _ordinal_choice(reply, pending)
+            if ordinal is not None:
+                return _resume(original_question, ordinal)
+        if len(candidates) != 1:
             # "the suiting one" -- named, but not on its own.
-            candidates = [s.action.value for s in pending.suggestions
-                          if s.action.value
-                          and s.action.value.lower() in reply.lower()]
+            candidates = [_chosen_value(s) for s in pending.suggestions
+                          if _chosen_value(s)
+                          and _chosen_value(s).lower() in reply.lower()]
         if len(candidates) != 1:
             return None
         chosen = candidates[0]
 
-    # Put the choice where the truncated name was, so the resumed question is
-    # the one the user meant to ask in the first place.
-    for token in sorted(_CANDIDATE_TOKEN.findall(original_question),
-                        key=len, reverse=True):
-        if token.lower() in _NOT_AN_ENTITY or token == chosen:
+    return _resume(original_question, chosen)
+
+
+def _chosen_value(suggestion: Suggestion) -> str | None:
+    """What a suggestion resolves to when it is chosen.
+
+    An action's value where there is one, and the label otherwise. A reading
+    mutates no state, so it carries no action -- without the fallback every
+    match pass would skip it and typing a reading out in full would fail to
+    resolve just as surely as typing its number.
+    """
+    if suggestion.action is not None and suggestion.action.value:
+        return suggestion.action.value
+    return suggestion.label or None
+
+
+def _ordinal_index(reply: str) -> int | None:
+    """A reply read as a position in a list, 1-based, or None."""
+    reply = (reply or "").strip()
+    found = re.match(
+        r"^(?:the\s+|option\s*|choice\s*|number\s*|no\.?\s*|#\s*)*(\d{1,2})"
+        r"(?:st|nd|rd|th)?\s*[.)]?$",
+        reply, re.IGNORECASE)
+    if found:
+        return int(found.group(1))
+    words = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+             "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10}
+    found = re.match(r"^(?:the\s+)?([a-z]+)(?:\s+one)?$", reply, re.IGNORECASE)
+    if found:
+        return words.get(found.group(1).lower())
+    return None
+
+
+def _ordinal_choice(reply: str, pending: FollowUp) -> str | None:
+    """The reading a positional reply picked, if it picked one.
+
+    Only ever offered against readings the model itself numbered in prose. Two
+    reasons, and both are load-bearing.
+
+    Value chips are not positionally answerable. "Show the AR_YD
+    items" offers names that differ only in case (AR_YD_Shirting and
+    AR_YD_SHIRTING) -- asking someone to tell option 2 from option 3 by
+    number when they read alike is not a question with an answer.
+
+    And a bare number means nothing on its own. Asked to choose between listing
+    and grouping, a user once replied "3" and the turn came back as LIMIT 3. A
+    number is a choice only where a numbered list was offered, which is
+    precisely what this gate tests.
+    """
+    if pending.reason != "ambiguous_interpretation":
+        return None
+    index = _ordinal_index(reply)
+    if index is None or index < 1 or index > len(pending.suggestions):
+        # Out of range is not a near miss. Nine, against four readings, is the
+        # user talking about something else.
+        return None
+    return _chosen_value(pending.suggestions[index - 1])
+
+
+def _candidate_tokens(text: str) -> list[str]:
+    """Tokens that could name an entity, longest first."""
+    return [t for t in sorted(_CANDIDATE_TOKEN.findall(text), key=len, reverse=True)
+            if t.lower() not in _not_an_entity()]
+
+
+def _resume(original_question: str, chosen: str) -> str:
+    """The original question with the choice written into it.
+
+    Substituting where the truncated name was is what makes the result read
+    like something a person would have typed. When nothing in the question was
+    a partial form of the choice -- which is always so for a reading, since a
+    reading is a sentence rather than a name -- the choice is appended instead.
+    """
+    for token in _candidate_tokens(original_question):
+        if token == chosen:
             continue
         if _is_partial_name(token, chosen):
             return original_question.replace(token, chosen)
     return f"{original_question} ({chosen})"
+
+
+def label_for_ref(pending: FollowUp | None, ref: str) -> str | None:
+    """The reading a chip was offered for, given the ref it carries.
+
+    Matching against the clarification currently outstanding is what ties a
+    click to the question that prompted it: a chip still on screen from three
+    turns further up carries a nonce nothing is waiting on any more, so it
+    matches nothing and its label is read as ordinary text instead of silently
+    answering a question that has already moved on.
+    """
+    ref = (ref or "").strip()
+    if not ref or pending is None or not pending.suggestions:
+        return None
+    for suggestion in pending.suggestions:
+        if suggestion.ref == ref:
+            return suggestion.label
+    return None

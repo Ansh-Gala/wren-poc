@@ -1,0 +1,336 @@
+import asyncio
+import hashlib
+import json
+import re
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+from openai import APITimeoutError, AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+
+from pipeline.models import ClaudeRun, Session
+from config.settings import Settings
+from llm_api.cli_pool import MAX_OUTPUT_TOKENS
+from llm_api.provider import LLMProvider
+from claude.prompts import build_lean_system_prompt, build_system_prompt, build_user_prompt
+
+# An agent loop with no ceiling is both a hang risk and an unbounded bill: every
+# turn resends the whole conversation. Real runs settle in 2-3 tool calls, so
+# this only ever fires on a model that has got stuck.
+MAX_TURNS = 8
+
+# A single tool result must not be allowed to dominate the context. The cap is
+# generous next to what the allowed tools actually return (the largest,
+# describe_model, is ~880 tokens) and only bites on a pathological payload.
+MAX_TOOL_RESULT_CHARS = 8000
+
+# A ceiling on the lean reply, which is a SELECT and a few sentences. The same
+# figure the Drupal port uses for every transport (LlmProviderInterface::
+# MAX_TOKENS), so a model is not given more room here than it gets there.
+LEAN_MAX_TOKENS = MAX_OUTPUT_TOKENS
+
+
+def _breakpoints(settings: Settings) -> bool:
+    """True for OpenAI gpt-5.6 and later, which take cache breakpoints."""
+    if settings.llm_provider != "openai":
+        return False
+    found = re.match(r"gpt-(\d+)(?:\.(\d+))?", settings.openai_model or "")
+    return bool(found) and (int(found.group(1)), int(found.group(2) or 0)) >= (5, 6)
+
+
+def _system(settings: Settings, system_prompt: str) -> str | list:
+    """The system message; from gpt-5.6 it ends in a 12-hour cache breakpoint,
+    so the static prompt is cached on its own and outlives idle gaps."""
+    if not _breakpoints(settings):
+        return system_prompt
+    return [{"type": "text", "text": system_prompt,
+             "prompt_cache_breakpoint": {"mode": "explicit", "ttl": "12h"}}]
+
+
+def _cache(settings: Settings, system_prompt: str, mode: str = "explicit") -> dict:
+    """OpenAI's cache fields (none for Groq or Gemini): a key from the system
+    prompt's hash and, from gpt-5.6, the mode -- "explicit" never writes the
+    changing question, "implicit" (MCP) also caches earlier turns."""
+    if settings.llm_provider != "openai":
+        return {}
+    key = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:32]
+    fields: dict = {"prompt_cache_key": f"wren-{key}"}
+    if _breakpoints(settings):
+        fields["prompt_cache_options"] = {"mode": mode}
+    return fields
+
+
+def _cache_counts(usage) -> dict:
+    """Tokens read from and written to OpenAI's cache; zero when not reported."""
+    details = getattr(usage, "prompt_tokens_details", None) if usage else None
+    return {"cache_read_tokens": getattr(details, "cached_tokens", 0) or 0,
+            "cache_write_tokens": getattr(details, "cache_write_tokens", 0) or 0}
+
+
+def _limits(settings: Settings) -> dict:
+    """The output cap (and temperature) in each vendor's form: OpenAI's reasoning
+    models reject max_tokens and temperature; Groq and Gemini expect both."""
+    if settings.llm_provider == "openai":
+        return {"max_completion_tokens": LEAN_MAX_TOKENS}
+    return {"max_tokens": LEAN_MAX_TOKENS, "temperature": 0}
+
+
+def _cap(text: str) -> str:
+    if len(text) <= MAX_TOOL_RESULT_CHARS:
+        return text
+    dropped = len(text) - MAX_TOOL_RESULT_CHARS
+    return text[:MAX_TOOL_RESULT_CHARS] + f"\n... [truncated {dropped} chars]"
+
+
+class OpenAIProvider(LLMProvider):
+    def ask(
+        self,
+        question: str,
+        mcp_config_path: Path,
+        privacy_mode: str,
+        settings: Settings,
+        session: Session | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ClaudeRun:
+        if settings.cli_lean:
+            return asyncio.run(self._ask_lean(question, settings, session, on_delta))
+        return asyncio.run(self._ask_async(question, privacy_mode, settings, session))
+
+    async def _ask_lean(
+        self,
+        question: str,
+        settings: Settings,
+        session: Session | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ClaudeRun:
+        """One call with the whole semantic layer as the system prompt, no tools,
+        as the Drupal port sends. Nothing question-specific may come before
+        the system prompt, or the prefix cache is lost."""
+        started = time.perf_counter()
+
+        if not settings.openai_api_key:
+            return ClaudeRun(ok=False, error="OPENAI_API_KEY is not set.")
+
+        # One attempt with Drupal's limit: the SDK's own defaults (600s, two
+        # retries) could ask the same question three times.
+        client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            timeout=float(settings.claude_timeout_seconds),
+            max_retries=0,
+        )
+
+        system_prompt = build_lean_system_prompt()
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": _system(settings, system_prompt)},
+            {"role": "user", "content": build_user_prompt(
+                question, session,
+                context=session.context_block if session else None,
+                lean=True)},
+        ]
+        cache = _cache(settings, system_prompt)
+
+        try:
+            if on_delta is None:
+                response = await client.chat.completions.create(
+                    model=settings.openai_model,
+                    messages=messages,
+                    **_limits(settings),
+                    **cache,
+                )
+                text = response.choices[0].message.content or ""
+                usage = response.usage
+            else:
+                text, usage = await self._stream_lean(
+                    client, settings, messages, on_delta, cache)
+        except Exception as e:
+            return ClaudeRun(
+                ok=False,
+                timed_out=isinstance(e, APITimeoutError),
+                error=str(e),
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+        finally:
+            await client.close()     # its connection pool, made for this one call
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+
+        return ClaudeRun(
+            ok=text != "",
+            duration_ms=elapsed_ms,
+            result_text=text,
+            error=None if text else "the model returned no message content",
+            prompt_tokens=(usage.prompt_tokens or 0) if usage else 0,
+            completion_tokens=(usage.completion_tokens or 0) if usage else 0,
+            **_cache_counts(usage),
+        )
+
+    async def _stream_lean(self, client, settings, messages, on_delta, cache):
+        """The same call, streamed; include_usage keeps the token counts."""
+        text = ""
+        usage = None
+        stream = await client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            **_limits(settings),
+            **cache,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in stream:
+            if chunk.usage:
+                usage = chunk.usage
+            if not chunk.choices:
+                # The usage block arrives in a final chunk of its own, with
+                # no choices to index.
+                continue
+            piece = chunk.choices[0].delta.content or ""
+            if piece:
+                text += piece
+                on_delta(piece)
+        return text, usage
+
+    async def _ask_async(
+        self,
+        question: str,
+        privacy_mode: str,
+        settings: Settings,
+        session: Session | None = None,
+    ) -> ClaudeRun:
+        # The MCP path only. Production ships without wren_setup and the
+        # bridge, so the lean path must not need them to import.
+        from llm_api.mcp_bridge import WrenMCPBridge
+        from wren_setup.mcp_config import allowed_tools, to_claude_name, to_mcp_name
+
+        started = time.perf_counter()
+
+        if not settings.openai_api_key:
+            return ClaudeRun(ok=False, error="OPENAI_API_KEY is not set.")
+
+        client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            timeout=float(settings.claude_timeout_seconds),
+            max_retries=0,
+        )
+        
+        bridge = WrenMCPBridge(settings.benchmark_config, privacy_mode, settings)
+        
+        # The client too: its connection pool is made for this one question.
+        async with client, bridge.get_session() as mcp_session:
+            tools_response = await mcp_session.list_tools()
+            
+            allowed = set(allowed_tools(privacy_mode))
+            # The MCP server answers to bare names ("dry_plan"); allowed_tools
+            # returns Claude Code's addressing form ("mcp__wren__dry_plan").
+            # Comparing the two directly matched nothing, so tools=None was
+            # sent and the model never learned Wren existed.
+            mcp_tools = [t for t in tools_response.tools if to_claude_name(t.name) in allowed]
+            if not mcp_tools:
+                return ClaudeRun(
+                    ok=False,
+                    error=(
+                        "no allowed Wren tools matched the MCP server's tool list "
+                        f"(server offers {sorted(t.name for t in tools_response.tools)}). "
+                        "Answering without the semantic layer would measure the model alone."
+                    ),
+                )
+            openai_tools = [bridge.to_openai_tool(t) for t in mcp_tools]
+            
+            system_prompt = build_system_prompt()
+            messages: list[ChatCompletionMessageParam] = [
+                {"role": "system", "content": _system(settings, system_prompt)},
+                {"role": "user", "content": build_user_prompt(
+                    question, session,
+                    context=session.context_block if session else None)}
+            ]
+            cache_fields = _cache(settings, system_prompt, mode="implicit")
+            
+            tools_used = []
+            mcp_errors = []
+            result_text = ""
+            prompt_tokens = 0
+            completion_tokens = 0
+            cache = {"cache_read_tokens": 0, "cache_write_tokens": 0}
+
+            try:
+                for _turn in range(MAX_TURNS):
+                    # Each turn appends to the same messages and keeps the
+                    # same tools, so the earlier turns are a cacheable prefix.
+                    response = await client.chat.completions.create(
+                        model=settings.openai_model,
+                        messages=messages,
+                        tools=openai_tools if openai_tools else None,
+                        temperature=0,
+                        **cache_fields,
+                    )
+
+                    if response.usage:
+                        prompt_tokens += response.usage.prompt_tokens or 0
+                        completion_tokens += response.usage.completion_tokens or 0
+                        for name, count in _cache_counts(response.usage).items():
+                            cache[name] += count
+                        
+                    msg = response.choices[0].message
+                    messages.append(msg)
+                    
+                    if not msg.tool_calls:
+                        # Model is done
+                        result_text = msg.content or ""
+                        break
+                        
+                    for tool_call in msg.tool_calls:
+                        # Recorded in Claude Code's spelling so wren_tool_calls()
+                        # counts the same way for both providers.
+                        tools_used.append(to_claude_name(tool_call.function.name))
+                        try:
+                            args = json.loads(tool_call.function.arguments)
+                        except json.JSONDecodeError:
+                            args = {}
+
+                        # Call MCP
+                        try:
+                            result = await mcp_session.call_tool(
+                                to_mcp_name(tool_call.function.name), args
+                            )
+                            content_str = "\n".join([c.text for c in result.content if c.type == "text"])
+                            if result.isError:
+                                mcp_errors.append(content_str)
+                        except Exception as e:
+                            content_str = f"Error calling tool: {e}"
+                            mcp_errors.append(content_str)
+
+                        content_str = _cap(content_str)
+
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": content_str,
+                        })
+            except Exception as e:
+                return ClaudeRun(
+                    ok=False,
+                    error=str(e),
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    tools_used=tools_used,
+                    mcp_errors=mcp_errors,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    **cache,
+                )
+                
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            
+            # Every turn asked for a tool: there is no answer to report.
+            return ClaudeRun(
+                ok=bool(result_text),
+                error=None if result_text else f"no final answer after {MAX_TURNS} turns",
+                duration_ms=elapsed_ms,
+                result_text=result_text,
+                tools_used=tools_used,
+                mcp_errors=mcp_errors,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                **cache,
+            )

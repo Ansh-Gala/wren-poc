@@ -2,19 +2,26 @@
    API INTEGRATION — this is the only file that talks to a backend.
    ===========================================================================
 
-   Point ENDPOINT at your service, untick "use mock responses" in the header,
-   and nothing else in this console needs to change.
+   Point ENDPOINT at your service, and nothing else in this console needs to
+   change.
 
    REQUEST the console sends:
 
      POST <ENDPOINT>
      {
        "question":       "only the active ones",   // exactly what was typed
+       "user_id":        12,                       // the asking TMS user; required.
+                                                   //   400 if missing or not a positive
+                                                   //   whole number, 403 without a
+                                                   //   CHATBOT_RUN_ROLES role
        "session_id":     "qa-1712...",             // stable per conversation
        "reset_context":  false,                    // true right after Reset
        "action":         null,                     // set when a chip was clicked:
                                                    //   {type, field, operator, value}
-       "debug":          false                     // see below
+       "debug":          false,                    // see below
+       "save_chat":      false                     // this console's chats are not
+                                                   //   saved; honoured on this
+                                                   //   machine only
      }
 
    DEBUG is off unless the console asks for it, and it is enforced server-side
@@ -35,16 +42,15 @@
 
      {
        // -------------------------------------------------- what it decided
-       "decision":             "new_block | follow_up | switch | rebase |
-                                clarification_response",
+       "decision":             "new_block | follow_up | clarification_response",
        "question":             "only the active ones",       // as typed
        "normalized_question":  "only the active ones",       // after repair
        "repairs":              [{original, corrected, kind}],
        "resumed_from":         null,   // set when this answered a clarification
-       "preflight_clarified":  false,  // decided without calling the model
 
        // ------------------------------------------------------- the query
        "generated_sql":        "SELECT ...",   // null if it asked instead
+       "generated_sql_pretty": "SELECT\n  ...", // the same, laid out to read
        "sql_valid":            true,
        "execution_success":    true,
        "error":                null,           // safe to show; never the raw one
@@ -55,10 +61,30 @@
          "columns":       ["business_object_id", "..."],   // debug only
          // What the table actually renders. Derived from `columns` by
          // pipeline/labels.py, so the query and the heading never disagree.
-         "column_labels": ["Business Object Id", "..."],
+         "column_labels": ["Initiative Id", "..."],
          "rows":          [[112, "..."], ...],     // a preview is fine
          "row_count":     22,
-         "truncated":     false
+         "truncated":     false,
+
+         // Presentation metadata, all of it positional so that none of it
+         // names a column and all of it survives redaction. `columns` does
+         // not, and debug off is the mode the grid runs in.
+         "column_order":   [1, 0, 2],   // display order, as positions
+         "hidden_columns": [2],         // start collapsed, still exported
+         // Which cell identifies the initiative. `ref_id` is the cell that
+         // opens the details dialog; `id` is what the dialog is given. Any
+         // of the three may be null -- an aggregate has none of them.
+         "initiative":     {"id": 0, "ref_id": 1, "colour": null},
+         // Initiative id -> the CSS class the colour bar draws. Absent when
+         // the answer has no initiative, or no colour could be resolved.
+         "colours":        {"112": "a_bl"},
+         // The grouping the table nominated, if any. Empty lists mean the
+         // grid shows records, not groups.
+         "grouping": {
+           "row_groups":    [0],
+           "pivot_columns": [],
+           "value_columns": [{"index": 3, "aggFunc": "sum"}]
+         }
        },
 
        // ------------------------------------- scoring, when ground truth exists
@@ -73,14 +99,14 @@
        "followup": {
          "follow_up_required": true,
          "type":     "clarification | exploration | none",
-         "reason":   "ambiguous_entity | unknown_value | ambiguous_request |
-                      useful_next_actions",
-         "question": "Which AR_YD type did you mean?",
+         "reason":   "unknown_value | ambiguous_interpretation |
+                      ambiguous_request | useful_next_actions",
+         "question": "Which SLA status did you mean?",
          "suggestions": [
-           { "id": "set_entity_AR_YD_Suiting",
-             "label": "AR_YD_Suiting",
-             "action": {"type": "set_entity", "field": "business_object_type",
-                        "operator": "=", "value": "AR_YD_Suiting"} }
+           { "id": "filter_task_sla_status_Delayed",
+             "label": "Delayed",
+             "action": {"type": "add_filter", "field": "task_sla_status",
+                        "operator": "=", "value": "Delayed"} }
          ],
          "allow_free_text": true
        },
@@ -101,6 +127,24 @@
          "pending_question": null      // what the system is waiting on
        },
        "state_mutations": ["+ filter business_object_status = 'Active'"],
+
+       // ------------------------------------------------ who answered
+       "llm": {"mode": "cli", "provider": "claude-cli", "model": "sonnet"},
+
+       // ---------------------------------------------------- PII aliasing
+       // {"enabled": false} when PII_ALIASING is off. On, what the model
+       // was sent and how each value was aliased -- real values, so debug only.
+       "pii": {
+         "enabled": true,
+         "model": "fastino/gliner2.5-small-v1", "threshold": 0.5, "detect_ms": 61.2,
+         "sent_to_llm": "tasks of PERSON_001",
+         "aliases": [{"alias": "PERSON_001", "label": "person",
+                      "original": "Rahul Sharma", "new": true, "used": true}],
+         "masked": 0,                       // known values the tripwire caught
+         "generated_sql": "SELECT ... 'PERSON_001'",
+         "executed_sql": "SELECT ... 'Rahul Sharma'",
+         "executed_sql_pretty": "SELECT\n  ..."
+       },
 
        // ---------------------------------------------------------- cost
        "tokens": {
@@ -129,14 +173,28 @@ const API = (() => {
     ? `${location.origin}/debug`
     : "http://localhost:8000/debug";
 
+  // The same turn, delivered in two parts. See streamMessageToBackend.
+  const STREAM_ENDPOINT = ENDPOINT + "/stream";
+
+  // The model and the modes, for the line under the input box.
+  const INFO_ENDPOINT = location.protocol.startsWith("http")
+    ? `${location.origin}/info`
+    : "http://localhost:8000/info";
+
   const TIMEOUT_MS = 120000;   // a cold model call can take a while
 
-  /* THE INTEGRATION POINT. Everything above is documentation for this call. */
-  async function sendMessageToBackend(payload, { useMock = true } = {}) {
-    // window.MOCK is absent in a production build, which drops mock.js. Asking
-    // the real backend is the right fallback; throwing would be a blank page.
-    if (useMock && window.MOCK) return MOCK.respond(payload);
+  // The server's own sentence when it sent one ("user_id is required"),
+  // else the status line.
+  async function refusal(res) {
+    try {
+      const body = await res.json();
+      if (body && body.error) return body.error;
+    } catch {}
+    return `backend returned ${res.status} ${res.statusText}`;
+  }
 
+  /* THE INTEGRATION POINT. Everything above is documentation for this call. */
+  async function sendMessageToBackend(payload) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
@@ -147,9 +205,85 @@ const API = (() => {
         signal: controller.signal,
       });
       if (!res.ok) {
-        throw new Error(`backend returned ${res.status} ${res.statusText}`);
+        throw new Error(await refusal(res));
       }
       return normalize(await res.json());
+    } catch (err) {
+      if (err.name === "AbortError") {
+        throw new Error(`no response within ${TIMEOUT_MS / 1000}s`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /* THE SAME CALL, IN TWO PARTS.
+
+     The backend knows the SQL about a second before it has finished writing
+     the sentences around it, so /ask/stream sends the table as soon as it has
+     run the query and the rest when it is written:
+
+       event: rows      what the query returned -- no explanation, no chips
+       event: answer    exactly what POST /ask returns
+
+     `onRows` may never fire: a turn that asks for clarification has no SQL.
+     `onAnswer` always fires, and carries everything, so the page is correct
+     whether or not the early table arrived.
+
+     Falls back to the plain call when the browser cannot read a stream. */
+  async function streamMessageToBackend(payload, { onRows } = {}) {
+    if (!window.ReadableStream || !window.TextDecoder) {
+      return sendMessageToBackend(payload);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(STREAM_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(await refusal(res));
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let answer = null;
+
+      // An event ends at a blank line, and a chunk can split one anywhere --
+      // including mid-character, which is why the decoder is told to stream.
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let cut;
+        while ((cut = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+
+          let name = null;
+          let data = null;
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) name = line.slice(7).trim();
+            else if (line.startsWith("data: ")) {
+              try { data = JSON.parse(line.slice(6)); } catch (e) { data = null; }
+            }
+          }
+          if (!data) continue;
+          if (name === "rows" && onRows) onRows(normalize(data));
+          else if (name === "answer") answer = normalize(data);
+          else if (name === "error") throw new Error(data.error || "turn failed");
+        }
+      }
+
+      if (!answer) throw new Error("the stream ended without an answer");
+      return answer;
     } catch (err) {
       if (err.name === "AbortError") {
         throw new Error(`no response within ${TIMEOUT_MS / 1000}s`);
@@ -171,9 +305,9 @@ const API = (() => {
       normalized_question: r.normalized_question || r.question || "",
       repairs: r.repairs || [],
       resumed_from: r.resumed_from ?? null,
-      preflight_clarified: !!r.preflight_clarified,
 
       generated_sql: r.generated_sql ?? null,
+      generated_sql_pretty: r.generated_sql_pretty ?? null,
       sql_valid: r.sql_valid ?? null,
       execution_success: r.execution_success ?? null,
       error: r.error ?? null,
@@ -192,12 +326,17 @@ const API = (() => {
       state: r.state || {},
       state_mutations: r.state_mutations || [],
 
+      llm: r.llm || null,
+      pii: r.pii || null,
+
       tokens: r.tokens || {},
+      token_usage: r.token_usage || null,
       latency_ms: r.latency_ms ?? null,
       tool_calls: r.tool_calls ?? null,
       context_chars: r.context_chars ?? null,
     };
   }
 
-  return { sendMessageToBackend, normalize, ENDPOINT, DEBUG_ENDPOINT };
+  return { sendMessageToBackend, streamMessageToBackend, normalize,
+           ENDPOINT, STREAM_ENDPOINT, DEBUG_ENDPOINT, INFO_ENDPOINT };
 })();

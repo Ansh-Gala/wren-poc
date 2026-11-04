@@ -1,0 +1,99 @@
+# Attributes schema: the tms_initiative_attributes_flat entry.
+#
+# Paste the "Attributes schema" block from the /devel/php snippet (README.md)
+# over everything below this comment. Same shape as vf_sql_chatbot's
+# metadata/schema_description.yaml: 'tables' and 'relationships'.
+
+tables:
+  tms_initiative_attributes_flat:
+    description: 'Dynamic JSON attributes for the Initiative, such as season, category, vendor, etc.'
+    primary_key: initiative_id
+    columns:
+      initiative_id:
+        type: INTEGER
+        description: 'Unique identifier of the Initiative.'
+      assign_date:
+        type: VARCHAR
+        description: 'Assign date attribute, stored as text.'
+      category:
+        type: VARCHAR
+        description: 'Category attribute for the Initiative.'
+      channel:
+        type: VARCHAR
+        description: 'Channel attribute.'
+        values:
+          - '101'
+          - '12'
+          - DTR
+          - TAS
+          - WS
+      complexity:
+        type: VARCHAR
+        description: 'Complexity attribute.'
+      count:
+        type: VARCHAR
+        description: 'Count attribute. Quote this identifier in SQL; it collides with the COUNT function.'
+      end_date:
+        type: VARCHAR
+        description: 'End date attribute, stored as text.'
+      event:
+        type: VARCHAR
+        description: 'Event attribute.'
+      lead_time_vendor:
+        type: VARCHAR
+        description: 'Lead time vendor attribute.'
+      merchant_name:
+        type: VARCHAR
+        description: 'Merchant name attribute.'
+      moq:
+        type: VARCHAR
+        description: 'Minimum order quantity attribute.'
+      number_of_designs:
+        type: VARCHAR
+        description: 'Number of designs attribute.'
+      number_of_options:
+        type: VARCHAR
+        description: 'Number of options attribute.'
+      person:
+        type: VARCHAR
+        description: 'Person attribute.'
+      pi_date:
+        type: VARCHAR
+        description: 'PI date attribute, stored as text.'
+      season:
+        type: VARCHAR
+        description: 'Season attribute for the Initiative. Sparsely populated: only 16 of 307 rows have a value, and they all belong to the AR_NPD_YD_SALESPLAN, AR_SALESPLAN_Shirting and AR_SALESPLAN_Suiting types.'
+        values:
+          - Autumn
+          - Dummy01
+          - S6002
+          - S6010
+          - Summer
+          - Winter
+      subcategory:
+        type: VARCHAR
+        description: 'Subcategory attribute.'
+      total_qty:
+        type: VARCHAR
+        description: 'Total quantity attribute.'
+      vendor:
+        type: VARCHAR
+        description: 'Vendor attribute.'
+      volume:
+        type: VARCHAR
+        description: 'Volume attribute.'
+        values:
+          - '1'
+          - '100'
+          - '12'
+          - '132'
+          - '15'
+          - '2'
+          - V1086
+          - Vol001
+relationships:
+- name: initiative_attributes
+  from: tms_initiative_attributes_flat.initiative_id
+  to: tms_initiative_flat.initiative_id
+  join_type: ONE_TO_ONE
+  description: Attributes for an initiative.

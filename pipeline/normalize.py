@@ -22,11 +22,8 @@ import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from functools import lru_cache
-from pathlib import Path
 
-import yaml
-
-META_DIR = Path(__file__).resolve().parents[1] / "metadata"
+from pipeline import metadata
 
 # Below this many characters a typo is indistinguishable from a different
 # word: "ope" is one edit from "open", "one" and "top".
@@ -65,6 +62,19 @@ can could will would shall should may might must
 about per versus mine yours ours everything something anything nothing
 overdue urgent pending done outstanding
 """.split())
+# The product's own such words are product.yaml's spelling.never_correct.
+
+
+# Prefixes that change what a word means. "unassigned" is two letters from
+# "assigned" and scores 0.89, so it looks like a typo of the opposite word.
+# Real session, 25 September 2026: "tasks ... which are unassigned" reached
+# the model as "which are assigned" and was answered in reverse. A repair may
+# never drop one of these from the front of what the user typed.
+_MEANING_PREFIXES = ("un", "non", "dis", "re")
+
+
+def _drops_a_prefix(token: str, corrected: str) -> bool:
+    return any(token.startswith(p) and not corrected.startswith(p) for p in _MEANING_PREFIXES)
 
 
 @dataclass(frozen=True)
@@ -91,10 +101,10 @@ def load_vocabulary() -> frozenset[str]:
     """Every word the database itself uses, lowercased.
 
     Table names, column names and enum values, each also split on underscores
-    so that ``business_object_status`` contributes "business", "object" and
+    so that ``initiative_status`` contributes "business", "object" and
     "status" -- the words a person actually types.
     """
-    doc = yaml.safe_load((META_DIR / "schema_description.yaml").read_text(encoding="utf-8")) or {}
+    doc = metadata.schema()
     words: set[str] = set()
 
     def add(text: str) -> None:
@@ -136,7 +146,7 @@ def _morphs(token: str) -> list[str]:
     """The token and its obvious singular/plural variants.
 
     The vocabulary is built from column names, which are inconsistent about
-    number -- ``business_object_type`` is singular, ``open_tasks_list`` is
+    number -- ``initiative_type`` is singular, ``open_tasks_list`` is
     plural. Without this, "items" is one edit from the known word "item" and
     gets "repaired" into it, silently rewriting half the benchmark.
 
@@ -258,14 +268,17 @@ def _starts_a_sentence(question: str, start: int) -> bool:
 
 def normalize(question: str) -> Normalized:
     """Rewrite obvious misspellings of schema terms, leaving everything else."""
+    from pipeline.metadata import profile
+
     vocabulary = load_vocabulary()
+    query_words = _QUERY_WORDS | frozenset(profile().never_correct())
     repairs: list[Repair] = []
     quoted = _quoted_spans(question)
 
     def repair_token(match: re.Match) -> str:
         token = match.group(0)
         lowered = token.lower()
-        if len(lowered) < _MIN_LENGTH or lowered in _QUERY_WORDS:
+        if len(lowered) < _MIN_LENGTH or lowered in query_words:
             return token
 
         # Inside quotes the user is naming a value. Repairing there is a guess
@@ -287,7 +300,7 @@ def normalize(question: str) -> Normalized:
         if _is_known(lowered, vocabulary):
             return token
         corrected = _best_match(lowered, vocabulary)
-        if corrected is None or corrected == lowered:
+        if corrected is None or corrected == lowered or _drops_a_prefix(lowered, corrected):
             return token
         corrected = _match_case(token, corrected)
         repairs.append(Repair(original=token, corrected=corrected, kind="typo"))

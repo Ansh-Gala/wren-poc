@@ -2,7 +2,7 @@
 
 Result comparison alone is not enough. Asked for closed AR_PD_Suiting items,
 the model filtered `workflow_code = 'AR_PD_Suiting'` rather than
-`business_object_type`. Those two columns happen to agree on this data, so the
+`initiative_type`. Those two columns happen to agree on this data, so the
 query returned the right four rows and scored as correct -- while resting on a
 column that means something else and will diverge the moment the data changes.
 
@@ -19,6 +19,8 @@ away. What survives is the choice of column, value, operator and shape.
 """
 
 from __future__ import annotations
+
+from functools import lru_cache
 
 from dataclasses import dataclass, field
 
@@ -42,11 +44,24 @@ class SqlSignature:
     grouping: set[str] = field(default_factory=set)
     ordering: tuple = ()
     limit: int | None = None
-    distinct: bool = False
     parsed: bool = True
 
-    def is_empty(self) -> bool:
-        return not self.tables and not self.projection
+
+def _agg_key(agg: exp.AggFunc, aliases: dict[str, str], sole: str | None) -> tuple[str, str]:
+    """An aggregate as (function name, what it reads): count(*) or sum(t.x)."""
+    fname = (agg.sql_name().lower() if hasattr(agg, "sql_name")
+             else type(agg).__name__.lower())
+    inner = agg.this
+    if inner is None or isinstance(inner, exp.Star):
+        col = "*"
+    elif isinstance(inner, exp.Column):
+        col = _qualify(inner, aliases, sole)
+    else:
+        col = " ".join(inner.sql(dialect="postgres").split())
+    # COUNT(*) and COUNT(1) ask the same thing.
+    if fname == "count" and col in ("*", "1"):
+        col = "*"
+    return fname, col
 
 
 def _alias_map(tree: exp.Expression) -> dict[str, str]:
@@ -139,26 +154,12 @@ def signature(sql: str | None) -> SqlSignature:
 
     # --- projection ---------------------------------------------------------
     selects = list(tree.selects) if hasattr(tree, "selects") else []
-    sig.distinct = tree.args.get("distinct") is not None
     for item in selects:
         target = item.this if isinstance(item, exp.Alias) else item
-        agg = None
-        for node in target.find_all(exp.AggFunc):
-            agg = node
-            break
+        agg = next(iter(target.find_all(exp.AggFunc)), None)
         if agg is not None:
-            fname = agg.sql_name().lower() if hasattr(agg, "sql_name") else type(agg).__name__.lower()
-            inner = agg.this
-            if inner is None or isinstance(inner, exp.Star):
-                col = "*"
-            elif isinstance(inner, exp.Column):
-                col = _qualify(inner, aliases, sole)
-            else:
-                col = " ".join(inner.sql(dialect="postgres").split())
+            fname, col = _agg_key(agg, aliases, sole)
             if fname in _AGG_NAMES:
-                # COUNT(*) and COUNT(1) ask the same thing.
-                if fname == "count" and col in ("*", "1"):
-                    col = "*"
                 sig.aggregates.add((fname, col))
                 sig.projection.add(f"{fname}({col})")
                 continue
@@ -240,17 +241,7 @@ def signature(sql: str | None) -> SqlSignature:
             inner = item.this
             agg = next(iter(inner.find_all(exp.AggFunc)), None)
             if agg is not None:
-                fname = (agg.sql_name().lower() if hasattr(agg, "sql_name")
-                         else type(agg).__name__.lower())
-                a_inner = agg.this
-                if a_inner is None or isinstance(a_inner, exp.Star):
-                    acol = "*"
-                elif isinstance(a_inner, exp.Column):
-                    acol = _qualify(a_inner, aliases, sole)
-                else:
-                    acol = " ".join(a_inner.sql(dialect="postgres").split())
-                if fname == "count" and acol in ("*", "1"):
-                    acol = "*"
+                fname, acol = _agg_key(agg, aliases, sole)
                 select_aliases[item.alias] = f"{fname}({acol})"
             elif isinstance(inner, exp.Column):
                 select_aliases[item.alias] = _qualify(inner, aliases, sole)
@@ -260,7 +251,8 @@ def signature(sql: str | None) -> SqlSignature:
         seq = []
         for o in order.expressions:
             target = o.this
-            if isinstance(target, exp.Column) and not target.table                     and target.name in select_aliases:
+            if (isinstance(target, exp.Column) and not target.table
+                    and target.name in select_aliases):
                 key = select_aliases[target.name]
             elif isinstance(target, exp.Column):
                 key = _qualify(target, aliases, sole)
@@ -268,15 +260,7 @@ def signature(sql: str | None) -> SqlSignature:
                 key = " ".join(target.sql(dialect="postgres").split())
                 agg = next(iter(target.find_all(exp.AggFunc)), None)
                 if agg is not None:
-                    fname = (agg.sql_name().lower() if hasattr(agg, "sql_name")
-                             else type(agg).__name__.lower())
-                    a_inner = agg.this
-                    acol = ("*" if a_inner is None or isinstance(a_inner, exp.Star)
-                            else _qualify(a_inner, aliases, sole)
-                            if isinstance(a_inner, exp.Column)
-                            else " ".join(a_inner.sql(dialect="postgres").split()))
-                    if fname == "count" and acol in ("*", "1"):
-                        acol = "*"
+                    fname, acol = _agg_key(agg, aliases, sole)
                     key = f"{fname}({acol})"
             seq.append((key, "desc" if o.args.get("desc") else "asc"))
         sig.ordering = tuple(seq)
@@ -447,20 +431,25 @@ def compare(expected_sql: str | None, generated_sql: str | None,
 
 # ------------------------------------------------------------ hallucination --
 
-def _schema_index() -> tuple[set[str], dict[str, set[str]]]:
-    """(table names, table -> columns) from the generated schema description."""
-    from pathlib import Path
+@lru_cache(maxsize=1)
+def _schema_index() -> tuple[frozenset[str], dict[str, frozenset[str]]]:
+    """(table names, table -> columns) from the generated schema description.
 
-    import yaml
+    Cached: this re-parsed the same 25KB of YAML on every question that
+    produced SQL, which was the second-largest avoidable cost in a turn after
+    the system prompt. Frozen on the way out because the value is now shared
+    between callers -- a caller that mutated it would corrupt every later
+    schema check, and the failure would look like a hallucination report.
+    """
+    from pipeline import metadata
 
-    path = Path(__file__).resolve().parents[1] / "metadata" / "schema_description.yaml"
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    doc = metadata.schema()
     tables: set[str] = set()
-    columns: dict[str, set[str]] = {}
+    columns: dict[str, frozenset[str]] = {}
     for table, spec in (doc.get("tables") or {}).items():
         tables.add(table)
-        columns[table] = set((spec.get("columns") or {}).keys())
-    return tables, columns
+        columns[table] = frozenset((spec.get("columns") or {}).keys())
+    return frozenset(tables), columns
 
 
 @dataclass
@@ -503,13 +492,21 @@ def check_against_schema(sql: str | None) -> SchemaCheck:
         return check
 
     known_tables, known_columns = _schema_index()
-    used = {t.name for t in tree.find_all(exp.Table) if t.name}
-    check.unknown_tables = used - known_tables
 
-    # Names the query defines for itself are not schema references.
+    # Names the query defines for itself are not schema references. The CTE
+    # names have to come out before the table check, not only before the
+    # column check: "WITH x AS (...) SELECT FROM x" reads x as a table, and
+    # reporting it as missing made every WITH query look ungrounded. That was
+    # harmless while this was only a label; it stops being harmless the moment
+    # grounding decides whether the query runs.
+    cte_names = {c.alias_or_name for c in tree.find_all(exp.CTE)}
+
+    used = {t.name for t in tree.find_all(exp.Table) if t.name}
+    check.unknown_tables = used - known_tables - cte_names
+
     self_defined = {a.alias for a in tree.find_all(exp.Alias) if a.alias}
     self_defined |= {t.alias for t in tree.find_all(exp.Table) if t.alias}
-    self_defined |= {c.alias_or_name for c in tree.find_all(exp.CTE)}
+    self_defined |= cte_names
 
     allowed: set[str] = set()
     for table in used & known_tables:

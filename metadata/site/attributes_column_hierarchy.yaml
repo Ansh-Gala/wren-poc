@@ -1,0 +1,14 @@
+# Attributes column hierarchy: column order for tms_initiative_attributes_flat.
+#
+# Paste the "Attributes column hierarchy" block from the /devel/php snippet
+# (README.md) over everything below this comment. Same shape as
+# vf_sql_chatbot's metadata/column_hierarchy.yaml: 'tables', then per table
+# 'priority' and, if wanted, 'hidden'.
+
+tables:
+  tms_initiative_attributes_flat:
+    priority:
+    - initiative_id
+    - category
+    - season
+    hidden: []
