@@ -62,13 +62,14 @@ Then set, at a minimum:
 |---|---|
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME` | where PostgreSQL is |
 | `DATABASE_READONLY_USER`, `DATABASE_READONLY_PASSWORD` | the role queries run as |
-| `LLM_PROVIDER` | `cli` |
+| `LLM_PROVIDER` | `cli` (Claude Code on this machine), `anthropic` (Claude API, `ANTHROPIC_API_KEY`) or `openai` (`OPENAI_API_KEY`) |
 | `CLI_LEAN` | `true` |
 
-Both values are required, not defaults. This branch ships only the lean
-path: `LLM_PROVIDER` anything but `cli`, or `CLI_LEAN=false`, and the server
-exits at startup saying so. The MCP path it would otherwise select needs
-`wren_setup`, which is not part of a deployment.
+`CLI_LEAN=true` is required, not a default: this branch ships only the lean
+path, and with `CLI_LEAN=false` the server exits at startup saying so. The MCP
+path it would otherwise select needs `wren_setup`, which is not part of a
+deployment. For an API provider, install its package too (`pip install
+anthropic` or `pip install openai`; see requirements.txt).
 
 The query role should hold `SELECT` and nothing more. `pipeline/safety.py`
 rejects writes before they are sent, but a read-only grant is what makes that

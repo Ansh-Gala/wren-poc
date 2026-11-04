@@ -17,7 +17,7 @@ import pytest
 
 from claude.prompts import build_lean_system_prompt, build_user_prompt
 from config.settings import Settings
-from llm_api import openai_provider
+from llm_api import mcp_bridge, openai_provider
 from llm_api.openai_provider import LEAN_MAX_TOKENS, OpenAIProvider
 
 
@@ -58,6 +58,13 @@ def calls(monkeypatch):
         async def close(self):
             pass
 
+        # The MCP path opens the client with `async with`.
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
     monkeypatch.setattr(openai_provider, "AsyncOpenAI", FakeClient)
 
     # Constructing the bridge spawns the Wren MCP server. In lean mode nothing
@@ -65,8 +72,96 @@ def calls(monkeypatch):
     def no_bridge(*a, **k):
         raise AssertionError("lean mode opened the MCP bridge")
 
-    monkeypatch.setattr(openai_provider, "WrenMCPBridge", no_bridge)
+    monkeypatch.setattr(mcp_bridge, "WrenMCPBridge", no_bridge)
     return seen
+
+
+def test_openai_sends_one_stable_cache_key_and_no_lifetime_fields(calls):
+    settings = _settings(llm_provider="openai", openai_base_url=None)
+    OpenAIProvider().ask("Show the open tasks", None, "strict", settings)
+    OpenAIProvider().ask("And the closed ones", None, "strict", settings)
+    assert calls[0]["prompt_cache_key"].startswith("wren-")
+    assert calls[0]["prompt_cache_key"] == calls[1]["prompt_cache_key"]
+    # Deprecated, and not accepted by every model; the gpt-5.6 replacement
+    # only exists from gpt-5.6, and its sole ttl is the default anyway.
+    assert "prompt_cache_retention" not in calls[0]
+    assert "prompt_cache_options" not in calls[0]
+
+
+LUNA = {"llm_provider": "openai", "openai_base_url": None, "openai_model": "gpt-5.6-luna"}
+BREAKPOINT_12H = {"mode": "explicit", "ttl": "12h"}
+
+
+def test_the_default_openai_model_is_gpt_5_6_luna():
+    assert Settings(pg_host="h", pg_port=1, pg_database="d", pg_user="u").openai_model \
+        == "gpt-5.6-luna"
+
+
+def test_gpt_5_6_caches_only_the_static_prompt_for_12_hours(calls):
+    OpenAIProvider().ask("Show the open tasks", None, "strict", _settings(**LUNA))
+    system, user = calls[0]["messages"]
+    assert system["content"] == [{"type": "text", "text": build_lean_system_prompt(),
+                                  "prompt_cache_breakpoint": BREAKPOINT_12H}]
+    assert isinstance(user["content"], str)            # the question: after, never written
+    assert calls[0]["prompt_cache_options"] == {"mode": "explicit"}
+    # The key still comes from the prompt's text, not from the list around it.
+    OpenAIProvider().ask("Show the open tasks", None, "strict",
+                         _settings(llm_provider="openai", openai_base_url=None))
+    assert calls[0]["prompt_cache_key"] == calls[1]["prompt_cache_key"]
+
+
+def test_a_streamed_gpt_5_6_question_sends_the_same_cache_fields(calls):
+    OpenAIProvider().ask("Show the open tasks", None, "strict", _settings(**LUNA),
+                         on_delta=lambda piece: None)
+    assert calls[0]["stream"] is True
+    assert calls[0]["prompt_cache_options"] == {"mode": "explicit"}
+    assert calls[0]["messages"][0]["content"][0]["prompt_cache_breakpoint"] == BREAKPOINT_12H
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-4o", "o3"])
+def test_older_models_get_the_key_and_a_plain_system_prompt(calls, model):
+    OpenAIProvider().ask("Show the open tasks", None, "strict",
+                         _settings(llm_provider="openai", openai_base_url=None,
+                                   openai_model=model))
+    assert calls[0]["prompt_cache_key"].startswith("wren-")
+    assert "prompt_cache_options" not in calls[0]
+    assert calls[0]["messages"][0]["content"] == build_lean_system_prompt()
+
+
+def test_mcp_turns_send_the_cache_key_and_count_cached_tokens(calls, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from wren_setup.mcp_config import allowed_tools, to_mcp_name
+
+    class Session:
+        async def list_tools(self):
+            name = to_mcp_name(allowed_tools("strict")[0])
+            return types.SimpleNamespace(tools=[types.SimpleNamespace(name=name)])
+
+    class Bridge:
+        def __init__(self, *args):
+            pass
+
+        @asynccontextmanager
+        async def get_session(self):
+            yield Session()
+
+        def to_openai_tool(self, tool):
+            return {"type": "function", "function": {"name": tool.name, "parameters": {}}}
+
+    monkeypatch.setattr(mcp_bridge, "WrenMCPBridge", Bridge)
+    run = OpenAIProvider().ask("Show the open tasks", None, "strict",
+                               _settings(**LUNA, cli_lean=False))
+    assert calls[0]["prompt_cache_key"].startswith("wren-")
+    # Implicit: OpenAI also caches the turns so far, for the next turn.
+    assert calls[0]["prompt_cache_options"] == {"mode": "implicit"}
+    assert calls[0]["messages"][0]["content"][0]["prompt_cache_breakpoint"] == BREAKPOINT_12H
+    assert run.cache_read_tokens == 10636
+
+
+def test_compatible_endpoints_get_no_openai_cache_fields(calls):
+    OpenAIProvider().ask("Show the open tasks", None, "strict", _settings(llm_provider="groq"))
+    assert "prompt_cache_key" not in calls[0] and "prompt_cache_retention" not in calls[0]
 
 
 def test_lean_sends_exactly_one_request(calls):

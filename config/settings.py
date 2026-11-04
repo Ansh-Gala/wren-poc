@@ -145,7 +145,7 @@ class Settings:
     cli_pool_warmup_seconds: float = 3.0
     openai_api_key: str = field(repr=False, default="")
     openai_base_url: str | None = None
-    openai_model: str = "gpt-4o"
+    openai_model: str = "gpt-5.6-luna"
     # LLM_PROVIDER=anthropic: the Messages API, as Drupal's api_provider
     # "anthropic" reaches it.
     anthropic_api_key: str = field(repr=False, default="")
@@ -340,7 +340,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
             g("OPENAI_MODEL") or (
                 "llama-3.3-70b-versatile" if provider == "groq"
                 else "gemini-1.5-pro" if provider == "gemini"
-                else "gpt-4o"
+                else "gpt-5.6-luna"
             )
         ).strip(),
     )

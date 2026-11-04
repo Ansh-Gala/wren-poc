@@ -96,12 +96,12 @@ EXCLUDE = [
     #    build_command returns before it touches an MCP config or a tool
     #    allowlist, so none of this is reachable. cli_provider.py and
     #    serve_api.py import wren_setup lazily inside the non-lean branch,
-    #    which is what makes dropping the package possible at all. Setting
-    #    CLI_LEAN=false on production now fails loudly instead of silently
-    #    costing three times the context.
+    #    which is what makes dropping the package possible at all; so does
+    #    openai_provider.py, which therefore ships. Setting CLI_LEAN=false on
+    #    production now fails loudly instead of silently costing three times
+    #    the context.
     "wren_setup",
     "llm_api/mcp_bridge.py",
-    "llm_api/openai_provider.py",
 
     # -- Documentation. Written and reviewed on develop; the production README
     #    carries what someone deploying the thing actually needs.

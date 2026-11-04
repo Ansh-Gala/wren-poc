@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -9,10 +11,8 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from pipeline.models import ClaudeRun, Session
 from config.settings import Settings
-from wren_setup.mcp_config import allowed_tools, to_claude_name, to_mcp_name
 from llm_api.cli_pool import MAX_OUTPUT_TOKENS
 from llm_api.provider import LLMProvider
-from llm_api.mcp_bridge import WrenMCPBridge
 from claude.prompts import build_lean_system_prompt, build_system_prompt, build_user_prompt
 
 # An agent loop with no ceiling is both a hang risk and an unbounded bill: every
@@ -31,12 +31,46 @@ MAX_TOOL_RESULT_CHARS = 8000
 LEAN_MAX_TOKENS = MAX_OUTPUT_TOKENS
 
 
-def _limits(settings: Settings) -> dict:
-    """The output cap and temperature, in the form each vendor accepts.
+def _breakpoints(settings: Settings) -> bool:
+    """True for OpenAI gpt-5.6 and later, which take cache breakpoints."""
+    if settings.llm_provider != "openai":
+        return False
+    found = re.match(r"gpt-(\d+)(?:\.(\d+))?", settings.openai_model or "")
+    return bool(found) and (int(found.group(1)), int(found.group(2) or 0)) >= (5, 6)
 
-    OpenAI's reasoning models reject max_tokens and any non-default
-    temperature; Groq and Gemini still expect both. As the Drupal port sends.
-    """
+
+def _system(settings: Settings, system_prompt: str) -> str | list:
+    """The system message; from gpt-5.6 it ends in a 12-hour cache breakpoint,
+    so the static prompt is cached on its own and outlives idle gaps."""
+    if not _breakpoints(settings):
+        return system_prompt
+    return [{"type": "text", "text": system_prompt,
+             "prompt_cache_breakpoint": {"mode": "explicit", "ttl": "12h"}}]
+
+
+def _cache(settings: Settings, system_prompt: str, mode: str = "explicit") -> dict:
+    """OpenAI's cache fields (none for Groq or Gemini): a key from the system
+    prompt's hash and, from gpt-5.6, the mode -- "explicit" never writes the
+    changing question, "implicit" (MCP) also caches earlier turns."""
+    if settings.llm_provider != "openai":
+        return {}
+    key = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:32]
+    fields: dict = {"prompt_cache_key": f"wren-{key}"}
+    if _breakpoints(settings):
+        fields["prompt_cache_options"] = {"mode": mode}
+    return fields
+
+
+def _cache_counts(usage) -> dict:
+    """Tokens read from and written to OpenAI's cache; zero when not reported."""
+    details = getattr(usage, "prompt_tokens_details", None) if usage else None
+    return {"cache_read_tokens": getattr(details, "cached_tokens", 0) or 0,
+            "cache_write_tokens": getattr(details, "cache_write_tokens", 0) or 0}
+
+
+def _limits(settings: Settings) -> dict:
+    """The output cap (and temperature) in each vendor's form: OpenAI's reasoning
+    models reject max_tokens and temperature; Groq and Gemini expect both."""
     if settings.llm_provider == "openai":
         return {"max_completion_tokens": LEAN_MAX_TOKENS}
     return {"max_tokens": LEAN_MAX_TOKENS, "temperature": 0}
@@ -70,20 +104,9 @@ class OpenAIProvider(LLMProvider):
         session: Session | None = None,
         on_delta: Callable[[str], None] | None = None,
     ) -> ClaudeRun:
-        """One call, the whole semantic layer in the system prompt, no tools.
-
-        The shape the Drupal port has always used -- src/Llm/
-        OpenAiCompatibleProvider.php sends exactly this -- and the shape
-        CLILocalProvider switches to under the same flag. Only this class was
-        left behind, so asking Groq or Gemini a question in lean mode ran the
-        MCP agent loop instead: up to eight round trips to measure a transport
-        that ships as one.
-
-        Nothing question-specific may precede the system prompt. All three
-        providers cache on a prefix match, and the prompt is ~10.7k tokens of
-        schema identical on every question, so a byte moved in front of it
-        throws the whole cache away.
-        """
+        """One call with the whole semantic layer as the system prompt, no tools,
+        as the Drupal port sends. Nothing question-specific may come before
+        the system prompt, or the prefix cache is lost."""
         started = time.perf_counter()
 
         if not settings.openai_api_key:
@@ -98,13 +121,15 @@ class OpenAIProvider(LLMProvider):
             max_retries=0,
         )
 
+        system_prompt = build_lean_system_prompt()
         messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": build_lean_system_prompt()},
+            {"role": "system", "content": _system(settings, system_prompt)},
             {"role": "user", "content": build_user_prompt(
                 question, session,
                 context=session.context_block if session else None,
                 lean=True)},
         ]
+        cache = _cache(settings, system_prompt)
 
         try:
             if on_delta is None:
@@ -112,12 +137,13 @@ class OpenAIProvider(LLMProvider):
                     model=settings.openai_model,
                     messages=messages,
                     **_limits(settings),
+                    **cache,
                 )
                 text = response.choices[0].message.content or ""
                 usage = response.usage
             else:
                 text, usage = await self._stream_lean(
-                    client, settings, messages, on_delta)
+                    client, settings, messages, on_delta, cache)
         except Exception as e:
             return ClaudeRun(
                 ok=False,
@@ -137,28 +163,18 @@ class OpenAIProvider(LLMProvider):
             error=None if text else "the model returned no message content",
             prompt_tokens=(usage.prompt_tokens or 0) if usage else 0,
             completion_tokens=(usage.completion_tokens or 0) if usage else 0,
-            # What the provider served from its own cache. OpenAI reports it
-            # here; Groq and Gemini omit it, which reads as zero.
-            cache_read_tokens=(
-                (getattr(usage, "prompt_tokens_details", None)
-                 and getattr(usage.prompt_tokens_details, "cached_tokens", 0)) or 0
-            ) if usage else 0,
+            **_cache_counts(usage),
         )
 
-    async def _stream_lean(self, client, settings, messages, on_delta):
-        """The same call, delivered as it is produced.
-
-        `stream_options.include_usage` is sent because a streamed response
-        carries no usage block unless it is asked for, and the suite averages
-        those figures -- a streamed turn reporting zero tokens would quietly
-        pull every average down.
-        """
+    async def _stream_lean(self, client, settings, messages, on_delta, cache):
+        """The same call, streamed; include_usage keeps the token counts."""
         text = ""
         usage = None
         stream = await client.chat.completions.create(
             model=settings.openai_model,
             messages=messages,
             **_limits(settings),
+            **cache,
             stream=True,
             stream_options={"include_usage": True},
         )
@@ -182,11 +198,16 @@ class OpenAIProvider(LLMProvider):
         settings: Settings,
         session: Session | None = None,
     ) -> ClaudeRun:
+        # The MCP path only. Production ships without wren_setup and the
+        # bridge, so the lean path must not need them to import.
+        from llm_api.mcp_bridge import WrenMCPBridge
+        from wren_setup.mcp_config import allowed_tools, to_claude_name, to_mcp_name
+
         started = time.perf_counter()
-        
+
         if not settings.openai_api_key:
             return ClaudeRun(ok=False, error="OPENAI_API_KEY is not set.")
-            
+
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
@@ -217,31 +238,39 @@ class OpenAIProvider(LLMProvider):
                 )
             openai_tools = [bridge.to_openai_tool(t) for t in mcp_tools]
             
+            system_prompt = build_system_prompt()
             messages: list[ChatCompletionMessageParam] = [
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": _system(settings, system_prompt)},
                 {"role": "user", "content": build_user_prompt(
                     question, session,
                     context=session.context_block if session else None)}
             ]
+            cache_fields = _cache(settings, system_prompt, mode="implicit")
             
             tools_used = []
             mcp_errors = []
             result_text = ""
             prompt_tokens = 0
             completion_tokens = 0
-            
+            cache = {"cache_read_tokens": 0, "cache_write_tokens": 0}
+
             try:
                 for _turn in range(MAX_TURNS):
+                    # Each turn appends to the same messages and keeps the
+                    # same tools, so the earlier turns are a cacheable prefix.
                     response = await client.chat.completions.create(
                         model=settings.openai_model,
                         messages=messages,
                         tools=openai_tools if openai_tools else None,
                         temperature=0,
+                        **cache_fields,
                     )
-                    
+
                     if response.usage:
                         prompt_tokens += response.usage.prompt_tokens or 0
                         completion_tokens += response.usage.completion_tokens or 0
+                        for name, count in _cache_counts(response.usage).items():
+                            cache[name] += count
                         
                     msg = response.choices[0].message
                     messages.append(msg)
@@ -287,7 +316,8 @@ class OpenAIProvider(LLMProvider):
                     tools_used=tools_used,
                     mcp_errors=mcp_errors,
                     prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens
+                    completion_tokens=completion_tokens,
+                    **cache,
                 )
                 
             elapsed_ms = (time.perf_counter() - started) * 1000
@@ -301,5 +331,6 @@ class OpenAIProvider(LLMProvider):
                 tools_used=tools_used,
                 mcp_errors=mcp_errors,
                 prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens
+                completion_tokens=completion_tokens,
+                **cache,
             )

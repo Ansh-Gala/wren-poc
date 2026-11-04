@@ -15,4 +15,5 @@ python-dotenv>=1.0       # .env loading
 
 # Only when needed:
 #   anthropic>=1.15.0        LLM_PROVIDER=anthropic
+#   openai>=1.0.0            LLM_PROVIDER=openai, groq or gemini
 #   gliner2[local]==2.1.0    PII_ALIASING=true
