@@ -96,12 +96,17 @@ def read_only_posture(settings: Settings) -> dict:
     """What the read-only role may do to tables; SELECT alone is the aim.
 
     Asked as that role, as Drupal's QueryRunner::readOnlyPosture asks it.
+    Column grants count too: scripts/setup_databases.py grants SELECT on the
+    described columns only, which role_table_grants does not list.
     """
     try:
         with connect(settings, readonly=True) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT DISTINCT privilege_type FROM information_schema.role_table_grants"
-                " WHERE grantee = %s", (settings.pg_readonly_user,))
+                "SELECT privilege_type FROM information_schema.role_table_grants"
+                " WHERE grantee = %s"
+                " UNION SELECT privilege_type FROM information_schema.role_column_grants"
+                " WHERE grantee = %s",
+                (settings.pg_readonly_user, settings.pg_readonly_user))
             privileges = sorted(row[0] for row in cur.fetchall())
         return {"privileges": privileges, "select_only": privileges == ["SELECT"],
                 "error": None}

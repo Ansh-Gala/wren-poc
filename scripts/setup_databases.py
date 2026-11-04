@@ -95,7 +95,11 @@ def check_env() -> None:
     values = {**dotenv_values(ROOT / ".env"), **{k: v for k, v in os.environ.items() if v}}
     missing = [key for key in REQUIRED if not (values.get(key) or "").strip()]
     if missing:
-        sys.exit("Nothing was changed. Missing in .env: " + ", ".join(missing))
+        hint = ("\nDATABASE_USER / DATABASE_PASSWORD are the PostgreSQL owner login (for "
+                "example postgres) that creates the logins and tables. Copy the 'Owner "
+                "Login (setup only)' section from .env.example.")
+        sys.exit("Nothing was changed. Missing in .env: " + ", ".join(missing)
+                 + (hint if {"DATABASE_USER", "DATABASE_PASSWORD"} & set(missing) else ""))
 
 
 def owner(settings, host, port, dbname, autocommit=False) -> psycopg.Connection:

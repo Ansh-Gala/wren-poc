@@ -30,7 +30,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pipeline.metadata import enable_site_metadata
 from server.routes import router
-from server.services.runtime import Runtime
+from server.services.runtime import Runtime, console_info
 from server.utils import _json
 
 # No docs pages and no CORS headers. The console is served from here, so it is
@@ -69,30 +69,38 @@ def main() -> int:
     enable_site_metadata()
     runtime = app.state.runtime = Runtime(args)
     settings = runtime.settings
-    mode = "lean (no MCP)" if settings.cli_lean else f"MCP config {args.config}"
+    url = f"http://{args.host}:{args.port}"
 
     # Which database and login each operation uses. Never a password.
-    print(f"provider: {settings.llm_provider} / {settings.claude_model or 'default'}   {mode}")
-    print(f"business database: {settings.pg_database} on {settings.pg_host}:{settings.pg_port}"
-          f"   queries run as {settings.pg_readonly_user}")
-    print("chat database:     " + (
-        f"{settings.history_db_name} on {settings.history_db_host}:{settings.history_db_port}"
-        f"   written as {settings.history_db_user}"
-        + ("" if settings.save_chats else "   PAUSED (SAVE_CHATS=false): chats are not saved")
-        if settings.chats_configured
-        else "not configured (HISTORY_DATABASE_NAME / _USER): chats are not saved"))
-    print(f"run roles:         {', '.join(settings.run_roles) or 'not set (CHATBOT_RUN_ROLES): everyone may ask'}")
-    print(f"context mode: {args.context_mode}")
-    print("PII aliasing:      " + (
-        f"on ({settings.pii_model}, threshold {settings.pii_threshold})"
-        if settings.pii_aliasing else "off (PII_ALIASING)"))
-    print()
-    print(f"  console   http://{args.host}:{args.port}/?user_id=<TMS user id>")
-    print(f"  endpoint  POST http://{args.host}:{args.port}/ask")
+    chats = (f"{settings.history_db_name} on {settings.history_db_host}:"
+             f"{settings.history_db_port}, written as {settings.history_db_user}"
+             + ("" if settings.save_chats else " (saving paused: SAVE_CHATS=false)")
+             if settings.chats_configured else "not configured: chats are not saved")
+    setup = [
+        ("Model", f"{settings.llm_provider} / {settings.claude_model or 'default'}, "
+                  + ("lean (no MCP)" if settings.cli_lean else f"MCP config {args.config}")),
+        ("Business DB", f"{settings.pg_database} on {settings.pg_host}:{settings.pg_port}, "
+                        f"queries run as {settings.pg_readonly_user}"),
+        ("Chat DB", chats),
+        ("Metadata", console_info(settings, local=True)["metadata"]),
+        ("Run roles", ", ".join(settings.run_roles) or "not set: everyone may ask"),
+        ("Context", args.context_mode),
+        ("Streaming", "on" if settings.stream_answers else "off"),
+        ("PII", f"on ({settings.pii_model})" if settings.pii_aliasing else "off"),
+    ]
+    links = [("Console", f"{url}/?user_id=<user id>"),
+             ("API", f"POST {url}/ask"),
+             ("Health", f"{url}/health")]
     if runtime.log_path:
-        print(f"  log       {runtime.log_path}")
+        links.append(("Log", str(runtime.log_path)))
+
+    print("\nSQL chatbot server\n")
+    for label, value in setup:
+        print(f"  {label:<12} {value}")
     print()
-    print("Ctrl+C to stop.")
+    for label, value in links:
+        print(f"  {label:<12} {value}")
+    print("\nPress Ctrl+C to stop.\n")
 
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
