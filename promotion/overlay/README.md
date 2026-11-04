@@ -103,15 +103,6 @@ so it is also the only one to read when integrating something else.
 
 `GET /health` returns `{"ok": true}` and the live session count.
 
-## Tests
-
-```
-python -m pytest
-```
-
-Tests needing a live database or the Claude CLI are marked `integration`;
-`python -m pytest -m "not integration"` skips them.
-
 ## Layout
 
 ```
@@ -122,10 +113,11 @@ config/       Settings and logging
 database/     Read-only connection handling
 llm_api/      Provider abstraction over the Claude CLI
 metadata/     Schema descriptions, business rules, worked examples,
-              entity vocabulary -- what the model is told
+              entity vocabulary -- what the model is told (Arvind TMS)
+products/     The same files for other products; pick one with
+              METADATA_DIR in .env, with DATABASE_NAME to match
 ui/           The console: one page, no build step, no dependencies
 scripts/      serve_api.py, and the bootstrap it imports
-tests/        The tests for the above
 ```
 
 Everything here is reachable from `scripts/serve_api.py`. Nothing is kept

@@ -48,7 +48,13 @@ EXCLUDE = [
     "database/seed.sql",
     "database/setup.py",
     "scripts/setup_demo.py",
-    "tests/test_database.py",
+
+    # -- Tests: the Python suite, its config and the console's own tests.
+    "tests",
+    "pytest.ini",
+    "ui/sql-highlight.test.js",
+    "ui/stream.test.js",
+    "ui/table-copy.test.js",
 
     # -- The benchmark: question sets, ground truth, scoring, reporting.
     "benchmark",
@@ -63,14 +69,14 @@ EXCLUDE = [
     "scripts/verify_ground_truth.py",
     # Measures the PII detector on question sets; the detector itself ships.
     "scripts/pii_eval.py",
-    "tests/test_classify.py",
-    "tests/test_ground_truth.py",
-    "tests/test_lean_suite.py",
-    "tests/test_metadata.py",
-    "tests/test_report.py",
-    # Tests pipeline/normalize.py, but against the question corpus rather than
-    # against the module's rules, so it needs the suites to exist.
-    "tests/test_normalize_corpus.py",
+    # Latency probes and one-off suite builders and checks.
+    "ask_cli.py",
+    "scripts/bench_latency.py",
+    "scripts/probe_ttft.py",
+    "scripts/build_answer_shape_suite.py",
+    "scripts/build_new_views_suite.py",
+    "scripts/verify_new_views_suite.py",
+    "scripts/verify_rename_equivalence.py",
 
     # -- Source datasets. metadata/*.yaml is generated from these and promoted
     #    as output; the sources themselves are not deployed.
@@ -101,8 +107,11 @@ EXCLUDE = [
     #    carries what someone deploying the thing actually needs.
     "docs",
 
-    # -- Editor droppings, other agents' instruction files.
+    # -- Editor droppings, working notes, other agents' instruction files.
     "claude/.cph",
+    "claude.md",
+    ".claude",
+    "working.md",
 
     # -- This machinery. It rebuilds production; it does not ship to it.
     "promotion",
